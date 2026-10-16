@@ -1,0 +1,58 @@
+name: V2 isolated validation toolchain
+on:
+  push:
+    branches: [feat/v2-architecture]
+    paths: [.github/workflows/v2-build-toolchain.yml]
+permissions:
+  contents: read
+jobs:
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install isolated official .NET 10 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/packory-toolchain"
+          curl --fail --silent --show-error --location https://dot.net/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --install-dir "$RUNNER_TEMP/packory-toolchain/dotnet" --no-path
+          "$RUNNER_TEMP/packory-toolchain/dotnet/dotnet" --info
+      - name: Restore public validation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOTNET_ROOT="$RUNNER_TEMP/packory-toolchain/dotnet"
+          export PATH="$DOTNET_ROOT:$PATH"
+          export NUGET_PACKAGES="$RUNNER_TEMP/packory-toolchain/packages"
+          mkdir "$RUNNER_TEMP/restore"
+          cd "$RUNNER_TEMP/restore"
+          cat > Toolchain.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk.Web">
+            <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+              <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
+              <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
+              <PackageReference Include="NuGet.Versioning" Version="7.9.0" />
+              <PackageReference Include="YamlDotNet" Version="18.1.0" />
+              <PackageReference Include="JsonSchema.Net" Version="9.4.1" />
+              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+              <PackageReference Include="xunit" Version="2.9.3" />
+              <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore Toolchain.csproj --use-lock-file
+          cp packages.lock.json "$RUNNER_TEMP/packory-toolchain/validation-packages.lock.json"
+          mkdir "$RUNNER_TEMP/packory-toolchain/contracts"
+          curl --fail --silent --show-error --location https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json -o "$RUNNER_TEMP/packory-toolchain/contracts/server.schema.json"
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/modelcontextprotocol/registry/11b7b0e274d518b6f449c5ee3518a6151d9848b9/docs/reference/api/openapi.yaml -o "$RUNNER_TEMP/packory-toolchain/contracts/registry-openapi.yaml"
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/modelcontextprotocol/registry/11b7b0e274d518b6f449c5ee3518a6151d9848b9/LICENSE -o "$RUNNER_TEMP/packory-toolchain/contracts/MCP-REGISTRY-LICENSE"
+          tar -C "$RUNNER_TEMP/packory-toolchain" -czf "$RUNNER_TEMP/packory-toolchain.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packory-offline-validation-toolchain
+          path: ${{ runner.temp }}/packory-toolchain.tar.gz
+          retention-days: 1
+          compression-level: 0
