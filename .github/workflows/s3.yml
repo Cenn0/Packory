@@ -1,0 +1,36 @@
+name: S3 object storage
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  s3:
+    name: S3 backend integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PACKORY_TEST_S3: http://127.0.0.1:5000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install local open-source S3 emulator
+        run: python -m pip install 'moto[server]==5.2.3'
+      - name: Start emulator
+        run: |
+          moto_server -H 127.0.0.1 -p 5000 >/tmp/packory-moto.log 2>&1 &
+          for n in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:5000/ >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/packory-moto.log
+          exit 1
+      - name: Test real AWS S3 client requests
+        run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~S3ProviderTests
