@@ -27,9 +27,11 @@ public sealed class ApiTests
             Task.FromResult(handle(request));
     }
 
-    private sealed class Host(Func<HttpRequestMessage, HttpResponseMessage>? upstream = null) : WebApplicationFactory<Program>
+    private sealed class Host(Func<HttpRequestMessage, HttpResponseMessage>? upstream = null,
+        Action<Settings>? configure = null) : WebApplicationFactory<Program>
     {
         private readonly string _data = Path.Combine(Path.GetTempPath(), "packory-tests-" + Guid.NewGuid().ToString("N"));
+        public string DataDirectory => _data;
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -45,14 +47,17 @@ public sealed class ApiTests
                 // Replace the concrete Settings singleton: top-level startup binds configuration
                 // before the test host configuration overlay is applied.
                 services.RemoveAll<Settings>();
-                services.AddSingleton(new Settings
+                var cfg = new Settings
                 {
                     DataDirectory = _data,
                     PublicBaseUrl = "http://localhost:8080",
                     AdminToken = AdminToken,
                     ReadToken = ReadToken,
                     AnonymousRead = false
-                });
+                };
+                configure?.Invoke(cfg);
+                cfg.Validate();
+                services.AddSingleton(cfg);
                 services.AddHttpClient("upstream")
                     .ConfigurePrimaryHttpMessageHandler(() => new FakeUpstream(upstream ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
             });
@@ -267,4 +272,163 @@ public sealed class ApiTests
             "/api/skills/hello-world/1.0.0/skill.md"))).Content.ReadAsStringAsync());
         Assert.Contains("hello-world", await (await client.SendAsync(WithToken(HttpMethod.Get, "/api/packages?kind=skill"))).Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task ReservedNamespaces_DoNotContactPublicUpstreams()
+    {
+        var upstreamCalls = 0;
+        using var host = new Host(_ =>
+        {
+            Interlocked.Increment(ref upstreamCalls);
+            throw new InvalidOperationException("Private namespace must not contact upstream");
+        }, cfg =>
+        {
+            cfg.ReservedNugetPrefixes = ["internal."];
+            cfg.ReservedNpmScopes = ["@internal"];
+        });
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/flatcontainer/internal.widget/index.json"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/flatcontainer/internal.widget/1.0.0/internal.widget.1.0.0.nupkg"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/registration/internal.widget/index.json"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/npm/%40internal%2Fwidget"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/npm/%40internal%2Fwidget/-/1.0.0.tgz"))).StatusCode);
+        Assert.Equal(0, Volatile.Read(ref upstreamCalls));
+
+        var upload = new MultipartFormDataContent();
+        upload.Add(new ByteArrayContent(Nupkg("Internal.Widget", "1.0.0")), "package", "internal.widget.1.0.0.nupkg");
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", upload))).StatusCode);
+        using var index = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/flatcontainer/internal.widget/index.json"));
+        Assert.Contains("1.0.0", await index.Content.ReadAsStringAsync());
+        Assert.Equal(0, Volatile.Read(ref upstreamCalls));
+    }
+
+    [Fact]
+    public async Task Nuget_ConcurrentColdMissFetchesUpstreamBlobOnlyOnce()
+    {
+        var bytes = Nupkg("Example.Package", "1.2.3");
+        var downloads = 0;
+        using var host = new Host(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith(".nupkg.sha512", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(Convert.ToBase64String(SHA512.HashData(bytes)))
+                };
+            if (request.RequestUri.AbsolutePath.EndsWith(".nupkg", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref downloads);
+                Thread.Sleep(30);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+        using var client = host.CreateClient();
+        const string url = "/nuget/v3/flatcontainer/example.package/1.2.3/example.package.1.2.3.nupkg";
+        var responses = await Task.WhenAll(Enumerable.Range(0, 32)
+            .Select(_ => client.SendAsync(WithToken(HttpMethod.Get, url))));
+        foreach (var response in responses)
+        {
+            using (response)
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal(bytes, await response.Content.ReadAsByteArrayAsync());
+            }
+        }
+        Assert.Equal(1, Volatile.Read(ref downloads));
+    }
+
+    [Fact]
+    public async Task Npm_ConcurrentColdMissFetchesUpstreamTarballOnlyOnce()
+    {
+        var bytes = new byte[] { 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0 };
+        var downloads = 0;
+        var metadata = """ 
+            {"name":"example-widget","versions":{"1.0.0":{"name":"example-widget","version":"1.0.0","dist":{"tarball":"https://registry.npmjs.org/example-widget/-/example-widget-1.0.0.tgz","integrity":"HASH"}}}}
+            """.Replace("HASH", "sha512-" + Convert.ToBase64String(SHA512.HashData(bytes)));
+        using var host = new Host(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith(".tgz", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref downloads);
+                Thread.Sleep(30);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+            }
+            return Json(metadata);
+        });
+        using var client = host.CreateClient();
+        var responses = await Task.WhenAll(Enumerable.Range(0, 32)
+            .Select(_ => client.SendAsync(WithToken(HttpMethod.Get, "/npm/example-widget/-/1.0.0.tgz"))));
+        foreach (var response in responses)
+        {
+            using (response)
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal(bytes, await response.Content.ReadAsByteArrayAsync());
+            }
+        }
+        Assert.Equal(1, Volatile.Read(ref downloads));
+    }
+
+    [Fact]
+    public async Task Npm_RejectsTarballWhenUpstreamSuppliesNoIntegrityClaim()
+    {
+        var bytes = new byte[] { 0x1f, 0x8b, 8, 0, 0, 0 };
+        const string metadata = """
+            {"name":"unsigned-demo","versions":{"1.0.0":{"name":"unsigned-demo","version":"1.0.0","dist":{"tarball":"https://registry.npmjs.org/unsigned-demo/-/unsigned-demo-1.0.0.tgz"}}}}
+            """;
+        using var host = new Host(request => request.RequestUri!.AbsolutePath.EndsWith(".tgz", StringComparison.Ordinal)
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }
+            : Json(metadata));
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.BadGateway, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/npm/unsigned-demo/-/1.0.0.tgz"))).StatusCode);
+        var catalog = await (await client.SendAsync(WithToken(HttpMethod.Get, "/api/packages?kind=npm")))
+            .Content.ReadAsStringAsync();
+        Assert.DoesNotContain("unsigned-demo", catalog);
+    }
+
+    [Fact]
+    public async Task Startup_QuarantinesUnindexedImmutableBlobsWithoutPublishingThem()
+    {
+        using var host = new Host();
+        var key = Path.Combine(host.DataDirectory, "blobs", "nuget", "ghost", "1.0.0", "ghost.1.0.0.nupkg");
+        Directory.CreateDirectory(Path.GetDirectoryName(key)!);
+        await File.WriteAllBytesAsync(key, Nupkg("ghost", "1.0.0"));
+        using var client = host.CreateClient();
+        Assert.False(File.Exists(key));
+        var quarantined = Directory.GetFiles(Path.Combine(host.DataDirectory, "recovery", "orphaned"),
+            "ghost.1.0.0.nupkg", SearchOption.AllDirectories);
+        Assert.Single(quarantined);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/flatcontainer/ghost/1.0.0/ghost.1.0.0.nupkg"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
+    }
+
+    [Fact]
+    public void Reconciliation_DetectsMissingHostedBlobs()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-recovery-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cfg = new Settings { DataDirectory = root };
+            var db = new Database(cfg);
+            db.Initialize();
+            db.UpsertPackage("nuget", "local.demo", "1.0.0", "Test", "hosted");
+            var recovery = new ArtifactRecovery(cfg, db, new BlobStore(cfg),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ArtifactRecovery>.Instance).Reconcile();
+            Assert.Equal(1, recovery.MissingHostedArtifacts);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
 }
