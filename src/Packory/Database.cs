@@ -7,6 +7,7 @@ public sealed record SkillEntry(string Name, string Version, string Description,
 public sealed record StoredArtifact(string Kind, string Name, string Version, string Origin);
 public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
     string Actor, string CreatedAt);
+public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 
 public sealed class Database(Settings settings)
 {
@@ -51,6 +52,15 @@ public sealed class Database(Settings settings)
             CREATE TABLE IF NOT EXISTS skills (
                 name TEXT NOT NULL, version TEXT NOT NULL, description TEXT NOT NULL,
                 updated_at TEXT NOT NULL, PRIMARY KEY(name, version)
+            );
+            CREATE TABLE IF NOT EXISTS cargo_versions (
+                name TEXT NOT NULL, version TEXT NOT NULL, json TEXT NOT NULL,
+                PRIMARY KEY(name,version)
+            );
+            CREATE TABLE IF NOT EXISTS pypi_files (
+                name TEXT NOT NULL, version TEXT NOT NULL, filename TEXT NOT NULL,
+                sha256 TEXT NOT NULL, size INTEGER NOT NULL,
+                PRIMARY KEY(name,filename)
             );
             CREATE TABLE IF NOT EXISTS audit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,11 +147,102 @@ public sealed class Database(Settings settings)
         return result;
     }
 
+    public IReadOnlyList<string> CargoIndex(string name)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT json FROM cargo_versions WHERE name=$name ORDER BY version";
+        cmd.Parameters.AddWithValue("$name", name);
+        var result = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public bool PublishCargo(string name, string version, string json, string description, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "INSERT OR IGNORE INTO cargo_versions(name,version,json) VALUES($name,$version,$json)";
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$json", json);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        cmd.CommandText = """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('cargo',$name,$version,$description,'hosted',$updated)
+            """;
+        cmd.Parameters.AddWithValue("$description", description);
+        cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "cargo", name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
+    public IReadOnlyList<string> PyProjects()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT name FROM pypi_files ORDER BY name";
+        using var reader = cmd.ExecuteReader();
+        var names = new List<string>();
+        while (reader.Read()) names.Add(reader.GetString(0));
+        return names;
+    }
+
+    public IReadOnlyList<PyFileEntry> PyFiles(string? name = null)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT name,version,filename,sha256,size FROM pypi_files
+            WHERE $name IS NULL OR name=$name ORDER BY name,filename
+            """;
+        cmd.Parameters.AddWithValue("$name", (object?)name ?? DBNull.Value);
+        using var reader = cmd.ExecuteReader();
+        var entries = new List<PyFileEntry>();
+        while (reader.Read())
+            entries.Add(new PyFileEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.GetString(3), reader.GetInt64(4)));
+        return entries;
+    }
+
+    public bool PublishPyFile(PyFileEntry file, string description, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO pypi_files(name,version,filename,sha256,size)
+            VALUES($name,$version,$filename,$sha256,$size)
+            """;
+        cmd.Parameters.AddWithValue("$name", file.Name);
+        cmd.Parameters.AddWithValue("$version", file.Version);
+        cmd.Parameters.AddWithValue("$filename", file.Filename);
+        cmd.Parameters.AddWithValue("$sha256", file.Sha256);
+        cmd.Parameters.AddWithValue("$size", file.Size);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('pypi',$name,$version,$description,'hosted',$updated)
+            """;
+        cmd.Parameters.AddWithValue("$description", description);
+        cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "pypi", file.Name, file.Version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public IReadOnlyList<StoredArtifact> StoredArtifacts()
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT kind,name,version,origin FROM packages WHERE kind IN ('nuget','npm','skill')";
+        cmd.CommandText = "SELECT kind,name,version,origin FROM packages WHERE kind IN ('nuget','npm','skill','cargo')";
         using var reader = cmd.ExecuteReader();
         var result = new List<StoredArtifact>();
         while (reader.Read())
