@@ -19,6 +19,7 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                 "nuget" => NuGetEndpoints.NugetKey(artifact.Name, artifact.Version),
                 "npm" => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
                 "skill" => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                "cargo" => CargoEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null || blobs.Existing(key) is null) missing++;
@@ -40,6 +41,8 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                     => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
                 "skill" when Names.Skill(artifact.Name) && Names.Version(artifact.Version)
                     => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                "cargo" when CargoEndpoints.IsName(artifact.Name) && CargoEndpoints.IsVersion(artifact.Version)
+                    => CargoEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null)
@@ -68,7 +71,8 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                 var key = Path.GetRelativePath(root, path).Replace('\\', '/');
                 var immutable = key.StartsWith("nuget/", StringComparison.Ordinal) && key.EndsWith(".nupkg", StringComparison.Ordinal) ||
                     key.StartsWith("npm/", StringComparison.Ordinal) && key.EndsWith(".tgz", StringComparison.Ordinal) ||
-                    key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal);
+                    key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal) ||
+                    key.StartsWith("cargo/", StringComparison.Ordinal) && key.EndsWith(".crate", StringComparison.Ordinal);
                 if (!immutable || known.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
