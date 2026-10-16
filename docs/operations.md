@@ -23,6 +23,7 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_NUGET_REGISTRATION_URL` | `https://api.nuget.org/v3/registration5-semver2/` | Trusted NuGet registration source |
 | `PACKORY_NPM_UPSTREAM_URL` | `https://registry.npmjs.org/` | Trusted npm upstream |
 | `PACKORY_ANONYMOUS_READ` | `true` | Permit unauthenticated registry read |
+| `PACKORY_OCI_AUTHENTICATED_PING` | `false` | Require writer authentication for Docker `/v2/` negotiation even if generic reads are anonymous; see OCI docs for pull tradeoff |
 | `PACKORY_RESERVED_NUGET_PREFIXES` | *(empty)* | Comma-separated private NuGet ID prefixes (e.g. `internal.`); package names under these prefixes never fall back to nuget.org |
 | `PACKORY_RESERVED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes (e.g. `@internal`); packages under these scopes never fall back to registry.npmjs.org |
 | `PACKORY_DENIED_NUGET_PREFIXES` | *(empty)* | Comma-separated ID prefixes blocked for both read and publish, case-insensitively |
