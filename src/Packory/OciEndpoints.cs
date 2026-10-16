@@ -291,7 +291,10 @@ public static class OciEndpoints
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), cfg.MaxMetadataBytes, ctx.RequestAborted))
             {
                 var existing = blobs.Existing(key);
-                if (existing is null || !bytes.SequenceEqual(await File.ReadAllBytesAsync(existing, ctx.RequestAborted)))
+                if (existing is null)
+                    return Error(500, "MANIFEST_INVALID", "Content-addressed manifest collision");
+                var existingBytes = await File.ReadAllBytesAsync(existing, ctx.RequestAborted);
+                if (!bytes.AsSpan().SequenceEqual(existingBytes))
                     return Error(500, "MANIFEST_INVALID", "Content-addressed manifest collision");
             }
             db.OciPutManifest(repository, reference,
