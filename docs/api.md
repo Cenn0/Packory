@@ -1,4 +1,4 @@
-# API and client compatibility (MVP)
+# API and native client compatibility (experimental)
 
 All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `http://localhost:8080` for loopback-only development. Registry URLs embed the configured public origin and must be routable by the client.
 
@@ -59,7 +59,7 @@ Verify end-to-end using an **isolated** NuGet.Config to ensure the SDK does not 
 
 Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Network access from Packory to nuget.org is still required for uncached packages. For HTTPS remove the insecure opt-in.
 
-**Important:** the MVP does not expose a fully featured NuGet server API: symbols, vulnerability resources, unlisting, repository signatures, and advanced metadata/registration behaviors are not included. NuGet client compatibility is tested incrementally and should be treated as **basic** until the live smoke workflow succeeds.
+**Important:** the experimental does not expose a fully featured NuGet server API: symbols, vulnerability resources, unlisting, repository signatures, and advanced metadata/registration behaviors are not included. NuGet client compatibility is tested incrementally and should be treated as **basic** until the live smoke workflow succeeds.
 
 ## npm
 
@@ -69,7 +69,7 @@ Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Networ
 - Search of indexed versions: `GET /npm/-/v1/search?text={term}`
 - Hosted publish: `PUT /npm/{package}`, one-version packument with one base64 tarball attachment
 
-`GET` packuments merge upstream data with local hosted versions (local versions take precedence) and replace tarball URLs with Packory URLs. Tarballs are downloaded and cached by version upon first request. Upstream metadata has a best-effort offline file cache. npm publishing requires a pre-configured token; **npm login is not an endpoint** in this MVP.
+`GET` packuments merge upstream data with local hosted versions (local versions take precedence) and replace tarball URLs with Packory URLs. Tarballs are downloaded and cached by version upon first request. Upstream metadata has a best-effort offline file cache. npm publishing requires a pre-configured token; **npm login is not an endpoint** in this experimental.
 
 ## Skills and unified catalog
 
@@ -85,7 +85,7 @@ Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Networ
 
 `GET /api/skills` returns `{ "items": [...] }`. `POST /api/skills` accepts multipart fields `version` and `file` (ZIP). `GET /api/skills/{name}/{version}` returns metadata. Download the immutable ZIP from `/download`, or retrieve just the `SKILL.md` content from `/skill.md`.
 
-Skills follow the [Agent Skills specification](https://agentskills.io/specification) conceptually, but this MVP only parses simple inline `name`/`description` frontmatter. Do not assume complete conformance or trust executable content in arbitrary ZIP files.
+Skills follow the [Agent Skills specification](https://agentskills.io/specification) conceptually, but this experimental only parses simple inline `name`/`description` frontmatter. Do not assume complete conformance or trust executable content in arbitrary ZIP files.
 
 ## HTTP error codes
 
