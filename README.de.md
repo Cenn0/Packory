@@ -1,9 +1,13 @@
 # Packory
 
+**Marke und UI:** [Logo und Hell-/Dunkel-Designvorlagen](docs/branding/README.md) (ausschließlich Entwürfe).
+
 **Sprache:** [English](README.md) · **Deutsch**
 
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
+**Direkt zu:** [Schnellstart](#schnellstart) · [Funktionen](#funktionen-des-mvp) · [Architektur](#architektur-im-überblick) · [Dokumentation](docs/README.md) · [Roadmap](docs/roadmap.md)
 
 **Eine selbst gehostete Zentrale für NuGet-, npm-Pakete und versionierte KI-Agent-Skills.**
 
@@ -60,6 +64,23 @@ npm install --registry=http://localhost:8080/npm/ lodash
 
 Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Beispiele](docs/api.md) zeigen NuGet Push, npm-Veröffentlichung und ZIP-Import für Agent Skills, ohne Zugangsdaten in versionierten Dateien abzulegen. Die Skills werden zwar auf grundlegende Struktur geprüft, ihre Inhalte gelten dadurch aber **nicht als vertrauenswürdig oder sicher ausführbar**.
 
+## Architektur im Überblick
+
+```mermaid
+flowchart LR
+  C[NuGet- und npm-Clients] --> A[Packory ASP.NET Core]
+  K[Skill-ZIP-Import] --> A
+  A --> N[Protokolladapter]
+  A --> S[Skills und Katalog-API]
+  N --> D[(SQLite-Metadaten)]
+  S --> D
+  N --> B[(Lokale Artefaktdateien)]
+  S --> B
+  N -.->|Optionales Upstream-HTTPS| U[nuget.org und npmjs.org]
+```
+
+NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Architektur](docs/architecture.md).
+
 ## Einschränkungen und Sicherheit
 
 - NuGet und npm unterstützen wesentliche Registry-Abläufe, aber **nicht alle Protokollfunktionen**. Die konkret verwendeten Clients und Versionen müssen getestet werden.
@@ -85,6 +106,6 @@ Die [CI](.github/workflows/ci.yml) führt Build-, Integrations- und [echte CLI-V
 
 ## Dokumentation und Mitwirkung
 
-[Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
+[Dokumentationsindex](docs/README.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
 
 Lizenziert unter [Apache-2.0](LICENSE). Beiträge und öffentliche Fehlermeldungen sind willkommen. Sicherheitslücken über den vertraulichen Meldeweg der Sicherheitsrichtlinie melden.
