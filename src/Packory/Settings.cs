@@ -23,6 +23,8 @@ public sealed class Settings
     public string NpmUpstreamUrl { get; set; } = "https://registry.npmjs.org/";
     public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-semver2/";
     public bool AnonymousRead { get; set; } = true;
+    // Opt-in Docker authentication handshake even when generic anonymous reads are enabled.
+    public bool OciAuthenticatedPing { get; set; }
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
     // Optional single-node filesystem capacity guard. Zero disables it.
     // This does not provide a distributed S3 usage quota.
