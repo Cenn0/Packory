@@ -154,4 +154,44 @@ public sealed class ValidationTests
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
     }
 
+    [Fact]
+    public void NamespaceGrantParserRejectsUnsafeRulesAndMatchesOnlyIntendedPrefixes()
+    {
+        Assert.True(Access.ValidNamespaceGrant("nuget:internal.*"));
+        Assert.True(Access.ValidNamespaceGrant("oci:team/*"));
+        Assert.False(Access.ValidNamespaceGrant("nuget:../../*"));
+        Assert.False(Access.ValidNamespaceGrant("unknown:package"));
+        Assert.False(Access.ValidNamespaceGrant("nuget:*"));
+        Assert.True(Access.MatchesNamespace("nuget:internal.*", "nuget", "internal.demo"));
+        Assert.False(Access.MatchesNamespace("nuget:internal.*", "nuget", "internalization.demo"));
+        Assert.False(Access.MatchesNamespace("oci:team/*", "nuget", "team/demo"));
+        Assert.True(Access.MatchesNamespace("oci:team/*", "oci", "team/demo"));
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { WriteNamespaces = ["npm:../danger"] }.Validate());
+    }
+
+    [Fact]
+    public void OidcNamespaceWriteClaimsAreFailClosedWhenEnabled()
+    {
+        var cfg = new Settings
+        {
+            OidcAuthority = "https://identity.example.test/realms/test",
+            OidcAudience = "packory-api",
+            RequireOidcNamespaceGrants = true
+        };
+        var identity = new System.Security.Claims.ClaimsIdentity(new[]
+        {
+            new System.Security.Claims.Claim("scope", "packory.write"),
+            new System.Security.Claims.Claim("packory_namespace", "npm:@trusted/*")
+        }, "Bearer");
+        var ctx = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(identity)
+        };
+        ctx.Request.Headers.Authorization = "Bearer dummy-jwt-for-claims-test";
+        Assert.Null(Access.Require(ctx, cfg, write: true));
+        Assert.Null(Access.RequireNamespace(ctx, cfg, "npm", "@trusted/library"));
+        Assert.NotNull(Access.RequireNamespace(ctx, cfg, "npm", "@other/library"));
+    }
+
 }
