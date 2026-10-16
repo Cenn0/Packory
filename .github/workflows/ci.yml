@@ -27,6 +27,8 @@ jobs:
           node-version: 22
       - name: Validate offline backup and restore tooling
         run: python3 -m unittest discover -s tests -p test_offline_backup.py -v
+      - name: Validate S3 real-provider probe failure detection (synthetic only)
+        run: python3 -m unittest discover -s tests -p test_s3_provider_probe.py -v
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Validate shell smoke scripts
