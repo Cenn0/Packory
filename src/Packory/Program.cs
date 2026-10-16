@@ -58,6 +58,8 @@ if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is
         ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OCI_AUTHENTICATED_PING"), out var ociPing))
     settings.OciAuthenticatedPing = ociPing;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_STRICT_DEPLOYMENT"), out var strictDeployment))
+    settings.StrictDeployment = strictDeployment;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_RECOVERY_MAINTENANCE"), out var maintenance))
     settings.RecoveryMaintenance = maintenance;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
@@ -213,8 +215,10 @@ app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
     var missing = recovery.MissingHostedCount();
-    return missing > 0
-        ? Results.Json(new { status = "degraded", missingHostedArtifacts = missing },
+    var unresolved = recovery.StaleUnresolvedCount();
+    return missing > 0 || unresolved > 0
+        ? Results.Json(new { status = "degraded", missingHostedArtifacts = missing,
+            stalePendingPublications = unresolved },
             statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { status = "ready" });
 });
@@ -223,6 +227,21 @@ app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, 
     if (Access.Require(ctx, cfg) is { } denied) return denied;
     if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return Results.BadRequest(new { error = "Unknown package kind" });
     return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50) });
+});
+app.MapGet("/api/admin/operations/status", (Settings cfg, IPackageDatabase db,
+    ArtifactRecovery recovery, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new
+    {
+        instanceRole = cfg.InstanceRole,
+        strictDeploymentChecksEnabled = cfg.StrictDeployment,
+        metadataBackend = cfg.MetadataProvider, blobBackend = cfg.BlobProvider,
+        pendingPublicationCount = db.PendingPublications().Count,
+        staleUnresolvedCount = recovery.StaleUnresolvedCount(),
+        missingHostedCount = recovery.MissingHostedCount()
+    });
 });
 app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
