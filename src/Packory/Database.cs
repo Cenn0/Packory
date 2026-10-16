@@ -7,6 +7,7 @@ public sealed record SkillEntry(string Name, string Version, string Description,
 public sealed record StoredArtifact(string Kind, string Name, string Version, string Origin);
 public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
     string Actor, string CreatedAt);
+public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
 public sealed record OciReferrerEntry(string Digest, string MediaType, long Size, string ArtifactType);
@@ -86,6 +87,10 @@ public sealed class Database(Settings settings) : IPackageDatabase
                 repository TEXT NOT NULL, subject TEXT NOT NULL, digest TEXT NOT NULL,
                 media_type TEXT NOT NULL, size INTEGER NOT NULL, artifact_type TEXT NOT NULL,
                 PRIMARY KEY(repository,subject,digest)
+            );
+            CREATE TABLE IF NOT EXISTS managed_tokens (
+                id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
+                namespace TEXT, expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS audit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -511,6 +516,58 @@ public sealed class Database(Settings settings) : IPackageDatabase
             """;
         cmd.ExecuteNonQuery();
         InsertAudit(db, tx, "publish", "skill", name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
+    public void CreateManagedToken(ManagedTokenRecord token)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO managed_tokens(id,hash,role,namespace,expires_at,revoked)
+                VALUES($id,$hash,$role,$namespace,$expiry,0)
+                """;
+            cmd.Parameters.AddWithValue("$id", token.Id);
+            cmd.Parameters.AddWithValue("$hash", token.Hash);
+            cmd.Parameters.AddWithValue("$role", token.Role);
+            cmd.Parameters.AddWithValue("$namespace", (object?)token.Namespace ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$expiry", token.ExpiresAt);
+            cmd.ExecuteNonQuery();
+        }
+        InsertAudit(db, tx, "create", "managed-token", token.Id, "", "admin-token");
+        tx.Commit();
+    }
+
+    public ManagedTokenRecord? FindManagedToken(string sha256)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT id,hash,role,namespace,expires_at FROM managed_tokens
+            WHERE hash=$hash AND revoked=0
+            """;
+        cmd.Parameters.AddWithValue("$hash", sha256);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read()
+            ? new ManagedTokenRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4))
+            : null;
+    }
+
+    public bool RevokeManagedToken(string id)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE managed_tokens SET revoked=1 WHERE id=$id AND revoked=0";
+        cmd.Parameters.AddWithValue("$id", id);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "revoke", "managed-token", id, "", "admin-token");
         tx.Commit();
         return true;
     }
