@@ -33,6 +33,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
 | `PACKORY_READ_TOKEN` | *(unset)* | Optional read-only credential |
 | `PACKORY_WRITE_TOKEN` | *(unset)* | Optional publish credential |
+| `PACKORY_WRITE_NAMESPACES` | *(empty = unrestricted write token)* | Optional comma-separated namespace grants for shared write token: `nuget:internal.*`, `npm:@internal/*`, `oci:team/*`; exact names or suffix `*` prefix matches |
+| `PACKORY_OIDC_REQUIRE_NAMESPACE_GRANTS` | `false` | When true, every OIDC `packory.write` request must include matching signed `packory_namespace` claims; administrators remain unrestricted |
 
 All defined tokens must be unique, at least 32 characters. **Unset tokens mean no permission of that type is available**; the service will not silently enable writes. Runtime settings can also be set via the `Packory` JSON section, but do not persist real secrets there.
 
@@ -97,3 +99,21 @@ Set `PACKORY_METADATA_PROVIDER=postgresql` and provide `PACKORY_POSTGRES_CONNECT
 ### S3 artifact backing
 
 For optional S3-compatible artifact storage configure `PACKORY_BLOB_PROVIDER=s3` and review the [S3 operations and limitations](s3.md). AWS SDK conditional immutable writes and a local read-through materialization cache are used. This remains a **single-node design**, and switching to S3 does not automatically migrate or garbage-collect old filesystem blobs. Use remote encrypted transport, minimum-privilege IAM/bucket permissions and consistent backups.
+
+### Scoped publishing (single-node configuration policy)
+
+Set `PACKORY_WRITE_NAMESPACES` to restrict the **shared** write token to explicit
+kind/name allow rules. Without rules the existing write token remains global for
+backward compatibility. A rule uses `kind:name` for exact matches or a trailing
+`*` for prefix matches. The supported kinds are `nuget`, `npm`, `skill`,
+`cargo`, `pypi`, and `oci`; OCI uses the repository name, not a tag or digest.
+The administrator token bypasses namespace limits. Configure secrets only at runtime.
+
+For OIDC grant enforcement, set `PACKORY_OIDC_REQUIRE_NAMESPACE_GRANTS=true` and
+have Keycloak issue signed `packory_namespace` **access-token** claims with these
+same rule strings, after validating the exact client/role mappings. Missing or
+nonmatching claims yield HTTP 403 on uploads. Role-agnostic browser access remains
+unsupported. This is a static, deployment-defined policy, not user self-service,
+per-token revocation or database-managed token lifecycle. Be aware that clients
+may upload metadata before the package identifier is parsed; the server checks
+authorization before the first persisted blob write.
