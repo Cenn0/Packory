@@ -5,6 +5,12 @@ using Amazon.S3.Model;
 using Microsoft.Extensions.Logging.Abstractions;
 using Packory;
 using Xunit;
+using Npgsql;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Packory.Tests;
 
@@ -100,6 +106,93 @@ public sealed class PostgresS3RecoveryTests
             Assert.True(db.FindQuarantine(key)?.Completed);
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    private sealed class ReplicaHost(Settings cfg) : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<Settings>();
+                services.AddSingleton(cfg);
+            });
+        }
+    }
+
+    [Fact]
+    public async Task OneWriterAndReadOnlyReplicaSharePostgreSqlAndS3WithoutSecondWriter()
+    {
+        var baseConnection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");
+        if (string.IsNullOrWhiteSpace(baseConnection) || string.IsNullOrWhiteSpace(endpoint)) return;
+
+        // Isolated logical database ensures the test never interferes with other package fixtures.
+        var databaseName = "packory_replica_" + Guid.NewGuid().ToString("N")[..14];
+        using (var connection = new NpgsqlConnection(baseConnection))
+        {
+            connection.Open();
+            using var command = new NpgsqlCommand("CREATE DATABASE " + databaseName, connection);
+            command.ExecuteNonQuery();
+        }
+        var connectionBuilder = new NpgsqlConnectionStringBuilder(baseConnection) { Database = databaseName };
+        var root = Path.Combine(Path.GetTempPath(), "packory-reader-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var writerCfg = new Settings
+            {
+                InstanceRole = "writer", MetadataProvider = "postgresql", BlobProvider = "s3",
+                PostgresConnectionString = connectionBuilder.ConnectionString,
+                S3Endpoint = endpoint, S3Bucket = "packory-recovery-tests",
+                S3Region = "us-east-1", S3AccessKey = "test", S3SecretKey = "test",
+                S3KeyPrefix = "replica-" + Guid.NewGuid().ToString("N")[..12],
+                S3AllowLoopbackHttp = true, DataDirectory = Path.Combine(root, "writer")
+            };
+            writerCfg.Validate();
+            var readerCfg = new Settings
+            {
+                InstanceRole = "reader", MetadataProvider = "postgresql", BlobProvider = "s3",
+                PostgresConnectionString = writerCfg.PostgresConnectionString,
+                S3Endpoint = writerCfg.S3Endpoint, S3Bucket = writerCfg.S3Bucket,
+                S3Region = writerCfg.S3Region, S3AccessKey = "test", S3SecretKey = "test",
+                S3KeyPrefix = writerCfg.S3KeyPrefix,
+                S3AllowLoopbackHttp = true, DataDirectory = Path.Combine(root, "reader")
+            };
+            readerCfg.Validate();
+            using var writer = new ReplicaHost(writerCfg);
+            using var writerClient = writer.CreateClient();
+            Assert.Equal(System.Net.HttpStatusCode.OK,
+                (await writerClient.GetAsync("/health/ready")).StatusCode);
+            using var reader = new ReplicaHost(readerCfg);
+            using var readerClient = reader.CreateClient();
+            Assert.Equal(System.Net.HttpStatusCode.OK,
+                (await readerClient.GetAsync("/health/ready")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.OK,
+                (await readerClient.GetAsync("/api/packages")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.OK,
+                (await readerClient.GetAsync("/cargo/index/config.json")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable,
+                (await readerClient.GetAsync("/nuget/v3/index.json")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable,
+                (await readerClient.GetAsync("/npm/example")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable,
+                (await readerClient.PutAsync("/cargo/api/v1/crates/new",
+                    new ByteArrayContent(new byte[] { 0, 1, 2 }))).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.OK,
+                (await readerClient.GetAsync("/v2/")).StatusCode);
+
+            using var secondWriter = new ReplicaHost(new Settings
+            {
+                InstanceRole = "writer", MetadataProvider = "postgresql", BlobProvider = "s3",
+                PostgresConnectionString = writerCfg.PostgresConnectionString,
+                S3Endpoint = writerCfg.S3Endpoint, S3Bucket = writerCfg.S3Bucket,
+                S3Region = writerCfg.S3Region, S3AccessKey = "test", S3SecretKey = "test",
+                S3KeyPrefix = writerCfg.S3KeyPrefix,
+                S3AllowLoopbackHttp = true, DataDirectory = Path.Combine(root, "writer2")
+            });
+            Assert.ThrowsAny<Exception>(() => secondWriter.CreateClient());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     [Fact]
