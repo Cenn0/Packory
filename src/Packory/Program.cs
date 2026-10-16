@@ -35,6 +35,7 @@ builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
+builder.Services.AddSingleton<ArtifactRecovery>();
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
@@ -47,6 +48,7 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
 
 var app = builder.Build();
 app.Services.GetRequiredService<Database>().Initialize();
+var recoveryReport = app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -66,7 +68,10 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (Database db) =>
 {
     using var connection = db.Open();
-    return Results.Ok(new { status = "ready" });
+    return recoveryReport.MissingHostedArtifacts > 0
+        ? Results.Json(new { status = "degraded", missingHostedArtifacts = recoveryReport.MissingHostedArtifacts },
+            statusCode: StatusCodes.Status503ServiceUnavailable)
+        : Results.Ok(new { status = "ready" });
 });
 app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, Database db, HttpContext ctx) =>
 {

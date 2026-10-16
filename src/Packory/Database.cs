@@ -4,6 +4,7 @@ namespace Packory;
 
 public sealed record CatalogEntry(string Kind, string Name, string Version, string Description, string Origin, string UpdatedAt);
 public sealed record SkillEntry(string Name, string Version, string Description, string UpdatedAt);
+public sealed record StoredArtifact(string Kind, string Name, string Version, string Origin);
 
 public sealed class Database(Settings settings)
 {
@@ -103,6 +104,18 @@ public sealed class Database(Settings settings)
         var result = new List<CatalogEntry>();
         while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), reader.GetString(5)));
+        return result;
+    }
+
+    public IReadOnlyList<StoredArtifact> StoredArtifacts()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT kind,name,version,origin FROM packages WHERE kind IN ('nuget','npm','skill')";
+        using var reader = cmd.ExecuteReader();
+        var result = new List<StoredArtifact>();
+        while (reader.Read())
+            result.Add(new StoredArtifact(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
         return result;
     }
 
