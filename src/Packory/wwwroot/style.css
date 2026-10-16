@@ -7,3 +7,8 @@
 .brand-lockup strong{font-size:21px;letter-spacing:-.5px}
 .brand-lockup small{font-size:10px;letter-spacing:.65px;text-transform:uppercase;font-weight:650;color:#aebfdd;line-height:1.4}
 @media(max-width:440px){.brand-lockup small{font-size:9px;letter-spacing:.25px}}
+
+/* Hosted adapter overview; six cards wrap into two rows on desktop. */
+.stat-icon.cargo{background:#28593d;color:#bcf0c8;font-size:17px}
+.stat-icon.pypi{background:#4b457a;color:#dfd5ff;font-size:16px}
+.stat-icon.oci{background:#175465;color:#acf3ff;font-size:17px}
