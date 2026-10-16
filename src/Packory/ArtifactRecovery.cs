@@ -28,6 +28,10 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
         {
             if (blobs.Existing(PyPiEndpoints.Key(file.Name, file.Filename)) is null) missing++;
         }
+        foreach (var digest in database.OciAllBlobDigests())
+            if (blobs.Existing(OciEndpoints.BlobKey(digest)) is null) missing++;
+        foreach (var digest in database.OciAllManifestDigests())
+            if (blobs.Existing(OciEndpoints.ManifestKey(digest)) is null) missing++;
         return missing;
     }
 
@@ -70,6 +74,18 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
             known.Add(key);
             if (blobs.Existing(key) is null) missingHosted++;
         }
+        foreach (var digest in database.OciAllBlobDigests())
+        {
+            var key = OciEndpoints.BlobKey(digest);
+            known.Add(key);
+            if (blobs.Existing(key) is null) missingHosted++;
+        }
+        foreach (var digest in database.OciAllManifestDigests())
+        {
+            var key = OciEndpoints.ManifestKey(digest);
+            known.Add(key);
+            if (blobs.Existing(key) is null) missingHosted++;
+        }
         var root = Path.Combine(Path.GetFullPath(settings.DataDirectory), "blobs");
         var quarantine = Path.Combine(Path.GetFullPath(settings.DataDirectory), "recovery", "orphaned",
             DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmss") + "-" + Guid.NewGuid().ToString("N"));
@@ -86,7 +102,9 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                     key.StartsWith("pypi/", StringComparison.Ordinal) &&
                     (key.EndsWith(".whl", StringComparison.Ordinal) ||
                      key.EndsWith(".tar.gz", StringComparison.Ordinal) ||
-                     key.EndsWith(".zip", StringComparison.Ordinal));
+                     key.EndsWith(".zip", StringComparison.Ordinal)) ||
+                    key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
+                    key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal);
                 if (!immutable || known.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
