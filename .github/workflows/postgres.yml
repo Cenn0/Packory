@@ -1,0 +1,35 @@
+name: PostgreSQL backend
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: packory_test
+          POSTGRES_PASSWORD: packory_test_only
+          POSTGRES_DB: packory_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U packory_test -d packory_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PACKORY_TEST_POSTGRES: "Host=localhost;Port=5432;Database=packory_test;Username=packory_test;Password=packory_test_only;Pooling=false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run PostgreSQL persistence tests
+        run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~PostgresProviderTests

@@ -8,6 +8,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `PACKORY_METADATA_PROVIDER` | `sqlite` | Select `sqlite` or `postgresql` metadata provider |
+| `PACKORY_POSTGRES_CONNECTION_STRING` | *(unset)* | PostgreSQL ADO.NET connection string (runtime secret; required for postgresql provider) |
 | `PACKORY_DATA_DIRECTORY` | `./data` or `/data` in Docker | SQLite + blob root |
 | `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute origin (no path) advertised to clients |
 | `PACKORY_NUGET_UPSTREAM_URL` | `https://api.nuget.org/v3-flatcontainer/` | Trusted NuGet flat container |
@@ -78,3 +80,8 @@ Do not commit personal emails, contact details, tokens, `.env`, `.npmrc`, genera
 ### Optional OIDC / Keycloak API integration
 
 The bearer-token resource-server integration requires valid JWTs from an HTTPS OIDC authority and explicit Packory scopes. Refer to [OIDC and Keycloak](oidc-keycloak.md) for Keycloak audience-mapper configuration and security boundaries. The web dashboard does not yet implement interactive SSO; do not assume logging into Keycloak unlocks a browser session.
+
+
+### PostgreSQL metadata backend
+
+Set `PACKORY_METADATA_PROVIDER=postgresql` and provide `PACKORY_POSTGRES_CONNECTION_STRING` from the runtime secret manager. Packory creates its catalog, native-adapter metadata and audit tables with additive `CREATE TABLE IF NOT EXISTS` statements. The SQLite profile is unchanged and remains the default. **This is a fresh-deployment backend**: automatic SQLite-to-PostgreSQL migration is not implemented; export/import tooling and a verified migration sequence remain open work. The PostgreSQL backend does **not** make filesystem blobs shared or enable multi-node operation. Use TLS and `SSL Mode=VerifyFull` in the connection string for networked PostgreSQL connections where certificates are provisioned, and perform consistent relational and blob backups together. A disposable PostgreSQL 17 CI container runs provider integration tests.

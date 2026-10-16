@@ -9,7 +9,7 @@ public static class NpmEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/npm/-/v1/search", (string? text, int? size, Settings settings, Database db, HttpContext ctx) =>
+        app.MapGet("/npm/-/v1/search", (string? text, int? size, Settings settings, IPackageDatabase db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             var found = db.Search(text ?? "", "npm", Math.Clamp(size ?? 20, 1, 100))
@@ -20,7 +20,7 @@ public static class NpmEndpoints
             }) });
         });
 
-        app.MapGet("/npm/{**resource}", async (string? resource, Settings settings, Database db, BlobStore blobs,
+        app.MapGet("/npm/{**resource}", async (string? resource, Settings settings, IPackageDatabase db, BlobStore blobs,
             IHttpClientFactory clients, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
@@ -103,7 +103,7 @@ public static class NpmEndpoints
             return Results.Json(packument);
         });
 
-        app.MapPut("/npm/{**packageName}", async (string? packageName, Settings settings, Database db,
+        app.MapPut("/npm/{**packageName}", async (string? packageName, Settings settings, IPackageDatabase db,
             BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
@@ -185,7 +185,7 @@ public static class NpmEndpoints
         catch (TaskCanceledException) when (cached is not null && !ct.IsCancellationRequested) { return await File.ReadAllBytesAsync(cached, ct); }
     }
 
-    public static async Task<JsonObject?> BuildPackument(string name, Settings settings, Database db, BlobStore blobs, HttpClient http, CancellationToken ct)
+    public static async Task<JsonObject?> BuildPackument(string name, Settings settings, IPackageDatabase db, BlobStore blobs, HttpClient http, CancellationToken ct)
     {
         var hosted = db.NpmHosted(name);
         byte[]? remote;

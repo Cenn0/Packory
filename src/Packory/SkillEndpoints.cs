@@ -7,10 +7,10 @@ public static class SkillEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/skills", (Database db, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills", (IPackageDatabase db, Settings settings, HttpContext ctx) =>
             Access.Require(ctx, settings) is { } denied ? denied : Results.Json(new { items = db.Skills() }));
 
-        app.MapGet("/api/skills/{name}/{version}", (string name, string version, Database db, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}", (string name, string version, IPackageDatabase db, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
@@ -18,7 +18,7 @@ public static class SkillEndpoints
             return skill is null ? Results.NotFound() : Results.Json(skill);
         });
 
-        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, Database db, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, IPackageDatabase db, BlobStore blobs, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
@@ -27,7 +27,7 @@ public static class SkillEndpoints
             return file is null ? Results.NotFound() : Results.File(file, "application/zip", fileDownloadName: name + "-" + version + ".zip");
         });
 
-        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, Database db, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, IPackageDatabase db, BlobStore blobs, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
@@ -40,7 +40,7 @@ public static class SkillEndpoints
             return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
         });
 
-        app.MapPost("/api/skills", async (Settings settings, Database db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
+        app.MapPost("/api/skills", async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart form-data" });

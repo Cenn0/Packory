@@ -11,7 +11,7 @@ public sealed record PyFileEntry(string Name, string Version, string Filename, s
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
 public sealed record OciReferrerEntry(string Digest, string MediaType, long Size, string ArtifactType);
 
-public sealed class Database(Settings settings)
+public sealed class Database(Settings settings) : IPackageDatabase
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder
     {
@@ -28,6 +28,12 @@ public sealed class Database(Settings settings)
         pragma.CommandText = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
         pragma.ExecuteNonQuery();
         return connection;
+    }
+
+    public bool IsHealthy()
+    {
+        using var connection = Open();
+        return true;
     }
 
     public void Initialize()

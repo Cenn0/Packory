@@ -44,7 +44,7 @@ public static class CargoEndpoints
             });
         });
 
-        app.MapGet("/cargo/index/{**path}", (string? path, Settings cfg, Database db, HttpContext ctx) =>
+        app.MapGet("/cargo/index/{**path}", (string? path, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             if (string.IsNullOrEmpty(path)) return Results.NotFound();
@@ -61,7 +61,7 @@ public static class CargoEndpoints
         });
 
         app.MapGet("/cargo/api/v1/crates/{name}/{version}/download", (string name, string version,
-            Settings cfg, Database db, BlobStore blobs, HttpContext ctx) =>
+            Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             if (!IsName(name) || !IsVersion(version) || db.PackageOrigin("cargo", name, version) is null)
@@ -71,7 +71,7 @@ public static class CargoEndpoints
                 Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
 
-        app.MapPut("/cargo/api/v1/crates/new", async (Settings cfg, Database db, BlobStore blobs,
+        app.MapPut("/cargo/api/v1/crates/new", async (Settings cfg, IPackageDatabase db, BlobStore blobs,
             ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg, write: true) is { } denied) return denied;
