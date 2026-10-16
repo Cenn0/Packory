@@ -63,6 +63,15 @@ public sealed class PostgresProviderTests
         Assert.Contains("latest", db.OciTags(repo));
         Assert.Contains(digest, db.OciAllManifestDigests());
 
+        var tokenId = Guid.NewGuid().ToString("N");
+        var digestHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+        db.CreateManagedToken(new ManagedTokenRecord(tokenId, digestHash, "write",
+            "nuget:pg-private.*", DateTimeOffset.UtcNow.AddDays(1).ToString("O")));
+        Assert.Equal(tokenId, db.FindManagedToken(digestHash)?.Id);
+        Assert.True(db.RevokeManagedToken(tokenId));
+        Assert.Null(db.FindManagedToken(digestHash));
+        Assert.False(db.RevokeManagedToken(tokenId));
+
         var audits = db.AuditEvents(null, 100);
         Assert.Contains(audits, x => x.Kind == "nuget" && x.Name == nuget);
         Assert.Contains(audits, x => x.Kind == "npm" && x.Name == npm);

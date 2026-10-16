@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using Packory;
+using System.Text;
+using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder(args);
 var settings = new Settings();
@@ -177,6 +179,32 @@ app.MapPost("/api/admin/cache/mutable/evict", (Settings cfg, BlobStore blobs, Ht
         return Results.Conflict(new { error = "Local metadata eviction is only supported with filesystem storage" });
     return Results.Ok(new { evictedFiles = blobs.EvictMutableMetadata() });
 }).RequireRateLimiting("publish");
+app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    ManagedTokenRequest? input;
+    try { input = await ctx.Request.ReadFromJsonAsync<ManagedTokenRequest>(ctx.RequestAborted); }
+    catch (System.Text.Json.JsonException) { return Results.BadRequest(new { error = "Invalid token request" }); }
+    if (input is null || input.Role is not ("read" or "write") || input.ExpiresInHours is < 1 or > 2160 ||
+        (input.Role == "write" && (input.Namespace is null ||
+                                   !Access.ValidNamespaceGrant(input.Namespace))) ||
+        (input.Role == "read" && input.Namespace is not null))
+        return Results.BadRequest(new { error = "Role, namespace or expiry is invalid" });
+    var id = Guid.NewGuid().ToString("N");
+    var secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+    var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
+    var expiry = DateTimeOffset.UtcNow.AddHours(input.ExpiresInHours).ToString("O");
+    db.CreateManagedToken(new ManagedTokenRecord(id, hash, input.Role, input.Namespace, expiry));
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Json(new { id, token = secret, expiresAt = expiry },
+        statusCode: StatusCodes.Status201Created);
+}).RequireRateLimiting("publish");
+app.MapDelete("/api/admin/tokens/{id}", (string id, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    if (!Guid.TryParseExact(id, "N", out _)) return Results.BadRequest(new { error = "Invalid token id" });
+    return db.RevokeManagedToken(id) ? Results.NoContent() : Results.NotFound();
+}).RequireRateLimiting("publish");
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
@@ -186,3 +214,4 @@ SkillEndpoints.Map(app);
 app.Run();
 
 public partial class Program { }
+public sealed record ManagedTokenRequest(string Role, string? Namespace, int ExpiresInHours);
