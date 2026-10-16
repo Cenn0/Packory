@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banner-dark.svg">
+  <img src="docs/branding/banner-light.svg" alt="Packory — One hub. Endless possibilities. NuGet, npm and agent skills." width="1200">
+</picture>
+
 # Packory
 
 **Brand and UI design:** [Logo + light/dark templates](docs/branding/README.md) (design concepts only).
