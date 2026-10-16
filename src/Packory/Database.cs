@@ -62,6 +62,7 @@ public sealed class Database(Settings settings)
             VALUES ($kind,$name,$version,$description,$origin,$updated)
             ON CONFLICT(kind,name,version) DO UPDATE SET
                 description=excluded.description, origin=excluded.origin, updated_at=excluded.updated_at
+            WHERE packages.origin <> 'hosted'
             """;
         command.Parameters.AddWithValue("$kind", kind);
         command.Parameters.AddWithValue("$name", name);
@@ -103,6 +104,17 @@ public sealed class Database(Settings settings)
         while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), reader.GetString(5)));
         return result;
+    }
+
+    public string? PackageOrigin(string kind, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT origin FROM packages WHERE kind=$kind AND name=$name AND version=$version";
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        return cmd.ExecuteScalar() as string;
     }
 
     public bool HasPackage(string kind, string name, string version)
@@ -176,13 +188,22 @@ public sealed class Database(Settings settings)
     public bool AddSkill(string name, string version, string description)
     {
         using var db = Open();
+        using var tx = db.BeginTransaction();
         using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "INSERT OR IGNORE INTO skills(name,version,description,updated_at) VALUES($name,$version,$description,$updated)";
         cmd.Parameters.AddWithValue("$name", name);
         cmd.Parameters.AddWithValue("$version", version);
         cmd.Parameters.AddWithValue("$description", description);
         cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
-        return cmd.ExecuteNonQuery() == 1;
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        cmd.CommandText = """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('skill',$name,$version,$description,'hosted',$updated)
+            """;
+        cmd.ExecuteNonQuery();
+        tx.Commit();
+        return true;
     }
 
     public IReadOnlyList<SkillEntry> Skills(string? name = null)

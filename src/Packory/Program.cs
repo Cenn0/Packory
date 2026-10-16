@@ -18,6 +18,10 @@ settings.PublicBaseUrl = Environment.GetEnvironmentVariable("PACKORY_PUBLIC_BASE
 settings.NugetUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NUGET_UPSTREAM_URL") ?? settings.NugetUpstreamUrl;
 settings.NpmUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NPM_UPSTREAM_URL") ?? settings.NpmUpstreamUrl;
 settings.NugetRegistrationUrl = Environment.GetEnvironmentVariable("PACKORY_NUGET_REGISTRATION_URL") ?? settings.NugetRegistrationUrl;
+if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NUGET_PREFIXES") is { } reservedNuget)
+    settings.ReservedNugetPrefixes = reservedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NPM_SCOPES") is { } reservedNpm)
+    settings.ReservedNpmScopes = reservedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
     settings.AnonymousRead = anonymousRead;
 settings.Validate();
@@ -30,6 +34,7 @@ builder.Services.Configure<FormOptions>(options =>
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
+builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
