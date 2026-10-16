@@ -44,6 +44,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
     {
         Directory.CreateDirectory(settings.DataDirectory);
         using var db = Open();
+        SchemaVersionGuard.Verify(db);
         using var command = db.CreateCommand();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -114,6 +115,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
             CREATE INDEX IF NOT EXISTS audit_created ON audit_events(id DESC);
             """;
         command.ExecuteNonQuery();
+        SchemaVersionGuard.Stamp(db);
     }
 
     public void UpsertPackage(string kind, string name, string version, string description, string origin)
