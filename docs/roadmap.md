@@ -47,6 +47,11 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] Per-token identity, lifecycle, immutable full action audit, storage quotas and cache eviction remain pending.
 - [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
 
+### Keycloak acceptance
+
+- [x] Disposable real-Keycloak HTTPS discovery, audience-mapped signed JWT and read/write/admin permission checks in dedicated CI.
+- [ ] Interactive dashboard authorization-code/PKCE login with a CSRF-protected server-side BFF session and lifecycle tests remains outstanding.
+
 ## Milestone 2 — Operational and governance features
 
 - [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package (optional OIDC JWT resource-server auth and explicit read/write/admin scopes implemented; browser BFF, identity lifecycle, native scopes by package and live Keycloak tests outstanding)

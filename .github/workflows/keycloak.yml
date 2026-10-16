@@ -1,0 +1,26 @@
+name: Keycloak OIDC end-to-end
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  keycloak:
+    name: Real signed Keycloak JWT
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore and build
+        run: |
+          dotnet restore Packory.slnx
+          dotnet build Packory.slnx -c Release --no-restore -warnaserror
+      - name: Validate shell test script
+        run: bash -n scripts/smoke-oidc-keycloak.sh
+      - name: Real Keycloak OIDC issuer, audience and authorization
+        run: bash scripts/smoke-oidc-keycloak.sh

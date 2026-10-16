@@ -49,6 +49,23 @@ integration, **not a complete Keycloak SSO dashboard**. Native Cargo also
 supports its protocol's bare Authorization token when it is one of Packory's
 static credentials.
 
+## Real Keycloak integration evidence
+
+The dedicated [Keycloak OIDC CI](../.github/workflows/keycloak.yml) starts a
+disposable Keycloak **26.7.3** with a generated local TLS certificate and a
+throwaway service-account client. It obtains a real signed access token over
+HTTPS, validates the configured audience and `packory.write` scope in the
+fixture, then runs Packory JWT signature/issuer/audience validation through
+HTTPS discovery and JWKS. CI checks that no credential is denied (401), a
+properly signed bearer reads successfully, and write scope cannot reach the
+admin-only audit route. No actual user accounts or personal details are used.
+
+This proves a specific Keycloak machine-to-machine resource-server workflow.
+It does **not** test interactive browser login, PKCE, refresh tokens, group
+lifecycle, all Keycloak upgrades or multi-node session handling. Use a BFF with
+HttpOnly/SameSite cookies and CSRF controls for future interactive dashboard
+SSO; do not put long-lived administrative bearer tokens in localStorage.
+
 ## Deployment and security
 
 - TLS is required for Keycloak discovery and all external token transport.
