@@ -41,7 +41,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 
 ## Milestone 2 — Operational and governance features
 
-- [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package
+- [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package (optional OIDC JWT resource-server auth and explicit read/write/admin scopes implemented; browser BFF, identity lifecycle, native scopes by package and live Keycloak tests outstanding)
 - [ ] PostgreSQL backend; S3-compatible object storage; restore/migration tooling
 - [ ] Registry metrics, dashboard administration, pagination, full-text search, reporting
 - [ ] Strong Agent Skills conformance, signature/provenance support and vetted import sources

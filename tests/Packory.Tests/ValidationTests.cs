@@ -86,4 +86,49 @@ public sealed class ValidationTests
         Assert.False(OciEndpoints.ValidReference("../../latest"));
     }
 
+
+    [Fact]
+    public void OidcRequiresBothAuthorityAndAudienceOverHttps()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { OidcAuthority = "https://id.example.test/realms/packory" }.Validate());
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { OidcAuthority = "http://id.example.test/realms/packory", OidcAudience = "packory" }.Validate());
+        new Settings
+        {
+            OidcAuthority = "https://id.example.test/realms/packory",
+            OidcAudience = "packory"
+        }.Validate();
+    }
+
+    [Fact]
+    public void OidcScopeAuthorization_NeverGrantsAccessOnAuthenticationAlone()
+    {
+        static Microsoft.AspNetCore.Http.DefaultHttpContext Context(params string[] scopes)
+        {
+            var principal = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity(
+                    scopes.Select(s => new System.Security.Claims.Claim("scope", s)),
+                    "Bearer"));
+            var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = principal };
+            context.Request.Headers.Authorization = "Bearer mock-test-credential";
+            return context;
+        }
+        var cfg = new Settings
+        {
+            OidcAuthority = "https://id.example.test/realms/packory",
+            OidcAudience = "packory",
+            AnonymousRead = false
+        };
+        var noPermissions = Context("profile");
+        Assert.NotNull(Access.Require(noPermissions, cfg, write: true));
+        var writer = Context("packory.write");
+        Assert.Null(Access.Require(writer, cfg, write: true));
+        Assert.Equal("oidc-write", Access.Actor(writer));
+        Assert.NotNull(Access.RequireAdmin(writer, cfg));
+        var administrator = Context("packory.admin");
+        Assert.Null(Access.RequireAdmin(administrator, cfg));
+        Assert.Equal("oidc-admin", Access.Actor(administrator));
+    }
+
 }
