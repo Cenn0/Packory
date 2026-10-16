@@ -29,7 +29,7 @@ Token scopes: `catalog.read`, `repository.read`, `artifact.publish`, `artifact.y
 
 `GET /r/nuget/{feed}/v3/index.json` publishes only the advertised package base, basic registration and hosted push endpoints. `GET /r/nuget/{feed}/v3/flatcontainer/{id}/index.json` lists known and for proxy feeds upstream versions. `GET .../{version}/{id}.{version}.nupkg` streams verified bytes; `.sha512` and `.nuspec` are served from the cached original ZIP. Hosted push accepts one multipart NuGet package at `PUT/POST /r/nuget/{feed}/v3/push`. Proxy downloads verify the original SHA-512 and NuGet identity before publication.
 
-**Known limitation:** registration metadata compatibility is partial. Do not treat the V2 NuGet adapter as universally conformant until native dotnet tests pass.
+Proxy registration indexes and leaf JSON are fetched from the fixed official NuGet origin, validated for JSON syntax, cached and their registration/package-content URLs rewritten to the current Packory feed. Cached registration JSON remains available on origin connectivity failure. **Known limitation:** registration metadata compatibility is partial. Do not treat the V2 NuGet adapter as universally conformant until native dotnet tests pass.
 
 ## npm per-feed routes
 

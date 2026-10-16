@@ -25,7 +25,9 @@ jobs:
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-v2.sh
+      - name: Public source hygiene (no personal contact info or secret files)
+        run: python3 scripts/check-public-hygiene.py
   container:
     name: Build Docker image
     runs-on: ubuntu-latest

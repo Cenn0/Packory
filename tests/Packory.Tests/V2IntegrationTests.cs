@@ -291,4 +291,26 @@ public sealed class V2IntegrationTests
     [InlineData("..invalid",null)]
     public void PyPI_Normalizes_Names(string raw,string? expected)=>
         Assert.Equal(expected,PypiEndpoints.NormalizeProject(raw));
+
+    [Fact]
+    public async Task NugetV2_Registration_Rewrites_Metadata_Links_Through_Its_Feed()
+    {
+        const string registration = """
+            {"@id":"https://api.nuget.org/v3/registration5-semver2/test.library/index.json",
+             "items":[{"@id":"https://api.nuget.org/v3/registration5-semver2/test.library/page/1.0.0/1.0.0.json",
+             "items":[{"packageContent":"https://api.nuget.org/v3-flatcontainer/test.library/1.0.0/test.library.1.0.0.nupkg"}]}]}
+            """;
+        using var server=new Server(req=>new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content=new StringContent(registration,Encoding.UTF8,"application/json")
+        });
+        using var client=server.CreateClient();
+        await client.SendAsync(R(HttpMethod.Post,"/api/v1/repositories",NewFeed("nugetproxy","nuget","proxy",
+            upstream:"https://api.nuget.org/v3-flatcontainer/")));
+        var body=await (await client.SendAsync(R(HttpMethod.Get,
+            "/r/nuget/nugetproxy/v3/registration/test.library/index.json"))).Content.ReadAsStringAsync();
+        Assert.Contains("http://localhost:8080/r/nuget/nugetproxy/v3/registration/test.library/",body);
+        Assert.Contains("http://localhost:8080/r/nuget/nugetproxy/v3/flatcontainer/test.library/",body);
+        Assert.DoesNotContain("https://api.nuget.org/",body);
+    }
 }

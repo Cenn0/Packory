@@ -91,24 +91,16 @@ public static class NativeNugetV2
             return Results.StatusCode(201);
         });
         app.MapGet("/r/nuget/{feed}/v3/registration/{id}/index.json",async (string feed,string id,HttpContext ctx,
-            Settings settings,V2Catalog db,CasStore cas,IHttpClientFactory clients)=>
+            Settings settings,V2Catalog db,CasStore cas,BlobStore blobs,IHttpClientFactory clients)=>
         {
             var repo=db.FeedBySlug(feed);if(repo?.Protocol!="nuget")return Results.NotFound();
             if(ScopedAccess.Require(ctx,settings,db,feed,"repository.read",repo.Visibility=="public") is { } denied)return denied;
             if(!Names.Nuget(id))return Results.BadRequest();id=id.ToLowerInvariant();
-            // Registration metadata for a proxy must come from the origin. Do not trust its links as download URLs.
             if(repo.Mode=="proxy")
             {
-                var url="https://api.nuget.org/v3/registration5-semver2/"+id+"/index.json";
-                using var response=await clients.CreateClient("upstream").GetAsync(url,ctx.RequestAborted);
-                if(response.StatusCode==HttpStatusCode.NotFound)return Results.NotFound();
-                if(!response.IsSuccessStatusCode)return Results.StatusCode(502);
-                var bytes=await BlobStore.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ctx.RequestAborted),settings.MaxMetadataBytes,ctx.RequestAborted);
-                var raw=Encoding.UTF8.GetString(bytes);
-                // External registration IDs remain public upstream references, while package downloads
-                // must always be served from Packory. Rebase only the package content fields.
-                raw=raw.Replace("https://api.nuget.org/v3-flatcontainer/",settings.Base+"/r/nuget/"+feed+"/v3/flatcontainer/",StringComparison.OrdinalIgnoreCase);
-                return Results.Content(raw,"application/json; charset=utf-8");
+                var payload=await ProxyRegistration(feed,id,"index.json",settings,blobs,
+                    clients.CreateClient("upstream"),ctx.RequestAborted);
+                return payload is null?Results.NotFound():Results.Content(payload,"application/json; charset=utf-8");
             }
             var local=db.Assets(feed,"nuget",id).Where(x=>x.State=="published").ToArray();
             if(local.Length==0)return Results.NotFound();
@@ -121,6 +113,64 @@ public static class NativeNugetV2
             }).ToArray();
             return Results.Json(new {count=1,items=new[]{new {count=leaves.Length,items=leaves}}});
         });
+        app.MapGet("/r/nuget/{feed}/v3/registration/{id}/{**suffix}",async (string feed,string id,string? suffix,
+            HttpContext ctx,Settings settings,V2Catalog db,CasStore cas,BlobStore blobs,IHttpClientFactory clients)=>
+        {
+            var repo=db.FeedBySlug(feed);if(repo?.Protocol!="nuget")return Results.NotFound();
+            if(ScopedAccess.Require(ctx,settings,db,feed,"repository.read",repo.Visibility=="public") is { } denied)return denied;
+            if(!Names.Nuget(id)||string.IsNullOrEmpty(suffix)||!ValidRegistrationPath(suffix))return Results.BadRequest();
+            id=id.ToLowerInvariant();
+            if(repo.Mode=="proxy")
+            {
+                var payload=await ProxyRegistration(feed,id,suffix,settings,blobs,clients.CreateClient("upstream"),ctx.RequestAborted);
+                return payload is null?Results.NotFound():Results.Content(payload,"application/json; charset=utf-8");
+            }
+            if(!suffix.EndsWith(".json",StringComparison.Ordinal))return Results.NotFound();
+            var version=suffix[..^5];if(!Names.Version(version))return Results.NotFound();
+            var asset=db.Asset(feed,"nuget",id,version,id+"."+version+".nupkg");
+            if(asset is null||asset.State!="published")return Results.NotFound();
+            var path=cas.Find(asset.Digest);if(path is null)return Results.StatusCode(503);
+            var baseUrl=settings.Base+"/r/nuget/"+feed+"/v3/";
+            return Results.Json(new
+            {
+                @id=baseUrl+"registration/"+id+"/"+suffix,
+                catalogEntry=new {id,version,description=NuGetEndpoints.ReadNuspec(path).Description},
+                packageContent=baseUrl+"flatcontainer/"+id+"/"+version+"/"+asset.Filename
+            });
+        });
+    }
+
+    private static bool ValidRegistrationPath(string suffix)=>suffix.Length<=300 &&
+        suffix.Split('/').All(segment=>segment.Length is >0 and <=150 && segment is not ("." or "..") &&
+            segment.All(c=>char.IsAsciiLetterOrDigit(c)||c is '.' or '-' or '+' or '_'));
+
+    private static async Task<string?> ProxyRegistration(string feed,string id,string suffix,Settings settings,
+        BlobStore blobs,HttpClient http,CancellationToken ct)
+    {
+        if(!ValidRegistrationPath(suffix))throw new InvalidDataException("Invalid registration path");
+        var key="v2-nuget-reg/"+feed+"/"+id+"/"+Names.HashName(suffix)+".json";
+        var cached=blobs.Existing(key);
+        try
+        {
+            var uri="https://api.nuget.org/v3/registration5-semver2/"+id+"/"+suffix;
+            using var response=await http.GetAsync(uri,HttpCompletionOption.ResponseHeadersRead,ct);
+            if(response.StatusCode==HttpStatusCode.NotFound)return null;
+            if(!response.IsSuccessStatusCode)throw new HttpRequestException("Registration fetch failed",null,response.StatusCode);
+            var bytes=await BlobStore.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ct),settings.MaxMetadataBytes,ct);
+            using(var doc=System.Text.Json.JsonDocument.Parse(bytes))
+                if(doc.RootElement.ValueKind!=System.Text.Json.JsonValueKind.Object)
+                    throw new InvalidDataException("Invalid registration metadata");
+            var payload=Encoding.UTF8.GetString(bytes);
+            payload=payload.Replace("https://api.nuget.org/v3/registration5-semver2/",
+                settings.Base+"/r/nuget/"+feed+"/v3/registration/",StringComparison.OrdinalIgnoreCase);
+            payload=payload.Replace("https://api.nuget.org/v3-flatcontainer/",
+                settings.Base+"/r/nuget/"+feed+"/v3/flatcontainer/",StringComparison.OrdinalIgnoreCase);
+            var output=Encoding.UTF8.GetBytes(payload);
+            await blobs.ReplaceAsync(key,new MemoryStream(output,false),settings.MaxMetadataBytes,ct);
+            return payload;
+        }
+        catch(HttpRequestException) when(cached is not null){return await File.ReadAllTextAsync(cached,ct);}
+        catch(TaskCanceledException) when(cached is not null && !ct.IsCancellationRequested){return await File.ReadAllTextAsync(cached,ct);}
     }
 
     private sealed record NugetV2Info(string Id,string Version);

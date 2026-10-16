@@ -39,4 +39,4 @@ New V2 proxy feeds accept only known origins on HTTPS port 443; custom internal 
 
 ## Unresolved production gates
 
-There is no built-in rate-limiter, distributed leases, malware scanner, signature verification, Keycloak/OIDC login, quota policy or complete CAS checksum scrub. Complete threat-model testing and native-client compatibility remain release requirements; see `docs/v2-status.md`. A successful CI run is not a security certification.
+There is no built-in rate-limiter, distributed leases, malware scanner, signature verification, quota policy or complete CAS checksum scrub. OIDC/Keycloak sessions are implemented optionally but have not undergone real Keycloak integration or security testing. Complete threat-model testing and native-client compatibility remain release requirements; see `docs/v2-status.md`. A successful CI run is not a security certification.

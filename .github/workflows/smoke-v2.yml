@@ -1,0 +1,49 @@
+name: V2 native client smoke (external origins)
+on:
+  push:
+    branches: [feat/v2-platform]
+    paths:
+      - 'src/**'
+      - 'scripts/smoke-v2.sh'
+      - '.github/workflows/smoke-v2.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 0'
+permissions:
+  contents: read
+jobs:
+  native-client-smoke:
+    name: Real dotnet restore and npm ci through V2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish and start isolated Packory
+        run: |
+          dotnet publish src/Packory/Packory.csproj -c Release -o /tmp/packory-v2-service
+          mkdir -p /tmp/packory-v2-data
+          TOKEN="$(openssl rand -hex 32)"
+          echo "PACKORY_ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          PACKORY_ADMIN_TOKEN="$TOKEN" PACKORY_DATA_DIRECTORY=/tmp/packory-v2-data \
+            PACKORY_PUBLIC_BASE_URL=http://localhost:8080 \
+            ASPNETCORE_URLS=http://127.0.0.1:8080 \
+            dotnet /tmp/packory-v2-service/Packory.dll >/tmp/packory-v2.log 2>&1 &
+          echo $! > /tmp/packory-v2.pid
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/health/ready && break; sleep 1; done
+      - name: Native clients through V2 only
+        env:
+          PACKORY_PUBLIC_BASE_URL: http://localhost:8080
+        run: bash scripts/smoke-v2.sh
+      - name: Collect failure logs
+        if: failure()
+        run: tail -n 150 /tmp/packory-v2.log || true
+      - name: Stop service
+        if: always()
+        run: |
+          if test -f /tmp/packory-v2.pid; then kill "$(cat /tmp/packory-v2.pid)" || true; fi
