@@ -54,7 +54,7 @@ public sealed class S3ProviderTests
             Assert.Contains(publicationDb.PendingPublications(), pending => pending.Key == package);
             Assert.True(publicationDb.PublishNuget("test", "1.0.0", "test", "integration-writer"));
             recovery.Reconcile();
-            Assert.Empty(metadata.PendingPublications());
+            Assert.Empty(publicationDb.PendingPublications());
             const string metadata = "npm-metadata/demo.json";
             await store.ReplaceAsync(metadata, new MemoryStream(Encoding.UTF8.GetBytes("v1")), 1024, CancellationToken.None);
             await store.ReplaceAsync(metadata, new MemoryStream(Encoding.UTF8.GetBytes("v2")), 1024, CancellationToken.None);
