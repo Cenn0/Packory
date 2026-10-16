@@ -74,7 +74,8 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [x] Admin-reviewed, SHA-256-verified, ETag-conditional S3 orphan quarantine with durable recovery evidence.
 - [x] PostgreSQL + S3 crash-point tests in an isolated CI environment.
 - [ ] Validate the deployed S3 provider's conditional DELETE semantics, PostgreSQL/S3 coordinated backup and restore, and long-running interrupted upload behavior.
-- [ ] Before active-active deployment: distributed metadata/blob coordination, owner fencing, OCI upload-session durability, cache consistency, SLOs, security tests and operator runbooks. This implementation is intentionally **not** a multi-instance release.
+- [x] Limited PostgreSQL/S3 multi-instance read topology: one leased writer, extra strictly read-only replicas, fail-closed NuGet/npm paths, with two-node integration verification.
+- [ ] Before active-active deployment: distributed metadata/blob coordination, owner fencing, OCI upload-session durability, cache consistency, SLOs, security tests and operator runbooks. This implementation is intentionally **not** an active-active release.
 
 ## Milestone 4 — Scale only when justified
 
