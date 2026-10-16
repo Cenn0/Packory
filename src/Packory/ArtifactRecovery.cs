@@ -114,6 +114,29 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         }
         if (moved > 0)
             logger.LogWarning("Quarantined {Count} unindexed immutable blob(s) under recovery/orphaned. Review before deletion.", moved);
+        foreach (var pending in database.PendingPublications())
+        {
+            var exists = blobs.Contains(pending.Key);
+            var committed = pending.Kind switch
+            {
+                "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
+                "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
+                "pypi" => database.PyFiles(pending.Name).Any(
+                    file => PyPiEndpoints.Key(file.Name, file.Filename) == pending.Key),
+                _ => database.PackageOrigin(pending.Kind, pending.Name, pending.Version) == "hosted"
+            };
+            if (!exists || committed)
+            {
+                // Crash before blob creation or after committed metadata: no remote orphan.
+                database.CompletePublication(pending.Key);
+            }
+            else
+            {
+                // Fail closed: no automatic remote S3 deletes or unverified DB reconstruction.
+                logger.LogError("Uncommitted artifact bytes require operator reconciliation: {Kind} {Key}",
+                    pending.Kind, pending.Key);
+            }
+        }
         return new RecoveryReport(moved, missingHosted);
     }
 }

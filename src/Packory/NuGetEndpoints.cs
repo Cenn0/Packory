@@ -146,9 +146,11 @@ public static class NuGetEndpoints
             using var gate = await locks.AcquireAsync("nuget", id, version, ctx.RequestAborted);
             if (db.HasPackage("nuget", id, version) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Version already exists" });
+            db.BeginPublication(key, "nuget", id, version);
             using var content = new MemoryStream(bytes, writable: false);
             if (!await blobs.PutAsync(key, content, settings.MaxArtifactBytes, ctx.RequestAborted)) return Results.Conflict();
             if (!db.PublishNuget(id, version, spec.Description, Access.Actor(ctx))) return Results.Conflict();
+            db.CompletePublication(key);
             return Results.StatusCode(StatusCodes.Status201Created);
         }).RequireRateLimiting("publish");
     }

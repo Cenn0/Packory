@@ -136,12 +136,14 @@ public static class CargoEndpoints
             using var lease = await locks.AcquireAsync("cargo", name, version, ctx.RequestAborted);
             if (db.HasPackage("cargo", name, version) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Cargo version already exists" });
+            db.BeginPublication(key, "cargo", name, version);
             if (!await blobs.PutAsync(key, new MemoryStream(archive, writable: false),
                 cfg.MaxArtifactBytes, ctx.RequestAborted)) return Results.Conflict();
             var description = metadata["description"]?.ToString() ?? "";
             if (!db.PublishCargo(name, version, index.ToJsonString(),
                     description[..Math.Min(2000, description.Length)], Access.Actor(ctx)))
                 return Results.Conflict();
+            db.CompletePublication(key);
             return Results.Json(new { warnings = new { invalid_categories = Array.Empty<string>(),
                 invalid_badges = Array.Empty<string>(), other = Array.Empty<string>() } });
         }).RequireRateLimiting("publish");

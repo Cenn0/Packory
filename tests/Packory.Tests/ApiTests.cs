@@ -870,4 +870,37 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.OK, publicCatalog.StatusCode);
     }
 
+    [Fact]
+    public async Task PublicationIntents_AreVisibleOnlyToAdminAndRecoverAfterCommittedMetadata()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        const string name = "journal-test";
+        const string version = "1.0.0";
+        var key = NuGetEndpoints.NugetKey(name, version);
+        db.BeginPublication(key, "nuget", name, version);
+        Assert.Single(db.PendingPublications());
+        using var reader = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/publications/pending", token: ReadToken));
+        Assert.Equal(HttpStatusCode.Forbidden, reader.StatusCode);
+        using var admin = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/publications/pending"));
+        Assert.Equal(HttpStatusCode.OK, admin.StatusCode);
+        Assert.Contains(key, await admin.Content.ReadAsStringAsync());
+
+        // A crash before any blob is stored can be reconciled without metadata damage.
+        host.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+        Assert.Empty(db.PendingPublications());
+
+        // A crash after a successful metadata commit but before journal completion is safe.
+        db.BeginPublication(key, "nuget", name, version);
+        var blob = host.Services.GetRequiredService<BlobStore>();
+        Assert.True(await blob.PutAsync(key, new MemoryStream(new byte[] { 1, 2, 3 }),
+            1024, CancellationToken.None));
+        Assert.True(db.PublishNuget(name, version, "test", "writer"));
+        host.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+        Assert.Empty(db.PendingPublications());
+    }
+
 }

@@ -59,9 +59,11 @@ public static class SkillEndpoints
             using var gate = await locks.AcquireAsync("skill", manifest.Name, version, ctx.RequestAborted);
             if (db.Skills(manifest.Name).Any(x => x.Version == version) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Skill version already exists" });
+            db.BeginPublication(key, "skill", manifest.Name, version);
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), settings.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.Conflict();
             if (!db.AddSkill(manifest.Name, version, manifest.Description, Access.Actor(ctx))) return Results.Conflict();
+            db.CompletePublication(key);
             return Results.Json(new { name = manifest.Name, version, description = manifest.Description },
                 statusCode: StatusCodes.Status201Created);
         }).RequireRateLimiting("publish");

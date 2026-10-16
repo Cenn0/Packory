@@ -114,12 +114,14 @@ public static class PyPiEndpoints
             using var lease = await locks.AcquireAsync("pypi", name, filename, ctx.RequestAborted);
             if (db.PyFiles(name).Any(f => f.Filename == filename) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Distribution filename already exists" });
+            db.BeginPublication(key, "pypi", name, version);
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, writable: false),
                 cfg.MaxArtifactBytes, ctx.RequestAborted)) return Results.Conflict();
             var description = form["summary"].ToString();
             if (!db.PublishPyFile(new PyFileEntry(name, version, filename, sha, bytes.Length),
                     description[..Math.Min(2000, description.Length)], Access.Actor(ctx)))
                 return Results.Conflict();
+            db.CompletePublication(key);
             return Results.Text("Distribution uploaded", "text/plain", statusCode: StatusCodes.Status200OK);
         }).RequireRateLimiting("publish");
     }

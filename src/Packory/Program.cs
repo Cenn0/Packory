@@ -207,6 +207,12 @@ app.MapDelete("/api/admin/tokens/{id}", (string id, Settings cfg, IPackageDataba
     if (!Guid.TryParseExact(id, "N", out _)) return Results.BadRequest(new { error = "Invalid token id" });
     return db.RevokeManagedToken(id) ? Results.NoContent() : Results.NotFound();
 }).RequireRateLimiting("publish");
+app.MapGet("/api/admin/publications/pending", (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { items = db.PendingPublications() });
+});
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
