@@ -1,0 +1,44 @@
+name: V2 schema dependency verification
+on:
+  push:
+    branches: [feat/v2-architecture]
+    paths: [.github/workflows/v2-schema-license-check.yml]
+permissions:
+  contents: read
+jobs:
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore and inspect schema validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NUGET_PACKAGES="$RUNNER_TEMP/schema/packages"
+          mkdir -p "$RUNNER_TEMP/restore" "$RUNNER_TEMP/schema"
+          cd "$RUNNER_TEMP/restore"
+          cat > Schema.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><NuGetAuditMode>all</NuGetAuditMode><WarningsAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsAsErrors></PropertyGroup><ItemGroup><PackageReference Include="JsonSchema.Net" Version="8.0.5" /></ItemGroup></Project>
+          EOF
+          dotnet restore Schema.csproj --use-lock-file
+          dotnet list Schema.csproj package --vulnerable --include-transitive --format json > "$RUNNER_TEMP/schema/advisories.json"
+          cp packages.lock.json "$RUNNER_TEMP/schema/packages.lock.json"
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path(os.environ['NUGET_PACKAGES'])
+          for p in root.rglob('*.nuspec'):
+              doc = ET.parse(p); ns={'n':'http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'}
+              licenses=[e.text for e in doc.iter() if e.tag.endswith('license')]
+              print(p.parent.name, p.name, licenses)
+              if any('OSMFEULA' in (v or '') for v in licenses):
+                  raise SystemExit('Binary maintenance fee dependency is not acceptable for this build profile')
+          PY
+          tar -C "$RUNNER_TEMP/schema" -czf "$RUNNER_TEMP/schema-dependencies.tar.gz" .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: packory-mit-schema-dependencies
+          path: ${{ runner.temp }}/schema-dependencies.tar.gz
+          retention-days: 1
