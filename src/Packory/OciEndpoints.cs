@@ -45,7 +45,7 @@ public static class OciEndpoints
             if (cfg.OciAuthenticatedPing &&
                 Access.Require(ctx, cfg, write: true) is { } pingDenied)
             {
-                ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\\"Packory OCI\\"";
+                ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";
                 return pingDenied;
             }
             if (Access.Require(ctx, cfg) is { } denied)
