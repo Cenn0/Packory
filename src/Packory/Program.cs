@@ -19,6 +19,10 @@ settings.OidcAudience = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUDIENC
 settings.AdminToken = TokenFromEnv("PACKORY_ADMIN_TOKEN") ?? settings.AdminToken;
 settings.ReadToken = TokenFromEnv("PACKORY_READ_TOKEN") ?? settings.ReadToken;
 settings.WriteToken = TokenFromEnv("PACKORY_WRITE_TOKEN") ?? settings.WriteToken;
+if (Environment.GetEnvironmentVariable("PACKORY_WRITE_NAMESPACES") is { } grants)
+    settings.WriteNamespaces = grants.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OIDC_REQUIRE_NAMESPACE_GRANTS"), out var requireGrants))
+    settings.RequireOidcNamespaceGrants = requireGrants;
 settings.DataDirectory = Environment.GetEnvironmentVariable("PACKORY_DATA_DIRECTORY") ?? settings.DataDirectory;
 settings.MetadataProvider = Environment.GetEnvironmentVariable("PACKORY_METADATA_PROVIDER") ?? settings.MetadataProvider;
 settings.BlobProvider = Environment.GetEnvironmentVariable("PACKORY_BLOB_PROVIDER") ?? settings.BlobProvider;
