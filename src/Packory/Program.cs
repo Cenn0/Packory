@@ -130,6 +130,7 @@ app.Use(async (ctx, next) =>
     ctx.Response.Headers["X-Frame-Options"] = "DENY";
     ctx.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
     try { await next(ctx); }
+    catch (Amazon.S3.AmazonS3Exception) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 503; }
     catch (PayloadTooLargeException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 413; }
     catch (HttpRequestException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
     catch (TaskCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
