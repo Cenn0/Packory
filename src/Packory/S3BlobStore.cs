@@ -118,7 +118,7 @@ public sealed class S3BlobStore : BlobStore, IDisposable
         try
         {
             await using var payload = File.OpenRead(local);
-            using var request = new PutObjectRequest
+            var request = new PutObjectRequest
             {
                 BucketName = _bucket,
                 Key = ObjectKey(key),
@@ -149,19 +149,27 @@ public sealed class S3BlobStore : BlobStore, IDisposable
         // until the remote write succeeds. Upstream packages are immutable PutAsync.
         var bytes = await ReadBoundedAsync(input, maxBytes, ct);
         using (var payload = new MemoryStream(bytes, writable: false))
-        using (var request = new PutObjectRequest
         {
-            BucketName = _bucket,
-            Key = ObjectKey(key),
-            InputStream = payload,
-            AutoCloseStream = false
-        })
-        {
+            var request = new PutObjectRequest
+            {
+                BucketName = _bucket,
+                Key = ObjectKey(key),
+                InputStream = payload,
+                AutoCloseStream = false
+            };
             var result = await _client.PutObjectAsync(request, ct);
             if (result.HttpStatusCode != HttpStatusCode.OK)
                 throw new IOException("S3 mutable metadata update was not acknowledged.");
         }
-        await base.ReplaceAsync(key, new MemoryStream(bytes, writable: false), maxBytes, ct);
+        try
+        {
+            await base.ReplaceAsync(key, new MemoryStream(bytes, writable: false), maxBytes, ct);
+        }
+        catch
+        {
+            DeleteCached(key);
+            throw;
+        }
     }
 
     public void Dispose() => _client.Dispose();
