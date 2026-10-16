@@ -158,7 +158,7 @@ app.Use(async (ctx, next) =>
         // upstream metadata and artifacts. Block those endpoints fail-closed.
         var path = ctx.Request.Path;
         var method = ctx.Request.Method;
-        var safe = method is "GET" or "HEAD" &&
+        var safe = (method is "GET" or "HEAD") &&
             !path.StartsWithSegments("/nuget") &&
             !path.StartsWithSegments("/npm") &&
             !path.StartsWithSegments("/api/admin") &&
@@ -172,7 +172,7 @@ app.Use(async (ctx, next) =>
         }
     }
     // A lost PostgreSQL lease must fail closed, never permit a second writer.
-    if (!readerInstance && ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" && !startupLease.IsHeld())
+    if (!readerInstance && (ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE") && !startupLease.IsHeld())
     {
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
