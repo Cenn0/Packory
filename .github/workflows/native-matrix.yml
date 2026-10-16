@@ -1,0 +1,36 @@
+name: Native ecosystem compatibility matrix
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-clients:
+    name: Cargo and pip (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record native client versions
+        run: |
+          cargo --version
+          python --version
+          python -m pip --version
+      - name: Compile Packory
+        run: |
+          dotnet restore Packory.slnx
+          dotnet build Packory.slnx -c Release --no-restore -warnaserror
+      - name: Real hosted Cargo and pip workflows
+        run: bash scripts/smoke-ecosystems.sh

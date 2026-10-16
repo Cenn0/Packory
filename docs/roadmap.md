@@ -29,6 +29,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 
 - [x] Isolated hosted Cargo alternate registry publish and consumption via real Cargo CLI.
 - [x] Real pip install of a hosted wheel and its hosted transitive dependency via the PyPI Simple API, without a second package index.
+- [x] A dedicated CI smoke matrix repeats the hosted Cargo/pip scenarios with Python 3.12 and 3.13 on the current Linux-hosted Rust toolchain. This checks these two interpreter contexts, not broad Cargo/Twine/multi-OS compatibility.
 - [x] One isolated native Docker CLI login/push/tag-discovery/pull against Packory OCI (local scratch image, no upstream image).
 - [ ] A broader OCI / Helm / ORAS client matrix, real public registry pull-through and a broad package-version matrix are still outstanding.
 
