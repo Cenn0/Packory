@@ -37,6 +37,12 @@ public sealed class Settings
     public string? AdminToken { get; set; }
     public string? ReadToken { get; set; }
     public string? WriteToken { get; set; }
+    // Optional namespace policy for the shared write-token.
+    // Entries are "kind:name" or "kind:prefix*" (e.g. "nuget:internal.*").
+    public string[] WriteNamespaces { get; set; } = [];
+    // Opt-in: a signed OIDC packory.write token must carry matching packory_namespace claim.
+    public bool RequireOidcNamespaceGrants { get; set; }
+
     // Explicit reservations prevent upstream fallback for private namespaces.
     public string[] ReservedNugetPrefixes { get; set; } = [];
     public string[] ReservedNpmScopes { get; set; } = [];
@@ -103,6 +109,8 @@ public sealed class Settings
             !string.IsNullOrEmpty(oidc.Query) || !string.IsNullOrEmpty(oidc.Fragment) ||
             string.IsNullOrWhiteSpace(OidcAudience) || OidcAudience.Length > 256))
             throw new InvalidOperationException("OIDC requires an HTTPS authority and nonempty audience.");
+        if (WriteNamespaces.Any(x => !Access.ValidNamespaceGrant(x)))
+            throw new InvalidOperationException("Invalid WriteNamespaces grant.");
         if (MaxBlobStorageBytes < 0 || MaxBlobStorageBytes > 1_099_511_627_776L ||
             (MaxBlobStorageBytes != 0 && BlobProvider != "filesystem"))
             throw new InvalidOperationException("Filesystem blob quota must be 0..1 TiB and requires filesystem provider.");

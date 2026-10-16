@@ -131,6 +131,7 @@ public static class CargoEndpoints
                 ["links"] = metadata["links"]?.DeepClone(),
                 ["rust_version"] = metadata["rust_version"]?.DeepClone()
             };
+            if (Access.RequireNamespace(ctx, cfg, "cargo", name) is { } forbidden) return forbidden;
             var key = Key(name, version);
             using var lease = await locks.AcquireAsync("cargo", name, version, ctx.RequestAborted);
             if (db.HasPackage("cargo", name, version) || blobs.Existing(key) is not null)

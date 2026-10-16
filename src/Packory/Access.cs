@@ -64,6 +64,55 @@ public static class Access
         return null;
     }
 
+    /// <summary>
+    /// Authorization for a specific artifact target, performed after identity verification
+    /// and package-name validation, but before writing bytes or mutating metadata.
+    /// Only grants from server configuration or validated OIDC identity claims are trusted.
+    /// </summary>
+    public static IResult? RequireNamespace(HttpContext context, Settings settings, string kind, string name)
+    {
+        var role = Actor(context);
+        if (role is "admin-token" or "oidc-admin") return null;
+        if (role == "write-token" && settings.WriteNamespaces.Length == 0) return null;
+        if (role == "oidc-write" && !settings.RequireOidcNamespaceGrants) return null;
+        IEnumerable<string> grants = role switch
+        {
+            "write-token" => settings.WriteNamespaces,
+            "oidc-write" when context.User.Identity?.IsAuthenticated == true =>
+                context.User.FindAll("packory_namespace").Select(x => x.Value),
+            _ => []
+        };
+        return grants.Any(grant => MatchesNamespace(grant, kind, name))
+            ? null : Results.Json(new { error = "Publishing to this namespace is not permitted" },
+                statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    public static bool ValidNamespaceGrant(string grant)
+    {
+        var sep = grant.IndexOf(':');
+        if (sep <= 0 || sep == grant.Length - 1) return false;
+        var kind = grant[..sep];
+        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return false;
+        var value = grant[(sep + 1)..];
+        var wildcard = value.EndsWith('*');
+        if (wildcard) value = value[..^1];
+        // No traversal, arbitrary regex, whitespace, embedded wildcards or URLs.
+        return value.Length is >= 1 and <= 200 &&
+               !value.Contains("..", StringComparison.Ordinal) &&
+               value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '/' or '@');
+    }
+
+    public static bool MatchesNamespace(string grant, string kind, string name)
+    {
+        if (!ValidNamespaceGrant(grant)) return false;
+        var separator = grant.IndexOf(':');
+        if (!string.Equals(kind, grant[..separator], StringComparison.Ordinal)) return false;
+        var value = grant[(separator + 1)..];
+        if (value.EndsWith('*'))
+            return name.StartsWith(value[..^1], StringComparison.Ordinal);
+        return string.Equals(name, value, StringComparison.Ordinal);
+    }
+
     private static string? CredentialRole(string token, Settings settings)
     {
         if (Matches(token, settings.AdminToken)) return "admin-token";

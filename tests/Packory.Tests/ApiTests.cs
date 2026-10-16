@@ -781,4 +781,36 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
     }
 
+    [Fact]
+    public async Task WriteNamespacePolicy_RestrictsNugetAndOciWithoutRestrictingAdministrator()
+    {
+        using var host = new Host(configure: cfg => cfg.WriteNamespaces =
+            ["nuget:approved.*", "oci:trusted/*"]);
+        using var client = host.CreateClient();
+
+        static HttpContent NugetUpload(string name)
+        {
+            var content = new MultipartFormDataContent();
+            content.Add(new ByteArrayContent(Nupkg(name, "1.0.0")), "file", name + ".1.0.0.nupkg");
+            return content;
+        }
+
+        using var denied = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            NugetUpload("unapproved.pkg"), WriteToken));
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var allowed = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            NugetUpload("approved.pkg"), WriteToken));
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        using var admin = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            NugetUpload("unapproved.pkg"), AdminToken));
+        Assert.Equal(HttpStatusCode.Created, admin.StatusCode);
+
+        using var deniedOci = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/v2/untrusted/example/blobs/uploads/", token: WriteToken));
+        Assert.Equal(HttpStatusCode.Forbidden, deniedOci.StatusCode);
+        using var allowedOci = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/v2/trusted/example/blobs/uploads/", token: WriteToken));
+        Assert.Equal(HttpStatusCode.Accepted, allowedOci.StatusCode);
+    }
+
 }
