@@ -1,0 +1,12 @@
+.git/
+.github/
+**/bin/
+**/obj/
+**/data/
+**/TestResults/
+.env*
+.npmrc
+*.sqlite*
+*.nupkg
+*.zip
+*.tgz

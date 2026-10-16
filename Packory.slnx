@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Packory/Packory.csproj" />
+  <Project Path="tests/Packory.Tests/Packory.Tests.csproj" />
+</Solution>

@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Build and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore Packory.slnx
+      - name: Build (warnings are errors)
+        run: dotnet build Packory.slnx --configuration Release --no-restore -warnaserror
+      - name: Test all protocol adapters
+        run: dotnet test Packory.slnx --configuration Release --no-build --logger 'console;verbosity=normal'
+      - name: Validate dashboard JavaScript
+        run: node --check src/Packory/wwwroot/app.js
+      - name: Validate shell smoke scripts
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh
+  container:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build self-hosted image
+        run: docker build -t packory:ci .
