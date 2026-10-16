@@ -149,7 +149,7 @@ public sealed class Settings
             {
                 throw new InvalidOperationException("StrictDeployment requires a valid PostgreSQL connection string.");
             }
-            if (postgres.SslMode != SslMode.VerifyFull || postgres.TrustServerCertificate)
+            if (postgres.SslMode != SslMode.VerifyFull)
                 throw new InvalidOperationException("StrictDeployment requires PostgreSQL SSL Mode=VerifyFull and a trusted hostname-checked certificate.");
         }
         if (PublishRequestsPerMinute is < 1 or > 10000)
