@@ -29,10 +29,9 @@ the password contains the token. This is intended for ORAS and other clients
 that can configure Basic credentials; TLS is mandatory outside loopback.
 
 Packory does **not** currently expose the Docker Bearer-token challenge/grant
-endpoint or per-repository token scopes. Native Docker login/Helm/ORAS client
-compatibility must be verified separately, not assumed from API-level tests.
+endpoint or per-repository token scopes. A native Docker CLI smoke test now exercises a local scratch image build, Basic-authenticated login, push, tag discovery and pull. This is **one tested Docker flow**, not a Docker/Helm/ORAS compatibility matrix or production certification.
 
-### Operational limits
+### Native client acceptance\n\nAfter a Release build, run `bash scripts/smoke-oci-docker.sh` with Docker Engine, Bash, .NET 10, Python 3, curl and OpenSSL. The script uses loopback port 18082, a temporary Docker credential directory and a `FROM scratch` image; it does not pull a public base image. It verifies a real `docker push`, the Packory tag-list API and a subsequent `docker pull`. On CI this shares the Linux job with the other hosted registry smoke tests. A successful run does not establish offline layer-cache independence, multi-architecture support, signature compatibility, resumable uploads or comprehensive OCI conformance.\n\n### Operational limits
 
 Blob upload sessions are bounded to `PACKORY_MAX_ARTIFACT_BYTES` (default
 100 MiB); an active upload expires after 30 minutes and is removed when
