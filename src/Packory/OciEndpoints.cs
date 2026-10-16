@@ -67,7 +67,7 @@ public static class OciEndpoints
             if (write)
             {
                 var boundaries = new[] { "/blobs/uploads/", "/blobs/", "/manifests/", "/tags/list", "/referrers/" };
-                var cut = boundaries.Select(value.IndexOf).Where(i => i > 0).DefaultIfEmpty(-1).Min();
+                var cut = boundaries.Select(boundary => value.IndexOf(boundary, StringComparison.Ordinal)).Where(i => i > 0).DefaultIfEmpty(-1).Min();
                 if (cut <= 0 || !ValidRepository(value[..cut]))
                     return Error(400, "NAME_INVALID", "Invalid OCI mutation repository");
                 if (Access.RequireNamespace(ctx, cfg, "oci", value[..cut]) is { } forbidden)
