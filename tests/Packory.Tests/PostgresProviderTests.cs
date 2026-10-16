@@ -72,6 +72,12 @@ public sealed class PostgresProviderTests
         Assert.Null(db.FindManagedToken(digestHash));
         Assert.False(db.RevokeManagedToken(tokenId));
 
+        var publicationKey = NuGetEndpoints.NugetKey("pg-journal-" + suffix, "2.0.0");
+        db.BeginPublication(publicationKey, "nuget", "pg-journal-" + suffix, "2.0.0");
+        Assert.Contains(db.PendingPublications(), x => x.Key == publicationKey);
+        db.CompletePublication(publicationKey);
+        Assert.DoesNotContain(db.PendingPublications(), x => x.Key == publicationKey);
+
         var audits = db.AuditEvents(null, 100);
         Assert.Contains(audits, x => x.Kind == "nuget" && x.Name == nuget);
         Assert.Contains(audits, x => x.Kind == "npm" && x.Name == npm);
