@@ -4,28 +4,78 @@ using Npgsql;
 namespace Packory;
 
 /// <summary>
-/// Pre-V3 baseline marker only, not an automatic migration/downgrade service.
-/// Reject unknown future schemas BEFORE applying the historical CREATE TABLE batch.
+/// Explicit forward-only database versions. V1 is the historical global-catalog
+/// schema; V2 adds an inventory of default legacy feeds without changing any
+/// native registry routes or claiming cross-feed isolation.
 /// </summary>
 public static class SchemaVersionGuard
 {
-    public const int Current = 1;
+    private const int Baseline = 1;
+    public const int Current = 2;
 
-    private static void RequireCurrent(object? value)
+    private static int RequireKnown(object? value)
     {
-        if (value is null || value is DBNull || Convert.ToInt32(value) != Current)
+        if (value is null or DBNull)
+            throw new InvalidOperationException("Missing Packory metadata schema version");
+        var version = Convert.ToInt32(value);
+        if (version < Baseline || version > Current)
             throw new InvalidOperationException(
                 "Unsupported Packory metadata schema version; reviewed migration required.");
+        return version;
     }
+
+    private const string FeedSchema = """
+        CREATE TABLE IF NOT EXISTS feeds (
+            id TEXT NOT NULL PRIMARY KEY,
+            kind TEXT NOT NULL CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill')),
+            mode TEXT NOT NULL CHECK(mode IN ('legacy','hosted','proxy')),
+            visibility TEXT NOT NULL CHECK(visibility IN ('runtime','private','public')),
+            display_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS feeds_kind_id ON feeds(kind,id);
+        CREATE TABLE IF NOT EXISTS feed_namespaces (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            namespace TEXT NOT NULL,
+            rule TEXT NOT NULL CHECK(rule IN ('reserved','allow')),
+            PRIMARY KEY(feed_id,namespace)
+        );
+        CREATE TABLE IF NOT EXISTS feed_policies (
+            feed_id TEXT NOT NULL PRIMARY KEY REFERENCES feeds(id) ON DELETE RESTRICT,
+            policy_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS feed_upstreams (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            upstream_id TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            priority INTEGER NOT NULL CHECK(priority>=0),
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+            PRIMARY KEY(feed_id,upstream_id),
+            UNIQUE(feed_id,priority)
+        );
+        """;
+
+    private static readonly (string Id, string Kind, string Name)[] Defaults =
+    [
+        ("default-nuget", "nuget", "NuGet legacy"),
+        ("default-npm", "npm", "npm legacy"),
+        ("default-cargo", "cargo", "Cargo legacy"),
+        ("default-pypi", "pypi", "PyPI legacy"),
+        ("default-oci", "oci", "OCI legacy"),
+        ("default-skill", "skill", "Agent Skills legacy")
+    ];
 
     public static void Verify(SqliteConnection connection)
     {
         using var exists = connection.CreateCommand();
         exists.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='packory_schema_version'";
-        if (exists.ExecuteScalar() is null) return; // old unmarked installation
+        if (exists.ExecuteScalar() is null) return; // unmarked pre-versioned installation
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-        RequireCurrent(cmd.ExecuteScalar());
+        RequireKnown(cmd.ExecuteScalar());
     }
 
     public static void Stamp(SqliteConnection connection)
@@ -39,10 +89,53 @@ public static class SchemaVersionGuard
             INSERT OR IGNORE INTO packory_schema_version(slot,version,applied_at)
             VALUES(1,$version,$at);
             """;
-        cmd.Parameters.AddWithValue("$version", Current);
+        cmd.Parameters.AddWithValue("$version", Baseline);
         cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
         cmd.ExecuteNonQuery();
         Verify(connection);
+    }
+
+    public static void Upgrade(SqliteConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        using var read = connection.CreateCommand();
+        read.Transaction = tx;
+        read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+        var version = RequireKnown(read.ExecuteScalar());
+        if (version == Current) { tx.Commit(); return; }
+        using (var schema = connection.CreateCommand())
+        {
+            schema.Transaction = tx;
+            schema.CommandText = FeedSchema;
+            schema.ExecuteNonQuery();
+        }
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        foreach (var feed in Defaults)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = """
+                INSERT INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
+                VALUES($id,$kind,'legacy','runtime',$name,1,$at,$at)
+                ON CONFLICT(id) DO NOTHING
+                """;
+            insert.Parameters.AddWithValue("$id", feed.Id);
+            insert.Parameters.AddWithValue("$kind", feed.Kind);
+            insert.Parameters.AddWithValue("$name", feed.Name);
+            insert.Parameters.AddWithValue("$at", at);
+            insert.ExecuteNonQuery();
+        }
+        using (var stamp = connection.CreateCommand())
+        {
+            stamp.Transaction = tx;
+            stamp.CommandText = "UPDATE packory_schema_version SET version=$version,applied_at=$at WHERE slot=1 AND version=$previous";
+            stamp.Parameters.AddWithValue("$version", Current);
+            stamp.Parameters.AddWithValue("$previous", version);
+            stamp.Parameters.AddWithValue("$at", at);
+            if (stamp.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("Packory database migration lost its version gate.");
+        }
+        tx.Commit();
     }
 
     public static void Verify(NpgsqlConnection connection)
@@ -52,7 +145,7 @@ public static class SchemaVersionGuard
         if (exists.ExecuteScalar() is not bool found || !found) return;
         using var cmd = new NpgsqlCommand(
             "SELECT version FROM packory_schema_version WHERE slot=1", connection);
-        RequireCurrent(cmd.ExecuteScalar());
+        RequireKnown(cmd.ExecuteScalar());
     }
 
     public static void Stamp(NpgsqlConnection connection)
@@ -65,9 +158,45 @@ public static class SchemaVersionGuard
             INSERT INTO packory_schema_version(slot,version,applied_at)
             VALUES(1,@version,@at) ON CONFLICT(slot) DO NOTHING;
             """, connection);
-        cmd.Parameters.AddWithValue("version", Current);
+        cmd.Parameters.AddWithValue("version", Baseline);
         cmd.Parameters.AddWithValue("at", DateTimeOffset.UtcNow.ToString("O"));
         cmd.ExecuteNonQuery();
         Verify(connection);
+    }
+
+    public static void Upgrade(NpgsqlConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        using var read = new NpgsqlCommand(
+            "SELECT version FROM packory_schema_version WHERE slot=1 FOR UPDATE", connection, tx);
+        var version = RequireKnown(read.ExecuteScalar());
+        if (version == Current) { tx.Commit(); return; }
+        using (var schema = new NpgsqlCommand(FeedSchema, connection, tx))
+            schema.ExecuteNonQuery();
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        foreach (var feed in Defaults)
+        {
+            using var insert = new NpgsqlCommand("""
+                INSERT INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
+                VALUES(@id,@kind,'legacy','runtime',@name,1,@at,@at)
+                ON CONFLICT(id) DO NOTHING
+                """, connection, tx);
+            insert.Parameters.AddWithValue("id", feed.Id);
+            insert.Parameters.AddWithValue("kind", feed.Kind);
+            insert.Parameters.AddWithValue("name", feed.Name);
+            insert.Parameters.AddWithValue("at", at);
+            insert.ExecuteNonQuery();
+        }
+        using (var stamp = new NpgsqlCommand(
+            "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
+            connection, tx))
+        {
+            stamp.Parameters.AddWithValue("version", Current);
+            stamp.Parameters.AddWithValue("previous", version);
+            stamp.Parameters.AddWithValue("at", at);
+            if (stamp.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("Packory database migration lost its version gate.");
+        }
+        tx.Commit();
     }
 }

@@ -304,6 +304,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
     try { return Results.Ok(await recovery.ResolveAsync(request.Key, request.ExpectedStartedAt, ctx.RequestAborted)); }
     catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
 }).RequireRateLimiting("publish");
+FeedEndpoints.Map(app);
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);

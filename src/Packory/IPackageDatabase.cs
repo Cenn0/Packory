@@ -7,6 +7,8 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    IReadOnlyList<FeedDefinition> Feeds(string? after, int limit);
+    FeedDefinition? Feed(string id);
     void BeginPublication(string key, string kind, string name, string version);
     void CompletePublication(string key);
     IReadOnlyList<PendingPublication> PendingPublications();
