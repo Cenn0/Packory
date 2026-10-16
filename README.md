@@ -12,14 +12,14 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#what-works-in-the-mvp) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap](docs/roadmap.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap](docs/roadmap.md)
 
-**A self-hosted hub for NuGet, npm and versioned AI agent skills.**
+**A self-hosted distribution hub for developer packages and AI agent skills.**
 
 
-Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current **MVP** is an **ASP.NET Core / .NET 10 modular monolith**, using SQLite and local file storage. No separate database, broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
+Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current implementation is an **ASP.NET Core / .NET 10 modular monolith**. SQLite and filesystem storage remain the default; PostgreSQL metadata storage and S3-compatible object storage are optional. No broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
 
-> **Status: MVP, not production-hardened.** Protocol coverage and real-client compatibility are incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
+> **Status: experimental platform, not production-hardened.** The implemented adapters and optional backends have bounded test coverage; protocol, migration and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
 
 ## Quick start
 
@@ -44,7 +44,7 @@ dotnet run --project src/Packory --urls http://localhost:8080
 
 See [operations](docs/operations.md) before enabling network access or choosing a permanent data directory.
 
-## What works in the MVP
+## Implemented capabilities
 
 | Area | Implemented scope |
 | --- | --- |
@@ -54,7 +54,8 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Agent skills** | Import, list and download versioned ZIP files containing a simple `SKILL.md` manifest |
 | **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
-| **Access** | Configurable static read, write and admin tokens; anonymous read enabled by default; admin-only successful-publish audit |
+| **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
+| **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
 
 ### Use Packory as a registry
 
@@ -75,15 +76,16 @@ Publish operations require an appropriate token. [API examples](docs/api.md) exp
 
 ```mermaid
 flowchart LR
-  C[NuGet and npm clients] --> A[Packory ASP.NET Core]
+  C[NuGet, npm, Cargo, PyPI, OCI clients] --> A[Packory ASP.NET Core]
   K[Skill ZIP importer] --> A
-  A --> N[Protocol adapters]
-  A --> S[Skills and catalog API]
-  N --> D[(SQLite metadata)]
-  S --> D
-  N --> B[(Local artifact files)]
-  S --> B
-  N -.->|Optional upstream HTTPS| U[nuget.org and npmjs.org]
+  O[Optional OIDC issuer] -.-> A
+  A --> N[Native protocol adapters]
+  A --> M[Catalog and management API]
+  N --> D[(SQLite or PostgreSQL metadata)]
+  M --> D
+  N --> B[(Filesystem or S3 objects)]
+  M --> B
+  N -.->|Configured HTTPS origins| U[nuget.org and npmjs.org]
 ```
 
 NuGet and npm keep their **own native protocols** while sharing the catalog and storage. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
@@ -92,11 +94,11 @@ NuGet and npm keep their **own native protocols** while sharing the catalog and 
 
 - NuGet and npm support useful registry flows, but **not full protocol parity**. Verify your exact client/version/workflow before relying on Packory.
 - Search covers locally indexed artifacts. Fresh upstream metadata and uncached downloads may require connectivity.
-- Static tokens are not individual user accounts. **OIDC/SSO, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The existing admin-only log records **successful hosted publishes**, not every action or denied attempt.
+- Static tokens are not individual user accounts. **OIDC JWT validation is implemented but browser SSO/BFF, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The existing admin-only log records **successful hosted publishes**, not every action or denied attempt.
 - Reserved NuGet ID prefixes and npm scopes can prevent configured private namespaces from falling back to public upstreams. This is **not** a comprehensive package-policy or malware-scanning solution. Signature enforcement, cache eviction and automatic license compliance are also absent.
-- **Cargo, PyPI, OCI, PostgreSQL, S3 and distributed services are planned, not implemented.**
+- **Cargo, PyPI and OCI hosted adapters are implemented experimentally.** PostgreSQL and S3 are selectable backends, but automatic SQLite/filesystem migration, distributed metadata/blob transactions and multi-node services are **not** implemented.
 
-Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **SQLite and blobs together**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
+Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **the selected metadata database and artifact storage consistently**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
 
 ## Build and test
 
