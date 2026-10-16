@@ -7,6 +7,9 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    void CreateManagedToken(ManagedTokenRecord token);
+    ManagedTokenRecord? FindManagedToken(string sha256);
+    bool RevokeManagedToken(string id);
     bool IsHealthy();
     void UpsertPackage(string kind, string name, string version, string description, string origin);
     bool PublishNuget(string name, string version, string description, string actor);
