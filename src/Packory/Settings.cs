@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Npgsql;
 
 namespace Packory;
 
@@ -27,6 +28,8 @@ public sealed class Settings
     public bool AnonymousRead { get; set; } = true;
     // Explicit offline maintenance for controlled PostgreSQL/S3 quarantine operations.
     public bool RecoveryMaintenance { get; set; }
+    // Opt-in deployment security checks only. Passing is not production certification.
+    public bool StrictDeployment { get; set; }
     // Opt-in Docker authentication handshake even when generic anonymous reads are enabled.
     public bool OciAuthenticatedPing { get; set; }
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
@@ -127,6 +130,28 @@ public sealed class Settings
         if (MaxBlobStorageBytes < 0 || MaxBlobStorageBytes > 1_099_511_627_776L ||
             (MaxBlobStorageBytes != 0 && BlobProvider != "filesystem"))
             throw new InvalidOperationException("Filesystem blob quota must be 0..1 TiB and requires filesystem provider.");
+        if (StrictDeployment)
+        {
+            if (MetadataProvider != "postgresql" || BlobProvider != "s3")
+                throw new InvalidOperationException("StrictDeployment requires PostgreSQL metadata and S3 object storage.");
+            if (!Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out var publicUri) ||
+                publicUri.Scheme != "https" || publicUri.IsLoopback)
+                throw new InvalidOperationException("StrictDeployment requires an externally reachable HTTPS public origin.");
+            if (AnonymousRead)
+                throw new InvalidOperationException("StrictDeployment requires authenticated package reads.");
+            if (string.IsNullOrWhiteSpace(AdminToken) && !OidcEnabled)
+                throw new InvalidOperationException("StrictDeployment requires an administrator or validated OIDC resource-server.");
+            if (S3AllowLoopbackHttp)
+                throw new InvalidOperationException("StrictDeployment prohibits insecure S3 emulator fallback.");
+            NpgsqlConnectionStringBuilder postgres;
+            try { postgres = new NpgsqlConnectionStringBuilder(PostgresConnectionString); }
+            catch (ArgumentException)
+            {
+                throw new InvalidOperationException("StrictDeployment requires a valid PostgreSQL connection string.");
+            }
+            if (postgres.SslMode != SslMode.VerifyFull || postgres.TrustServerCertificate)
+                throw new InvalidOperationException("StrictDeployment requires PostgreSQL SSL Mode=VerifyFull and a trusted hostname-checked certificate.");
+        }
         if (PublishRequestsPerMinute is < 1 or > 10000)
             throw new InvalidOperationException("PublishRequestsPerMinute must be between 1 and 10000.");
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)
