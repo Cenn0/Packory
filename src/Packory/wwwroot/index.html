@@ -11,22 +11,25 @@
   <script defer src="/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="brand"><img class="logo" src="/brand/packory.svg" width="40" height="40" alt="" aria-hidden="true"><span class="brand-lockup"><strong>Packory</strong><small>One hub. Endless possibilities.</small></span></div><span class="tag">Self-hosted registry hub · MVP</span></header>
+  <header class="topbar"><div class="brand"><img class="logo" src="/brand/packory.svg" width="40" height="40" alt="" aria-hidden="true"><span class="brand-lockup"><strong>Packory</strong><small>One hub. Endless possibilities.</small></span></div><span class="tag">Experimental · Single-writer reference</span></header>
   <main>
-    <section class="hero"><p class="eyebrow">ONE PLACE FOR YOUR ARTIFACTS</p><h1>Your packages. <em>One catalog.</em></h1><p class="lead">NuGet, npm, and agent skills in a unified view — with local caches and native client endpoints.</p></section>
+    <section class="hero"><p class="eyebrow">ONE PLACE FOR YOUR ARTIFACTS</p><h1>Your packages. <em>One catalog.</em></h1><p class="lead">NuGet, npm, Cargo, PyPI, OCI and agent skills in one indexed catalog. Individual adapters remain experimental; see the published support matrix.</p></section>
     <section class="stats" aria-label="Registry endpoints">
       <div class="stat"><div class="stat-icon">N</div><div><strong>NuGet</strong><span><code>/nuget/v3/index.json</code></span></div></div>
       <div class="stat"><div class="stat-icon npm">npm</div><div><strong>npm</strong><span><code>/npm/</code></span></div></div>
+      <div class="stat"><div class="stat-icon cargo">C</div><div><strong>Cargo (hosted)</strong><span><code>/cargo/index/</code></span></div></div>
+      <div class="stat"><div class="stat-icon pypi">Py</div><div><strong>PyPI (hosted)</strong><span><code>/pypi/simple/</code></span></div></div>
+      <div class="stat"><div class="stat-icon oci">O</div><div><strong>OCI (hosted)</strong><span><code>/v2/</code></span></div></div>
       <div class="stat"><div class="stat-icon skills">✦</div><div><strong>Agent skills</strong><span><code>/api/skills</code></span></div></div>
     </section>
     <section class="workspace">
       <div class="section-head"><div><p class="eyebrow">DISCOVER</p><h2>Unified catalog</h2></div><div class="auth"><label for="token">API token <span>(kept in memory only)</span></label><input id="token" type="password" autocomplete="off" placeholder="Only if required"></div></div>
-      <div class="filters"><label class="search"><span class="visually-hidden">Search catalog</span><input id="search" type="search" placeholder="Search cached and hosted packages…"></label><label><span class="visually-hidden">Ecosystem</span><select id="kind"><option value="">All ecosystems</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="skill">Skills</option></select></label><button type="button" id="refresh">Refresh</button></div>
+      <div class="filters"><label class="search"><span class="visually-hidden">Search catalog</span><input id="search" type="search" placeholder="Search cached and hosted packages…"></label><label><span class="visually-hidden">Ecosystem</span><select id="kind"><option value="">All ecosystems</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="cargo">Cargo</option><option value="pypi">PyPI</option><option value="oci">OCI</option><option value="skill">Skills</option></select></label><button type="button" id="refresh">Refresh</button></div>
       <div id="feedback" class="feedback" role="status" aria-live="polite">Loading catalog…</div>
       <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
     </section>
     <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
-    <footer>Packory MVP · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · Apache-2.0</footer>
+    <footer>Packory experimental · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · <a href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" rel="noopener noreferrer">Support matrix</a> · Apache-2.0</footer>
   </main>
 </body>
 </html>
