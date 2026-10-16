@@ -102,6 +102,7 @@ public static class PyPiEndpoints
                 !(filename.StartsWith(name + "-", StringComparison.OrdinalIgnoreCase) ||
                   filename.StartsWith(name.Replace('-', '_') + "-", StringComparison.OrdinalIgnoreCase)))
                 return Results.BadRequest(new { error = "Invalid or mismatched distribution filename" });
+            if (Access.RequireNamespace(ctx, cfg, "pypi", name) is { } forbidden) return forbidden;
             if (file.Length > cfg.MaxArtifactBytes) return Results.StatusCode(413);
             await using var input = file.OpenReadStream();
             var bytes = await BlobStore.ReadBoundedAsync(input, cfg.MaxArtifactBytes, ctx.RequestAborted);
