@@ -141,6 +141,7 @@ public static class NuGetEndpoints
             { return Results.BadRequest(new { error = "Invalid nupkg or nuspec" }); }
             var id = spec.Id.ToLowerInvariant(); var version = spec.Version.ToLowerInvariant();
             if (settings.DeniesNuget(id)) return Results.StatusCode(403);
+            if (Access.RequireNamespace(ctx, settings, "nuget", id) is { } forbidden) return forbidden;
             var key = NugetKey(id, version);
             using var gate = await locks.AcquireAsync("nuget", id, version, ctx.RequestAborted);
             if (db.HasPackage("nuget", id, version) || blobs.Existing(key) is not null)
