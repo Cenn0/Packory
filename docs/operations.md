@@ -124,6 +124,26 @@ Set `PACKORY_METADATA_PROVIDER=postgresql` and provide `PACKORY_POSTGRES_CONNECT
 
 For optional S3-compatible artifact storage configure `PACKORY_BLOB_PROVIDER=s3` and review the [S3 operations and limitations](s3.md). AWS SDK conditional immutable writes and a local read-through materialization cache are used. This remains a **single-node design**, and switching to S3 does not automatically migrate or garbage-collect old filesystem blobs. Use remote encrypted transport, minimum-privilege IAM/bucket permissions and consistent backups.
 
+### Revocable time-limited API credentials
+
+Administrators can provision database-backed scoped credentials through
+`POST /api/admin/tokens`, supplying JSON
+`{"role":"write","namespace":"nuget:internal.*","expiresInHours":24}` or
+`{"role":"read","namespace":null,"expiresInHours":24}`.
+Valid lifetime: 1–2160 hours. The response returns an unpredictable 32-byte
+hexadecimal token **once** with `Cache-Control: no-store` and a random token ID.
+Only SHA-256 of the token is persisted in the selected metadata database.
+Use `DELETE /api/admin/tokens/{id}` to revoke it without restarting Packory.
+A managed write token is **always namespace-scoped**; managed read tokens cannot
+publish. Create/revoke operations append metadata-only admin audit entries
+without storing the secret. Keep the token response out of terminal transcripts,
+logs, issue reports and public repository history.
+
+This is a basic lifecycle, not OAuth refresh-token management, personal user
+accounts, PKI provenance, an immutable audit log or a multi-node credential
+cache. Static environment credentials remain accepted until independently rotated.
+For public deployments, put TLS and request rate limits at the edge.
+
 ### Scoped publishing (single-node configuration policy)
 
 Set `PACKORY_WRITE_NAMESPACES` to restrict the **shared** write token to explicit
