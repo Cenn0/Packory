@@ -2,10 +2,11 @@
 
 **Language:** **English** · [Deutsch](README.de.md)
 
+[![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 **A self-hosted hub for NuGet, npm and versioned AI agent skills.**
 
-[![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
-[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current **MVP** is an **ASP.NET Core / .NET 10 modular monolith**, using SQLite and local file storage. No separate database, broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
 
