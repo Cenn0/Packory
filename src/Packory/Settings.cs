@@ -8,6 +8,8 @@ public sealed class Settings
 {
     public string DataDirectory { get; set; } = "./data";
     public string MetadataProvider { get; set; } = "sqlite";
+    // writer (exclusive) or reader (no mutation, no registry mirror caching).
+    public string InstanceRole { get; set; } = "writer";
     public string BlobProvider { get; set; } = "filesystem";
     public string? S3Endpoint { get; set; }
     public string? S3Bucket { get; set; }
@@ -94,6 +96,11 @@ public sealed class Settings
         }
         if (MetadataProvider is not ("sqlite" or "postgresql"))
             throw new InvalidOperationException("MetadataProvider must be sqlite or postgresql.");
+        if (InstanceRole is not ("writer" or "reader"))
+            throw new InvalidOperationException("InstanceRole must be writer or reader.");
+        if (InstanceRole == "reader" &&
+            (MetadataProvider != "postgresql" || BlobProvider != "s3" || RecoveryMaintenance))
+            throw new InvalidOperationException("Read-only replicas require PostgreSQL/S3 and no maintenance mode.");
         if (RecoveryMaintenance && (MetadataProvider != "postgresql" || BlobProvider != "s3"))
             throw new InvalidOperationException("Recovery maintenance requires PostgreSQL metadata and S3 blobs.");
         if (MetadataProvider == "postgresql" && string.IsNullOrWhiteSpace(PostgresConnectionString))
