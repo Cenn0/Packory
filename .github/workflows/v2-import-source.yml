@@ -1,0 +1,83 @@
+name: Import verified V2 source snapshot
+on:
+  push:
+    branches: [feat/v2-architecture]
+    paths: [.packory-v2-transfer/READY]
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feat/v2-architecture
+          persist-credentials: false
+      - name: Decode and verify reviewed source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib
+          root=pathlib.Path.cwd(); transport=root/'.packory-v2-transfer'
+          packed=base64.b64decode(''.join(p.read_text() for p in sorted(transport.glob('*.b64'))),validate=True)
+          expected=transport.joinpath('READY').read_text().strip()
+          assert expected=='ca9a33e1f7992343c9514990df6972b4066dff12b30b0b76bf5211cc6b0e1768'
+          assert hashlib.sha256(packed).hexdigest()==expected
+          snapshot=json.loads(lzma.decompress(packed,memlimit=268435456))
+          def target(name):
+              path=pathlib.PurePosixPath(name)
+              assert not path.is_absolute() and not any(p in ('..','.git','.github','.packory-v2-transfer') for p in path.parts)
+              return root/name
+          for name in snapshot['remove']:
+              p=target(name)
+              if p.is_file():p.unlink()
+          for name,content in snapshot['files'].items():
+              p=target(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content,encoding='utf-8')
+          transport.joinpath('expected.json').write_text(json.dumps(snapshot['expected']))
+          print('Verified source files:',len(snapshot['files']))
+          PY
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.21.0'
+      - name: Materialize byte-pinned upstream contracts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,json,hashlib,urllib.request
+          root=pathlib.Path('src/Packory/Contracts')
+          for name,record in json.loads((root/'contracts.lock.json').read_text()).items():
+              assert pathlib.Path(name).name==name
+              with urllib.request.urlopen(record['source'],timeout=60) as response:data=response.read(2097153)
+              assert len(data)<=2097152 and hashlib.sha256(data).hexdigest()==record['sha256'],name
+              (root/name).write_bytes(data)
+          PY
+      - name: Restore reviewed dependencies for exact notice reconstruction
+        run: |
+          dotnet restore Packory.slnx --locked-mode -p:NuGetAudit=false
+          npm --prefix web ci --ignore-scripts --no-fund
+          python3 scripts/generate-notices.py
+          python3 scripts/check-dependencies.py
+          python3 scripts/verify-contracts.py
+      - name: Verify complete snapshot and commit on feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,hashlib,json,shutil
+          for name,digest in json.loads(pathlib.Path('.packory-v2-transfer/expected.json').read_text()).items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==digest,name
+          shutil.rmtree('.packory-v2-transfer')
+          PY
+          python3 scripts/check-public-hygiene.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- . ':!.github'
+          git commit -m 'feat: implement V2 standalone architecture and acceptance suites'
+          HEADER=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $HEADER" push origin HEAD:refs/heads/feat/v2-architecture
