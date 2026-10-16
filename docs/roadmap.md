@@ -77,6 +77,13 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [x] Limited PostgreSQL/S3 multi-instance read topology: one leased writer, extra strictly read-only replicas, fail-closed NuGet/npm paths, with two-node integration verification.
 - [ ] Before active-active deployment: distributed metadata/blob coordination, owner fencing, OCI upload-session durability, cache consistency, SLOs, security tests and operator runbooks. This implementation is intentionally **not** an active-active release.
 
+### Strict deployment baseline (not production certification)
+
+- [x] Opt-in strict configuration gate for HTTPS public origin, private reads, validated PostgreSQL TLS and S3.
+- [x] Stale publication intent detection in readiness and admin-only aggregate operational status.
+- [ ] Production release gate: full external S3 conformance, PostgreSQL/S3 coordinated backups and recovery restore drill, load tests, ingress and network policy review, malware/provenance scanning, actionable SLOs and incident runbooks.
+- [ ] Active-active registry publishing is not implemented. Read-only replicas do not imply distributed write safety.
+
 ## Milestone 4 — Scale only when justified
 
 - [ ] Background sync/GC workers, queue/outbox if throughput measurements require them
