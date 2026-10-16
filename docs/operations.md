@@ -29,6 +29,7 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_DENIED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes blocked for both read and publish |
 | `PACKORY_OIDC_AUTHORITY` | *(unset)* | HTTPS authority / issuer URL for optional JWT validation |
 | `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
+| `PACKORY_MAX_BLOB_STORAGE_BYTES` | `0` (unlimited) | Optional single-process filesystem blob capacity; writes fail HTTP 507 if exceeded. Not a S3 quota. |
 | `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` | `60` | Maximum attempts per minute in each credential-role partition (admin, write, read, unauthenticated). Range 1–10000; 429 when exceeded |
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
 | `PACKORY_READ_TOKEN` | *(unset)* | Optional read-only credential |
@@ -69,6 +70,21 @@ Stop Packory before a simple file-level backup of `/data` in the default SQLite/
 ### Real native-client smoke tests
 
 After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` to exercise hosted publishing and downloads with real .NET/npm clients. It starts a loopback-only server on port 18080 using a newly generated short-lived token and temporary data directory, then performs a hosted NuGet package publish/restore and a scoped npm package publish/install/`npm ci`. This test requires `dotnet` 10, Node.js/npm, Bash, curl and OpenSSL. It fails if port 18080 is already occupied. `bash scripts/smoke-ecosystems.sh` additionally checks a real hosted Cargo alternate-registry publish/consume and a transitive pip install on loopback port 18081; it requires Cargo, Python/pip and the same built server. All temporary data and credentials are removed on exit. CI runs it on every PR; the separate scheduled `smoke-live.yml` checks public upstream mirroring and may need external connectivity. Passing the hosted smoke does not establish full NuGet/npm protocol conformance, especially multi-version publishing or transitive dependency resolution.
+
+### Capacity and safe cache eviction
+
+`PACKORY_MAX_BLOB_STORAGE_BYTES` sets an opt-in total limit for files under the
+local blob root; when reached, new writes fail HTTP 507 **before publication**.
+The accounting is serialized inside a single Packory process; multiple processes,
+external writers and S3 object stores are outside this guarantee. Bound the HTTP
+upload limit independently; temporary in-flight files still consume disk space.
+
+Administrators may invoke `POST /api/admin/cache/mutable/evict` with their token
+to drop only re-fetchable **npm packument** and **NuGet registration** cache files.
+Hosted package bytes, OCI blobs/manifests and other immutable artifacts are never
+deleted by this endpoint. Cache eviction requires the filesystem backend and
+network connectivity for subsequent upstream metadata requests. It is a
+**manual** operation, not time-based eviction or a distributed GC.
 
 ### Known failure modes
 
