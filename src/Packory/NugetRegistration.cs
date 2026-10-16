@@ -5,7 +5,7 @@ namespace Packory;
 
 public static class NugetRegistration
 {
-    public static async Task<JsonObject?> GetIndex(string id, Settings settings, Database db,
+    public static async Task<JsonObject?> GetIndex(string id, Settings settings, IPackageDatabase db,
         BlobStore blobs, HttpClient client, CancellationToken ct)
     {
         var remote = settings.IsReservedNuget(id)
@@ -35,7 +35,7 @@ public static class NugetRegistration
         return result;
     }
 
-    public static async Task<JsonObject?> GetResource(string id, string suffix, Settings settings, Database db,
+    public static async Task<JsonObject?> GetResource(string id, string suffix, Settings settings, IPackageDatabase db,
         BlobStore blobs, HttpClient client, CancellationToken ct)
     {
         if (suffix.Length > 256 || suffix.StartsWith('/') || suffix.Contains('\\') ||

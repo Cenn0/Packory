@@ -7,7 +7,7 @@ public sealed record RecoveryReport(int QuarantinedOrphans, int MissingHostedArt
 /// and committing its database reference may leave an orphan. Move it aside rather
 /// than accidentally serving it or silently deleting user data.
 /// </summary>
-public sealed class ArtifactRecovery(Settings settings, Database database, BlobStore blobs, ILogger<ArtifactRecovery> logger)
+public sealed class ArtifactRecovery(Settings settings, IPackageDatabase database, BlobStore blobs, ILogger<ArtifactRecovery> logger)
 {
     public int MissingHostedCount()
     {

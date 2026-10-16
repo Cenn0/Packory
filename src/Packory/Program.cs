@@ -20,6 +20,8 @@ settings.AdminToken = TokenFromEnv("PACKORY_ADMIN_TOKEN") ?? settings.AdminToken
 settings.ReadToken = TokenFromEnv("PACKORY_READ_TOKEN") ?? settings.ReadToken;
 settings.WriteToken = TokenFromEnv("PACKORY_WRITE_TOKEN") ?? settings.WriteToken;
 settings.DataDirectory = Environment.GetEnvironmentVariable("PACKORY_DATA_DIRECTORY") ?? settings.DataDirectory;
+settings.MetadataProvider = Environment.GetEnvironmentVariable("PACKORY_METADATA_PROVIDER") ?? settings.MetadataProvider;
+settings.PostgresConnectionString = Environment.GetEnvironmentVariable("PACKORY_POSTGRES_CONNECTION_STRING") ?? settings.PostgresConnectionString;
 settings.PublicBaseUrl = Environment.GetEnvironmentVariable("PACKORY_PUBLIC_BASE_URL") ?? settings.PublicBaseUrl;
 settings.NugetUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NUGET_UPSTREAM_URL") ?? settings.NugetUpstreamUrl;
 settings.NpmUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NPM_UPSTREAM_URL") ?? settings.NpmUpstreamUrl;
@@ -66,7 +68,8 @@ if (settings.OidcEnabled)
         });
 }
 builder.Services.AddSingleton(settings);
-builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<IPackageDatabase>(_ =>
+    settings.MetadataProvider == "postgresql" ? new PostgresDatabase(settings) : new Database(settings));
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
@@ -99,7 +102,7 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
     });
 
 var app = builder.Build();
-app.Services.GetRequiredService<Database>().Initialize();
+app.Services.GetRequiredService<IPackageDatabase>().Initialize();
 app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 app.UseRouting();
 if (settings.OidcEnabled) app.UseAuthentication();
@@ -120,22 +123,22 @@ app.Use(async (ctx, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-app.MapGet("/health/ready", (Database db, ArtifactRecovery recovery) =>
+app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
-    using var connection = db.Open();
+    db.IsHealthy();
     var missing = recovery.MissingHostedCount();
     return missing > 0
         ? Results.Json(new { status = "degraded", missingHostedArtifacts = missing },
             statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { status = "ready" });
 });
-app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, Database db, HttpContext ctx) =>
+app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
     if (Access.Require(ctx, cfg) is { } denied) return denied;
     if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return Results.BadRequest(new { error = "Unknown package kind" });
     return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50) });
 });
-app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, Database db, HttpContext ctx) =>
+app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
     if (before <= 0) return Results.BadRequest(new { error = "before must be positive" });

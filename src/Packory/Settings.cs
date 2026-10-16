@@ -7,6 +7,8 @@ namespace Packory;
 public sealed class Settings
 {
     public string DataDirectory { get; set; } = "./data";
+    public string MetadataProvider { get; set; } = "sqlite";
+    public string? PostgresConnectionString { get; set; }
     public string PublicBaseUrl { get; set; } = "http://localhost:8080";
     public string NugetUpstreamUrl { get; set; } = "https://api.nuget.org/v3-flatcontainer/";
     public string NpmUpstreamUrl { get; set; } = "https://registry.npmjs.org/";
@@ -42,6 +44,10 @@ public sealed class Settings
 
     public void Validate()
     {
+        if (MetadataProvider is not ("sqlite" or "postgresql"))
+            throw new InvalidOperationException("MetadataProvider must be sqlite or postgresql.");
+        if (MetadataProvider == "postgresql" && string.IsNullOrWhiteSpace(PostgresConnectionString))
+            throw new InvalidOperationException("PostgreSQL connection string is required.");
         if (!Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out var origin) ||
             origin.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(origin.UserInfo) ||
             origin.AbsolutePath.Trim('/') != "" || !string.IsNullOrEmpty(origin.Query) || !string.IsNullOrEmpty(origin.Fragment))

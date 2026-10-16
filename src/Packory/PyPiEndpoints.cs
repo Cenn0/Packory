@@ -28,7 +28,7 @@ public static class PyPiEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/pypi/simple/", (Settings cfg, Database db, HttpContext ctx) =>
+        app.MapGet("/pypi/simple/", (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             var names = db.PyProjects();
@@ -44,7 +44,7 @@ public static class PyPiEndpoints
             return Results.Text(html, "application/vnd.pypi.simple.v1+html");
         });
 
-        app.MapGet("/pypi/simple/{name}/", (string name, Settings cfg, Database db, HttpContext ctx) =>
+        app.MapGet("/pypi/simple/{name}/", (string name, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             var normalized = Normalize(name);
@@ -73,7 +73,7 @@ public static class PyPiEndpoints
         });
 
         app.MapGet("/pypi/files/{name}/{filename}", (string name, string filename,
-            Settings cfg, Database db, BlobStore blobs, HttpContext ctx) =>
+            Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             var normalized = Normalize(name);
@@ -86,7 +86,7 @@ public static class PyPiEndpoints
             return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
 
-        app.MapPost("/pypi/legacy/", async (Settings cfg, Database db, BlobStore blobs,
+        app.MapPost("/pypi/legacy/", async (Settings cfg, IPackageDatabase db, BlobStore blobs,
             ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg, write: true) is { } denied) return denied;

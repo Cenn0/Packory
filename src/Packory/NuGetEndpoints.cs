@@ -28,7 +28,7 @@ public static class NuGetEndpoints
             });
         });
 
-        app.MapGet("/nuget/v3/flatcontainer/{id}/index.json", async (string id, Settings settings, Database db, IHttpClientFactory clients, HttpContext ctx) =>
+        app.MapGet("/nuget/v3/flatcontainer/{id}/index.json", async (string id, Settings settings, IPackageDatabase db, IHttpClientFactory clients, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant();
@@ -59,7 +59,7 @@ public static class NuGetEndpoints
         });
 
         app.MapGet("/nuget/v3/flatcontainer/{id}/{version}/{file}", async (
-            string id, string version, string file, Settings settings, Database db, BlobStore blobs,
+            string id, string version, string file, Settings settings, IPackageDatabase db, BlobStore blobs,
             IHttpClientFactory clients, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
@@ -85,7 +85,7 @@ public static class NuGetEndpoints
             return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
 
-        app.MapGet("/nuget/v3/registration/{id}/index.json", async (string id, Settings settings, Database db,
+        app.MapGet("/nuget/v3/registration/{id}/index.json", async (string id, Settings settings, IPackageDatabase db,
             BlobStore blobs, IHttpClientFactory clients, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
@@ -97,7 +97,7 @@ public static class NuGetEndpoints
         });
 
         app.MapGet("/nuget/v3/registration/{id}/{**suffix}", async (string id, string? suffix, Settings settings,
-            Database db, BlobStore blobs, IHttpClientFactory clients, HttpContext ctx) =>
+            IPackageDatabase db, BlobStore blobs, IHttpClientFactory clients, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Nuget(id) || string.IsNullOrEmpty(suffix)) return Results.BadRequest();
@@ -107,7 +107,7 @@ public static class NuGetEndpoints
             return resource is null ? Results.NotFound() : Results.Json(resource);
         });
 
-        app.MapGet("/nuget/v3/search", (string? q, int? skip, int? take, Settings settings, Database db, HttpContext ctx) =>
+        app.MapGet("/nuget/v3/search", (string? q, int? skip, int? take, Settings settings, IPackageDatabase db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             var matching = db.Search(q ?? "", "nuget", 100).Where(x => !settings.DeniesNuget(x.Name)).ToList();
@@ -121,7 +121,7 @@ public static class NuGetEndpoints
             return Results.Json(new { totalHits = matching.Select(x => x.Name).Distinct().Count(), data = records });
         });
 
-        app.MapMethods("/nuget/v3/push", ["PUT", "POST"], async (Settings settings, Database db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
+        app.MapMethods("/nuget/v3/push", ["PUT", "POST"], async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart NuGet push" });
@@ -154,7 +154,7 @@ public static class NuGetEndpoints
 
     public static string NugetKey(string id, string version) => $"nuget/{id}/{version}/{id}.{version}.nupkg";
 
-    public static async Task<string?> EnsureNuget(string id, string version, Settings settings, Database db,
+    public static async Task<string?> EnsureNuget(string id, string version, Settings settings, IPackageDatabase db,
         BlobStore blobs, HttpClient http, ArtifactLocks locks, CancellationToken ct)
     {
         using var gate = await locks.AcquireAsync("nuget", id, version, ct);

@@ -48,7 +48,7 @@ public static class OciEndpoints
         });
 
         app.MapMethods("/v2/{**resource}", ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"],
-            async (string? resource, Settings cfg, Database db, BlobStore blobs,
+            async (string? resource, Settings cfg, IPackageDatabase db, BlobStore blobs,
                 OciUploadStore uploads, ArtifactLocks locks, HttpContext ctx) =>
         {
             ctx.Response.Headers["Docker-Distribution-API-Version"] = "registry/2.0";
@@ -147,7 +147,7 @@ public static class OciEndpoints
         });
     }
 
-    private static async Task<IResult> Upload(HttpContext ctx, Settings cfg, Database db,
+    private static async Task<IResult> Upload(HttpContext ctx, Settings cfg, IPackageDatabase db,
         BlobStore blobs, OciUploadStore sessions, string repository, string id)
     {
         var method = ctx.Request.Method;
@@ -204,7 +204,7 @@ public static class OciEndpoints
         finally { session.Gate.Release(); }
     }
 
-    private static async Task<IResult> Complete(HttpContext ctx, Settings cfg, Database db, BlobStore blobs,
+    private static async Task<IResult> Complete(HttpContext ctx, Settings cfg, IPackageDatabase db, BlobStore blobs,
         OciUploadStore sessions, OciUploadStore.Ticket session, string id, string repository, string digest)
     {
         await session.Gate.WaitAsync(ctx.RequestAborted);
@@ -255,7 +255,7 @@ public static class OciEndpoints
         ctx.Response.Headers.Range = "0-" + Math.Max(0, offset - 1);
     }
 
-    private static async Task<IResult> PutManifest(HttpContext ctx, Settings cfg, Database db,
+    private static async Task<IResult> PutManifest(HttpContext ctx, Settings cfg, IPackageDatabase db,
         BlobStore blobs, ArtifactLocks locks, string repository, string reference)
     {
         var media = ctx.Request.ContentType?.Split(';', 2)[0].Trim() ?? "";
@@ -305,7 +305,7 @@ public static class OciEndpoints
         }
     }
 
-    private static bool ValidateDescriptors(JsonElement root, string repository, Database db)
+    private static bool ValidateDescriptors(JsonElement root, string repository, IPackageDatabase db)
     {
         foreach (var property in new[] { "config", "layers", "blobs", "manifests" })
         {
