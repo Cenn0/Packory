@@ -72,6 +72,13 @@ cat >"$WORK/rust-consumer/src/main.rs" <<'RUST'
 fn main() { assert_eq!(packory_smoke_lib::answer(), 42); }
 RUST
 (cd "$WORK/rust-consumer" && cargo run --quiet)
+# Native Cargo yank and unyank must update the sparse-index flag in place.
+(cd "$WORK/rust-package" && cargo yank --vers 1.0.0 --registry packory packory-smoke-lib)
+curl --fail --silent --show-error "$BASE/cargo/index/pa/ck/packory-smoke-lib" | python3 -c \
+  'import json,sys; assert json.loads(sys.stdin.readline())["yanked"] is True'
+(cd "$WORK/rust-package" && cargo yank --vers 1.0.0 --registry packory --undo packory-smoke-lib)
+curl --fail --silent --show-error "$BASE/cargo/index/pa/ck/packory-smoke-lib" | python3 -c \
+  'import json,sys; assert json.loads(sys.stdin.readline())["yanked"] is False'
 
 # Build two standards-compliant pure-Python wheels using only the Python stdlib.
 # The top-level wheel declares a transitive dependency hosted by Packory.

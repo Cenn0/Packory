@@ -445,6 +445,27 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return items;
     }
 
+    /// <summary>Change only the yanked flag under a row lock, with transactional audit.</summary>
+    public bool SetCargoYanked(string name, string version, bool yanked, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var find = Command(db, """
+            SELECT json FROM cargo_versions WHERE name=@name AND version=@version FOR UPDATE
+            """, tx, ("name", name), ("version", version));
+        if (find.ExecuteScalar() is not string raw) return false;
+        var index = System.Text.Json.Nodes.JsonNode.Parse(raw) as System.Text.Json.Nodes.JsonObject
+            ?? throw new InvalidDataException("Invalid stored Cargo index metadata");
+        index["yanked"] = yanked;
+        using var update = Command(db, """
+            UPDATE cargo_versions SET json=@json WHERE name=@name AND version=@version
+            """, tx, ("json", index.ToJsonString()), ("name", name), ("version", version));
+        if (update.ExecuteNonQuery() != 1) throw new InvalidOperationException("Cargo index update lost its metadata row");
+        Audit(db, tx, yanked ? "yank" : "unyank", "cargo", name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public bool PublishCargo(string name, string version, string json, string description, string actor)
     {
         using var db = Open();
