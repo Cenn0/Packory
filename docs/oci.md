@@ -31,7 +31,20 @@ that can configure Basic credentials; TLS is mandatory outside loopback.
 Packory does **not** currently expose the Docker Bearer-token challenge/grant
 endpoint or per-repository token scopes. A native Docker CLI smoke test now exercises a local scratch image build, Basic-authenticated login, push, tag discovery and pull. This is **one tested Docker flow**, not a Docker/Helm/ORAS compatibility matrix or production certification.
 
-### Native client acceptance\n\nAfter a Release build, run `bash scripts/smoke-oci-docker.sh` with Docker Engine, Bash, .NET 10, Python 3, curl and OpenSSL. The script uses loopback port 18082, a temporary Docker credential directory and a `FROM scratch` image; it does not pull a public base image. It verifies a real `docker push`, the Packory tag-list API and a subsequent `docker pull`. On CI this shares the Linux job with the other hosted registry smoke tests. The test sets `PACKORY_ANONYMOUS_READ=false` so Docker receives a Basic challenge during registry negotiation. With anonymous reads enabled, the Docker push path has not passed this native-client test (Docker did not retry the later 401). Do not claim anonymous-read/native-Docker-push interoperability until that flow has separate passing evidence. A successful run also does not establish offline layer-cache independence, multi-architecture support, signature compatibility, resumable uploads or comprehensive OCI conformance.\n\n### Operational limits
+### Native client acceptance\n\nAfter a Release build, run `bash scripts/smoke-oci-docker.sh` with Docker Engine, Bash, .NET 10, Python 3, curl and OpenSSL. The script uses loopback port 18082, a temporary Docker credential directory and a `FROM scratch` image; it does not pull a public base image. It verifies a real `docker push`, the Packory tag-list API and a subsequent `docker pull`. On CI this shares the Linux job with the other hosted registry smoke tests. The test sets `PACKORY_ANONYMOUS_READ=false` so Docker receives a Basic challenge during registry negotiation. With anonymous reads enabled, the Docker push path has not passed this native-client test (Docker did not retry the later 401). Do not claim anonymous-read/native-Docker-push interoperability until that flow has separate passing evidence. A successful run also does not establish offline layer-cache independence, multi-architecture support, signature compatibility, resumable uploads or comprehensive OCI conformance.\n\n### Docker authentication negotiation with anonymous generic reads
+
+Opt-in `PACKORY_OCI_AUTHENTICATED_PING=true` makes `GET /v2/` require a
+writer/admin credential **even if** `PACKORY_ANONYMOUS_READ=true`. This causes
+Docker to receive a Basic challenge during registry negotiation and proactively
+authenticate future push requests. Native CI runs a second real Docker push/pull
+scenario with that combination. **Tradeoff:** anonymous Docker clients cannot
+complete the registry ping; other Packory APIs still honor anonymous reads.
+Leave this flag disabled if public anonymous Docker pull must work, and configure
+a private Docker registry instead until a separate, compliant Bearer-token
+service supports different pull/push scopes. No OCI Bearer token service,
+repository-scoped OAuth grant exchange or vendor conformance is claimed.
+
+### Operational limits
 
 Blob upload sessions are bounded to `PACKORY_MAX_ARTIFACT_BYTES` (default
 100 MiB); an active upload expires after 30 minutes and is removed when
