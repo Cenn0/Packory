@@ -8,6 +8,15 @@ public sealed class Settings
 {
     public string DataDirectory { get; set; } = "./data";
     public string MetadataProvider { get; set; } = "sqlite";
+    public string BlobProvider { get; set; } = "filesystem";
+    public string? S3Endpoint { get; set; }
+    public string? S3Bucket { get; set; }
+    public string S3Region { get; set; } = "us-east-1";
+    public string S3KeyPrefix { get; set; } = "packory";
+    public string? S3AccessKey { get; set; }
+    public string? S3SecretKey { get; set; }
+    // HTTP is deliberately restricted to loopback integration testing.
+    public bool S3AllowLoopbackHttp { get; set; }
     public string? PostgresConnectionString { get; set; }
     public string PublicBaseUrl { get; set; } = "http://localhost:8080";
     public string NugetUpstreamUrl { get; set; } = "https://api.nuget.org/v3-flatcontainer/";
@@ -44,6 +53,31 @@ public sealed class Settings
 
     public void Validate()
     {
+        if (BlobProvider is not ("filesystem" or "s3"))
+            throw new InvalidOperationException("BlobProvider must be filesystem or s3.");
+        if (BlobProvider == "s3")
+        {
+            if (string.IsNullOrWhiteSpace(S3Bucket) || S3Bucket.Length is < 3 or > 63 ||
+                !Regex.IsMatch(S3Bucket, "^[a-z0-9][a-z0-9.-]*[a-z0-9]$", RegexOptions.CultureInvariant) ||
+                S3Bucket.Contains("..", StringComparison.Ordinal))
+                throw new InvalidOperationException("S3 requires a valid bucket name.");
+            if (string.IsNullOrWhiteSpace(S3Region) || S3Region.Length > 64 ||
+                !Regex.IsMatch(S3Region, "^[a-z0-9-]+$", RegexOptions.CultureInvariant) ||
+                S3KeyPrefix.Length is < 1 or > 100 ||
+                !Regex.IsMatch(S3KeyPrefix, "^[a-z0-9][a-z0-9/_-]*$", RegexOptions.CultureInvariant) ||
+                S3KeyPrefix.Split('/').Any(x => x.Length == 0))
+                throw new InvalidOperationException("S3 region or key prefix is invalid.");
+            if (string.IsNullOrWhiteSpace(S3AccessKey) != string.IsNullOrWhiteSpace(S3SecretKey))
+                throw new InvalidOperationException("S3 static credentials must be set together.");
+            if (S3Endpoint is not null)
+            {
+                if (!Uri.TryCreate(S3Endpoint, UriKind.Absolute, out var endpoint) ||
+                    (endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && endpoint.IsLoopback && S3AllowLoopbackHttp)) ||
+                    !string.IsNullOrEmpty(endpoint.UserInfo) || endpoint.AbsolutePath != "/" ||
+                    !string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment))
+                    throw new InvalidOperationException("S3 endpoint requires HTTPS (HTTP allowed for explicitly enabled loopback tests only).");
+            }
+        }
         if (MetadataProvider is not ("sqlite" or "postgresql"))
             throw new InvalidOperationException("MetadataProvider must be sqlite or postgresql.");
         if (MetadataProvider == "postgresql" && string.IsNullOrWhiteSpace(PostgresConnectionString))

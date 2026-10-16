@@ -131,4 +131,27 @@ public sealed class ValidationTests
         Assert.Equal("oidc-admin", Access.Actor(administrator));
     }
 
+
+    [Fact]
+    public void S3RejectsInsecureRemoteEndpointsAndIncompleteSettings()
+    {
+        Assert.Throws<InvalidOperationException>(() => new Settings { BlobProvider = "s3" }.Validate());
+        var cfg = new Settings
+        {
+            BlobProvider = "s3", S3Bucket = "packory-tests",
+            S3Endpoint = "http://remote.example.test",
+            S3AccessKey = "test", S3SecretKey = "test"
+        };
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.S3Endpoint = "http://127.0.0.1:5000";
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.S3AllowLoopbackHttp = true;
+        cfg.Validate();
+        cfg.S3KeyPrefix = "bad/../segment";
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.S3KeyPrefix = "packory";
+        cfg.S3SecretKey = null;
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+    }
+
 }

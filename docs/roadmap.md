@@ -42,7 +42,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 ## Milestone 2 — Operational and governance features
 
 - [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package (optional OIDC JWT resource-server auth and explicit read/write/admin scopes implemented; browser BFF, identity lifecycle, native scopes by package and live Keycloak tests outstanding)
-- [ ] PostgreSQL backend; S3-compatible object storage; restore/migration tooling (full PostgreSQL metadata provider with isolated CI integration tests implemented; S3 object backing, SQLite migration and coordinated backups still open)
+- [ ] PostgreSQL backend; S3-compatible object storage; restore/migration tooling (full PostgreSQL metadata provider with isolated CI integration tests implemented; S3 conditional immutable object backing with local cache and Moto CI implemented; SQLite migration, cross-store transactional outbox and coordinated backups still open)
 - [ ] Registry metrics, dashboard administration, pagination, full-text search, reporting
 - [ ] Strong Agent Skills conformance, signature/provenance support and vetted import sources
 - [ ] Policy for npm upstream metadata freshness, mirror pinning and offline determinism

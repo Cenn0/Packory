@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 
 namespace Packory;
 
-public sealed class BlobStore
+public class BlobStore
 {
     private readonly string _root;
     public BlobStore(Settings settings)
@@ -12,7 +12,7 @@ public sealed class BlobStore
         Directory.CreateDirectory(_root);
     }
 
-    private string PathFor(string key)
+    protected string PathFor(string key)
     {
         var pieces = key.Split('/');
         if (pieces.Length == 0 || pieces.Any(x => x.Length is 0 or > 255 ||
@@ -21,13 +21,21 @@ public sealed class BlobStore
         return Path.Combine(_root, Path.Combine(pieces));
     }
 
-    public string? Existing(string key)
+    public virtual bool Contains(string key) => Existing(key) is not null;
+
+    protected void DeleteCached(string key)
+    {
+        var path = PathFor(key);
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    public virtual string? Existing(string key)
     {
         var path = PathFor(key);
         return File.Exists(path) ? path : null;
     }
 
-    public async Task<bool> PutAsync(string key, Stream input, long maxBytes, CancellationToken ct)
+    public virtual async Task<bool> PutAsync(string key, Stream input, long maxBytes, CancellationToken ct)
     {
         var path = PathFor(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -57,7 +65,7 @@ public sealed class BlobStore
         finally { if (File.Exists(tmp)) File.Delete(tmp); }
     }
 
-    public async Task ReplaceAsync(string key, Stream input, long maxBytes, CancellationToken ct)
+    public virtual async Task ReplaceAsync(string key, Stream input, long maxBytes, CancellationToken ct)
     {
         var path = PathFor(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
