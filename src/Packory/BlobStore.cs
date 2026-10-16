@@ -6,10 +6,56 @@ namespace Packory;
 public class BlobStore
 {
     private readonly string _root;
+    private readonly long _capacity;
+    private readonly SemaphoreSlim _publishGate = new(1, 1);
     public BlobStore(Settings settings)
     {
         _root = Path.Combine(Path.GetFullPath(settings.DataDirectory), "blobs");
+        _capacity = settings.MaxBlobStorageBytes;
         Directory.CreateDirectory(_root);
+    }
+
+    private long UsedBytes() => Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
+        .Where(file => !Path.GetFileName(file).StartsWith(".upload-", StringComparison.Ordinal) &&
+                       !Path.GetFileName(file).StartsWith(".meta-", StringComparison.Ordinal))
+        .Sum(file => new FileInfo(file).Length);
+
+    private async Task PublishWithCapacityAsync(string temporary, string destination,
+        bool overwrite, CancellationToken cancellationToken)
+    {
+        if (_capacity == 0)
+        {
+            File.Move(temporary, destination, overwrite);
+            return;
+        }
+        await _publishGate.WaitAsync(cancellationToken);
+        try
+        {
+            var incoming = new FileInfo(temporary).Length;
+            var previous = overwrite && File.Exists(destination) ? new FileInfo(destination).Length : 0L;
+            var currentlyUsed = UsedBytes();
+            if (incoming > _capacity || currentlyUsed - previous > _capacity - incoming)
+                throw new StorageQuotaExceededException();
+            File.Move(temporary, destination, overwrite);
+        }
+        finally { _publishGate.Release(); }
+    }
+
+    /// <summary>Discard only recomputable mutable mirror metadata, never hosted blobs.</summary>
+    public virtual int EvictMutableMetadata()
+    {
+        var removed = 0;
+        foreach (var segment in new[] { "npm-metadata", "nuget-registration" })
+        {
+            var directory = Path.Combine(_root, segment);
+            if (!Directory.Exists(directory)) continue;
+            foreach (var path in Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories))
+            {
+                File.Delete(path);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     protected string PathFor(string key)
@@ -59,7 +105,7 @@ public class BlobStore
                 }
                 finally { ArrayPool<byte>.Shared.Return(buffer); }
             }
-            try { File.Move(tmp, path); return true; }
+            try { await PublishWithCapacityAsync(tmp, path, overwrite: false, ct); return true; }
             catch (IOException) when (File.Exists(path)) { return false; }
         }
         finally { if (File.Exists(tmp)) File.Delete(tmp); }
@@ -84,7 +130,7 @@ public class BlobStore
                     await output.WriteAsync(buffer.AsMemory(0, count), ct);
                 }
             }
-            File.Move(tmp, path, true);
+            await PublishWithCapacityAsync(tmp, path, overwrite: true, ct);
         }
         finally { if (File.Exists(tmp)) File.Delete(tmp); }
     }
@@ -106,3 +152,4 @@ public class BlobStore
 }
 
 public sealed class PayloadTooLargeException : Exception { }
+public sealed class StorageQuotaExceededException : Exception { }
