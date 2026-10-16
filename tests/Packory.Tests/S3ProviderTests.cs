@@ -55,6 +55,12 @@ public sealed class S3ProviderTests
             var ociKey = "oci/blobs/sha256/" + sha + ".blob";
             Assert.True(await store.PutAsync(ociKey, new MemoryStream(ociBytes), 1024, CancellationToken.None));
             Assert.Equal(ociBytes, await File.ReadAllBytesAsync(restarted.Existing(ociKey)!));
+            // An already materialized local cache file is not an integrity authority.
+            var localOci = restarted.Existing(ociKey)!;
+            await File.WriteAllTextAsync(localOci, "tampered cache");
+            Assert.Throws<InvalidDataException>(() => restarted.Existing(ociKey));
+            // Removing the corrupted cache allows a fresh verified remote materialization.
+            Assert.Equal(ociBytes, await File.ReadAllBytesAsync(restarted.Existing(ociKey)!));
             await client.DeleteObjectAsync(new DeleteObjectRequest
             {
                 BucketName = bucket, Key = "test-" + id + "/" + package
