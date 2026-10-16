@@ -10,22 +10,54 @@
   <script defer src="/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="brand"><span class="logo" aria-hidden="true">P</span><span>packory<span class="dot">.</span></span></div><span class="tag">Self-hosted registry hub · MVP</span></header>
+  <header class="topbar"><div class="brand"><span class="logo" aria-hidden="true">P</span><span>packory<span class="dot">.</span></span></div><span class="tag">Self-hosted registry hub · V2</span></header>
   <main>
     <section class="hero"><p class="eyebrow">ONE PLACE FOR YOUR ARTIFACTS</p><h1>Your packages. <em>One catalog.</em></h1><p class="lead">NuGet, npm, and agent skills in a unified view — with local caches and native client endpoints.</p></section>
     <section class="stats" aria-label="Registry endpoints">
       <div class="stat"><div class="stat-icon">N</div><div><strong>NuGet</strong><span><code>/nuget/v3/index.json</code></span></div></div>
       <div class="stat"><div class="stat-icon npm">npm</div><div><strong>npm</strong><span><code>/npm/</code></span></div></div>
       <div class="stat"><div class="stat-icon skills">✦</div><div><strong>Agent skills</strong><span><code>/api/skills</code></span></div></div>
+      <div class="stat"><div class="stat-icon raw">R</div><div><strong>V2 repositories</strong><span><code>/api/v1/repositories</code></span></div></div>
     </section>
     <section class="workspace">
-      <div class="section-head"><div><p class="eyebrow">DISCOVER</p><h2>Unified catalog</h2></div><div class="auth"><label for="token">API token <span>(kept in memory only)</span></label><input id="token" type="password" autocomplete="off" placeholder="Only if required"></div></div>
+      <div class="section-head"><div><p class="eyebrow">DISCOVER</p><h2>Unified catalog</h2></div><div class="auth"><div id="oidc-login" class="oidc-login" hidden><a href="/auth/login">Sign in with OIDC</a><span id="session-state" class="muted"></span></div><label for="token">API token <span>(kept in memory only)</span></label><input id="token" type="password" autocomplete="off" placeholder="Only if required"></div></div>
       <div class="filters"><label class="search"><span class="visually-hidden">Search catalog</span><input id="search" type="search" placeholder="Search cached and hosted packages…"></label><label><span class="visually-hidden">Ecosystem</span><select id="kind"><option value="">All ecosystems</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="skill">Skills</option></select></label><button type="button" id="refresh">Refresh</button></div>
       <div id="feedback" class="feedback" role="status" aria-live="polite">Loading catalog…</div>
       <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
     </section>
     <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
-    <footer>Packory MVP · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · Apache-2.0</footer>
+    <section class="workspace v2-workspace" aria-labelledby="v2-title">
+      <div class="section-head"><div><p class="eyebrow">CONTROL PLANE</p><h2 id="v2-title">Repositories &amp; governance</h2></div><button type="button" id="v2-refresh">Refresh V2</button></div>
+      <p class="muted">Native feeds are isolated by repository. Use an administrator token for configuration. New feeds are private by default.</p>
+      <p id="v2-feedback" role="status" aria-live="polite" class="feedback"></p>
+      <div class="table-wrap"><table><thead><tr><th>Repository</th><th>Protocol</th><th>Mode</th><th>Visibility</th><th>Client endpoint</th></tr></thead><tbody id="repositories"></tbody></table></div>
+      <div class="admin-grid">
+        <form id="create-feed" class="panel form-panel" aria-labelledby="feed-title">
+          <h3 id="feed-title">Create a repository</h3>
+          <label for="feed-slug">Unique slug</label><input required id="feed-slug" name="slug" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="team-packages">
+          <label for="feed-protocol">Native protocol</label><select id="feed-protocol" name="protocol"><option value="raw">Raw files</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="skills">Skills</option><option value="mcp">MCP metadata</option></select>
+          <label for="feed-mode">Mode</label><select id="feed-mode" name="mode"><option value="hosted">Hosted</option><option value="proxy">Proxy (NuGet / npm)</option></select>
+          <label for="feed-visibility">Visibility</label><select id="feed-visibility" name="visibility"><option value="private">Private</option><option value="public">Public read</option></select>
+          <label for="feed-upstream">Proxy upstream</label><input id="feed-upstream" name="upstream" placeholder="https://api.nuget.org/v3-flatcontainer/">
+          <button type="submit">Create feed</button><p class="form-result" id="feed-result" role="status"></p>
+        </form>
+        <form id="create-token" class="panel form-panel" aria-labelledby="token-title">
+          <h3 id="token-title">Scoped access token</h3>
+          <label for="new-token-name">Name</label><input required id="new-token-name" name="name" maxlength="100" placeholder="ci-read-only">
+          <label for="new-token-feed">Repository</label><select id="new-token-feed" name="feed"><option value="">Global (administrators only)</option></select>
+          <label for="new-token-scope">Permission</label><select id="new-token-scope" name="scope"><option value="repository.read">Read artifacts</option><option value="artifact.publish">Publish artifacts</option><option value="artifact.yank">Yank or quarantine</option><option value="catalog.read">Read catalog</option></select>
+          <label for="new-token-days">Expires after days</label><input required id="new-token-days" name="days" type="number" min="1" max="365" value="30">
+          <button type="submit">Issue token</button><p class="form-result" id="token-result" role="status"></p>
+          <div id="token-secret" class="secret-once" aria-live="polite"></div>
+        </form>
+      </div>
+    </section>
+    <section class="grid-bottom ops-grid">
+      <div class="panel"><p class="eyebrow">AI DISTRIBUTION</p><h2>MCP Registry</h2><p>Approved remote servers and package references. Packory does not execute MCP tools.</p><div id="v2-mcp" class="skills-list"></div></div>
+      <div class="panel"><p class="eyebrow">OPERATIONS</p><h2>Maintenance jobs</h2><p>Queued and completed jobs are persisted in SQLite. Reconciliation cleans abandoned staging and aged orphan blobs.</p><button type="button" id="reconcile">Run reconciliation</button><div id="v2-jobs" class="skills-list"></div></div>
+    </section>
+    <section class="workspace v2-workspace"><p class="eyebrow">TRACEABILITY</p><h2>Audit trail</h2><div id="v2-audit" class="skills-list"></div></section>
+    <footer>Packory V2 · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · Apache-2.0</footer>
   </main>
 </body>
 </html>

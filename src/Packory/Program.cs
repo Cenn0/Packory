@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 using Packory;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +34,19 @@ builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<V2Catalog>();
 builder.Services.AddSingleton<CasStore>();
+var oidcConfig=OidcIdentity.Configure(builder,settings);
+builder.Services.AddSingleton(oidcConfig);
+var trustedProxies=Environment.GetEnvironmentVariable("PACKORY_TRUSTED_PROXY_IPS");
+if(!string.IsNullOrWhiteSpace(trustedProxies))
+{
+    var addresses=trustedProxies.Split(';',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries)
+        .Select(IPAddress.Parse).ToArray();
+    builder.Services.Configure<ForwardedHeadersOptions>(options=>
+    {
+        options.ForwardedHeaders=ForwardedHeaders.XForwardedFor|ForwardedHeaders.XForwardedProto;
+        foreach(var address in addresses)options.KnownProxies.Add(address);
+    });
+}
 builder.Services.AddHostedService<JobWorker>();
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -59,9 +74,12 @@ app.Use(async (ctx, next) =>
     catch (System.Text.Json.JsonException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
     catch (InvalidDataException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
 });
+if(!string.IsNullOrWhiteSpace(trustedProxies))app.UseForwardedHeaders();
+OidcIdentity.Use(app,oidcConfig);
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+app.MapGet("/api/v1/auth-config", () => Results.Ok(new { oidc = oidcConfig.Enabled }));
 app.MapGet("/health/ready", (Database db) =>
 {
     using var connection = db.Open();

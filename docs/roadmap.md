@@ -1,51 +1,20 @@
-# Packory roadmap
+# Packory roadmap and release gates
 
-The objective is **one self-hosted registry platform for heterogeneous developer and AI artifacts**, without turning it into a Git forge. Sequence work by actual native-client compatibility, security, and maintainability rather than adding microservices prematurely.
+Packory V2 introduces isolated repositories, a common CAS, control-plane authorization, a native Raw feed, NuGet/npm feed adapters, MCP metadata, audit and persistent maintenance jobs. The design target remains broader than the current implementation. See [V2 status](v2-status.md) for each actually delivered feature and tested support level.
 
-## Milestone 0 — First MVP (this repository)
+## Release gates
 
-- [x] .NET 10 modular monolith, Docker runtime, SQLite + filesystem storage
-- [x] NuGet v3 service discovery, flat-container pull-through, package hash and `.nuspec`, registration rewrite, basic search and hosted push
-- [x] npm packument proxy, rewritten cached tarballs, basic scoped packages and single-version publishing
-- [x] Unified indexed/hosted catalog, simple dashboard, health endpoints
-- [x] Versioned Agent Skills ZIP import/download and basic manifest validation
-- [x] Static read/write/admin API tokens and safe-by-default write access
-- [x] Automated integration/unit tests, build + container CI, opt-in live NuGet restore smoke test
-- [x] README, API/architecture/operations/security/contribution docs
+1. **Foundation (V2 in source):** durable SQLite migrations, immutable CAS, feed isolation, Raw hosted, token issuance/revocation and audit. CI: deterministic integration tests and container build.
+2. **Native protocols:** complete NuGet V3 and npm conformance, transitive cold/warm/offline actual client installs, metadata handling, typed origin errors and concurrency tests.
+3. **Enterprise access:** optional OIDC/Keycloak with strict subject-based mapping and CSRF-secured dashboard sessions; complete Keycloak E2E and role-change tests required before support.
+4. **AI distribution:** full Agent Skills schema + Git provenance/approval, MCP Registry OpenAPI pinned with publishing/namespace ownership, Packory MCP server read-only.
+5. **More distribution formats:** native Cargo, PyPI and OCI adapters (not format-emulated Raw uploads), optional content-signature attestations and larger model bundles.
+6. **Operations:** bounded metadata TTL, comprehensive reconciliation and GC, fault injection, checksum scrub, backup/restore drill, tenant quotas and horizontal read-only scaling.
+7. **Secondary storage profile:** PostgreSQL and S3, only after separate migrations, locking and provider tests; no unsupported multi-writer SQLite deployments.
 
-**MVP exit criteria:** CI green, deterministic protocol tests green, a real `dotnet restore` via Packory from nuget.org and a real npm install through registry.npmjs.org succeed, hosted NuGet/npm publish works in tested client versions, and the deployment can be recovered from backup. **An implementation checked into main is not proof that all those runtime acceptance criteria are met**; live tests and client-version matrix must be completed before production use.
+## Engineering rules
 
-## Milestone 1 — Hardening and client compatibility
-
-- [ ] Test and fix `dotnet restore`, `dotnet nuget push`, `npm install`, `npm publish` using real CLIs (including scoped npm, transitive dependencies, SemVer, edge cases)
-- [ ] NuGet complete registration semantics, search fallback, version normalization, package types, content digests, controlled redirects/retries and structured errors
-- [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
-- [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks
-- [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction
-- [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow
-- [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
-
-## Milestone 2 — Operational and governance features
-
-- [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package
-- [ ] PostgreSQL backend; S3-compatible object storage; restore/migration tooling
-- [ ] Registry metrics, dashboard administration, pagination, full-text search, reporting
-- [ ] Strong Agent Skills conformance, signature/provenance support and vetted import sources
-- [ ] Policy for npm upstream metadata freshness, mirror pinning and offline determinism
-
-## Milestone 3 — More ecosystems
-
-- [ ] Cargo registry (index protocol + crate downloads + checksum and client tests)
-- [ ] PyPI simple API (PEP 503/691, upload semantics)
-- [ ] OCI artifacts (container layers, Helm, agent bundles), optional other package formats
-- [ ] Artifact relationships, namespace conflict rules, federated search
-
-## Milestone 4 — Scale only when justified
-
-- [ ] Background sync/GC workers, queue/outbox if throughput measurements require them
-- [ ] Multi-node coordination, horizontal scaling, durable object storage, SLOs
-- [ ] Optional service decomposition of independent registry adapters if operational benefit is demonstrated
-
-### Non-goals
-
-Git hosting, issue tracking, CI runner replacement, generic file sharing, arbitrary URL proxying, running uploaded scripts, or deploying a mandatory Kubernetes/microservice stack.
+- An implemented route is not automatically officially supported. Native-client tests must use **Packory as the only source**, with caches cleared and Origin blocked for offline cases.
+- Security functionality must be tested for cross-feed IDOR, token expiry/revocation, SSRF and package identity/hash mismatch. Runtime must never run untrusted Skill/MCP/package code.
+- Backwards compatibility must be explicit. Existing `/nuget`, `/npm` and `/api/skills` remain while V2 source migration is being built; avoid silently conflating old and new blobs.
+- A version is ready for a release label only after CI and protocol acceptance gates actually pass.

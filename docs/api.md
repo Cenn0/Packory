@@ -1,3 +1,5 @@
+> **V2 notice:** New V2 endpoint contracts are documented in [V2 API](api-v2.md). This earlier page describes original endpoint compatibility.
+
 # API and client compatibility (MVP)
 
 All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `http://localhost:8080` for loopback-only development. Registry URLs embed the configured public origin and must be routable by the client.

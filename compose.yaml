@@ -1,14 +1,14 @@
 services:
   packory:
     build: .
-    image: packory:mvp
+    image: packory:v2
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
     environment:
       PACKORY_DATA_DIRECTORY: /data
       PACKORY_PUBLIC_BASE_URL: ${PACKORY_PUBLIC_BASE_URL:-http://localhost:8080}
-      PACKORY_ANONYMOUS_READ: ${PACKORY_ANONYMOUS_READ:-true}
+      PACKORY_ANONYMOUS_READ: ${PACKORY_ANONYMOUS_READ:-false}
       PACKORY_ADMIN_TOKEN: ${PACKORY_ADMIN_TOKEN:-}
       PACKORY_READ_TOKEN: ${PACKORY_READ_TOKEN:-}
       PACKORY_WRITE_TOKEN: ${PACKORY_WRITE_TOKEN:-}

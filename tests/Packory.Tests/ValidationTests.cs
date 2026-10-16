@@ -39,4 +39,22 @@ public sealed class ValidationTests
         cfg.NpmUpstreamUrl = "http://registry.npmjs.org/";
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
     }
+
+    [Fact]
+    public void OptionalOidc_RejectsInsecureOrIncompleteIssuerConfiguration()
+    {
+        new OidcOptions().Validate(); // optional provider, no runtime requirement
+        Assert.Throws<InvalidOperationException>(() => new OidcOptions
+        {
+            Authority = "http://localhost:8080/realms/demo", ClientId = "packory", ClientSecret = new string('x',32)
+        }.Validate());
+        Assert.Throws<InvalidOperationException>(() => new OidcOptions
+        {
+            Authority = "https://id.example.invalid/realms/demo", ClientId = "packory"
+        }.Validate());
+        new OidcOptions
+        {
+            Authority = "https://id.example.invalid/realms/demo", ClientId = "packory", ClientSecret = new string('x',32)
+        }.Validate();
+    }
 }

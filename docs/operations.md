@@ -1,3 +1,5 @@
+> **V2 notice:** For V2 tokens, CAS, backups and reconciliation use [V2 operations](operations-v2.md). This earlier page describes original endpoint compatibility.
+
 # Operations and security guidance
 
 ## Deployment topology

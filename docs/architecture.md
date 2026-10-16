@@ -1,3 +1,5 @@
+> **V2 notice:** See [V2 target design](design-v2/TARGET-ARCHITECTURE.md) and [implemented V2 schema/status](v2-status.md). This earlier page describes original endpoint compatibility.
+
 # Architecture decision record: Packory MVP
 
 Status: **Implemented (MVP)** · October 2026

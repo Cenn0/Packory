@@ -9,6 +9,10 @@ public static class ScopedAccess
         string? feed,string capability,bool publicRead=false)
     {
         if(publicRead && capability=="repository.read")return null;
+        var oidc=ctx.RequestServices.GetService<OidcOptions>();
+        if(oidc is not null && string.IsNullOrEmpty(ctx.Request.Headers.Authorization.ToString()) &&
+            string.IsNullOrEmpty(ctx.Request.Headers["X-NuGet-ApiKey"].ToString()) &&
+            OidcIdentity.HasCookiePermission(ctx,oidc,capability))return null;
         var token=Extract(ctx);
         if(string.IsNullOrWhiteSpace(token))return Results.Unauthorized();
         if(Match(token,settings.AdminToken))return null;
@@ -26,6 +30,7 @@ public static class ScopedAccess
     public static string Actor(HttpContext context, Settings settings, V2Catalog catalog)
     {
         var token=Extract(context);
+        if(context.User.Identity?.IsAuthenticated==true)return "oidc-principal";
         if(Match(token,settings.AdminToken))return "bootstrap-admin";
         if(Match(token,settings.WriteToken))return "legacy-writer";
         if(Match(token,settings.ReadToken))return "legacy-reader";
