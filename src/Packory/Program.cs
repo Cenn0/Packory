@@ -27,6 +27,7 @@ if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OIDC_REQUIRE_NAMES
     settings.RequireOidcNamespaceGrants = requireGrants;
 settings.DataDirectory = Environment.GetEnvironmentVariable("PACKORY_DATA_DIRECTORY") ?? settings.DataDirectory;
 settings.MetadataProvider = Environment.GetEnvironmentVariable("PACKORY_METADATA_PROVIDER") ?? settings.MetadataProvider;
+settings.InstanceRole = Environment.GetEnvironmentVariable("PACKORY_INSTANCE_ROLE") ?? settings.InstanceRole;
 settings.BlobProvider = Environment.GetEnvironmentVariable("PACKORY_BLOB_PROVIDER") ?? settings.BlobProvider;
 settings.S3Endpoint = Environment.GetEnvironmentVariable("PACKORY_S3_ENDPOINT") ?? settings.S3Endpoint;
 settings.S3Bucket = Environment.GetEnvironmentVariable("PACKORY_S3_BUCKET") ?? settings.S3Bucket;
@@ -136,15 +137,42 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
 var app = builder.Build();
 var activeSettings = app.Services.GetRequiredService<Settings>();
 var startupLease = app.Services.GetRequiredService<PostgresSingleWriterLease>();
-startupLease.Acquire();
+var readerInstance = activeSettings.InstanceRole == "reader";
+if (!readerInstance) startupLease.Acquire();
 app.Lifetime.ApplicationStopped.Register(startupLease.Dispose);
-app.Services.GetRequiredService<IPackageDatabase>().Initialize();
-app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+if (!readerInstance)
+{
+    app.Services.GetRequiredService<IPackageDatabase>().Initialize();
+    app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+}
+else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
+{
+    throw new InvalidOperationException("Read-only replica requires an initialized shared metadata database.");
+}
 app.UseRouting();
 app.Use(async (ctx, next) =>
 {
+    if (readerInstance)
+    {
+        // GET is not universally read-only: NuGet/npm read-through mirrors write
+        // upstream metadata and artifacts. Block those endpoints fail-closed.
+        var path = ctx.Request.Path;
+        var method = ctx.Request.Method;
+        var safe = method is "GET" or "HEAD" &&
+            !path.StartsWithSegments("/nuget") &&
+            !path.StartsWithSegments("/npm") &&
+            !path.StartsWithSegments("/api/admin") &&
+            !(path.StartsWithSegments("/v2") &&
+              path.Value?.Contains("/blobs/uploads", StringComparison.Ordinal) == true);
+        if (!safe)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            ctx.Response.Headers.RetryAfter = "60";
+            return;
+        }
+    }
     // A lost PostgreSQL lease must fail closed, never permit a second writer.
-    if (ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" && !startupLease.IsHeld())
+    if (!readerInstance && ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" && !startupLease.IsHeld())
     {
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
@@ -180,7 +208,7 @@ app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
-    if (activeSettings.RecoveryMaintenance || !startupLease.IsHeld() || !db.IsHealthy())
+    if (activeSettings.RecoveryMaintenance || (!readerInstance && !startupLease.IsHeld()) || !db.IsHealthy())
         return Results.Json(new { status = "maintenance-or-lease-lost" },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
