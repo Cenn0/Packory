@@ -45,6 +45,7 @@ builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
+builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("publish", context =>
@@ -105,7 +106,7 @@ app.MapGet("/health/ready", (Database db, ArtifactRecovery recovery) =>
 app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, Database db, HttpContext ctx) =>
 {
     if (Access.Require(ctx, cfg) is { } denied) return denied;
-    if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi")) return Results.BadRequest(new { error = "Unknown package kind" });
+    if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return Results.BadRequest(new { error = "Unknown package kind" });
     return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50) });
 });
 app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, Database db, HttpContext ctx) =>
@@ -114,6 +115,7 @@ app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, Database
     if (before <= 0) return Results.BadRequest(new { error = "before must be positive" });
     return Results.Json(new { items = db.AuditEvents(before, limit ?? 50) });
 });
+OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
 NuGetEndpoints.Map(app);

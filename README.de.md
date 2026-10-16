@@ -50,6 +50,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | --- | --- |
 | **NuGet V3** | Service-Index, Paket-/Versionsdownloads, Read-through-Caching von nuget.org, Registrierungsmetadaten und einfache Veröffentlichung eigener Pakete |
 | **npm** | Caching von Upstream-Metadaten und Tarballs, Scoped Packages und einfache Veröffentlichung einzelner Versionen |
+| **OCI (experimentell)** | Distribution-v2-Endpunkte für SHA-256-Blobs, Uploads, Manifeste, Tags und Referrer; Client-/Auth-Abdeckung noch unvollständig |
 | **Cargo & PyPI (experimentell)** | Cargo als gehostete Alternate Registry (Sparse Index und Upload), PyPI Simple API (HTML/JSON) und grundlegender Upload; keine vollständige Unterstützung |
 | **Agent Skills** | Import, Auflistung und Download versionierter ZIP-Dateien mit einfacher `SKILL.md`-Beschreibung |
 | **Dashboard/API** | Durchsuchbarer Katalog gecachter/gehosteter Artefakte sowie Liveness-/Readiness-Endpunkte |
@@ -85,7 +86,7 @@ flowchart LR
   N -.->|Optionales Upstream-HTTPS| U[nuget.org und npmjs.org]
 ```
 
-NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Cargo & PyPI](docs/cargo-pypi.md) · [Architektur](docs/architecture.md).
+NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [Architektur](docs/architecture.md).
 
 ## Einschränkungen und Sicherheit
 

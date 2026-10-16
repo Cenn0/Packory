@@ -64,3 +64,8 @@ See [Roadmap](roadmap.md) for implementation sequence and [Operations](operation
 ## Experimental native registry adapters (Cargo and PyPI)
 
 The hosted Cargo alternate registry uses its own native sparse index and Cargo publish wire format; PyPI serves PEP 503/691 HTML/JSON and accepts legacy multipart uploads. Both share SQLite catalog, static-token access, artifact locks, audit and local blobs with the existing modules. Crate and distribution files are immutable per key. See [Cargo and PyPI](cargo-pypi.md) for missing protocol features, test coverage and security limits.
+
+
+## Hosted OCI adapter (experimental)
+
+OCI distribution routes use their own `/v2/` namespace. Digest-indexed blobs and immutable manifests are stored in the shared artifact file store; repository/blob associations, digest-tag pointers and referrers are recorded in SQLite. Uploads have bounded short-lived disk staging sessions, and manifest references require existing repository-scoped content. The adapter does not claim full OCI Distribution Spec conformance or Docker Bearer-token support. See [OCI](oci.md).

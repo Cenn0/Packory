@@ -688,4 +688,93 @@ public sealed class ApiTests
             "/pypi/legacy/", form))).StatusCode);
     }
 
+
+    [Fact]
+    public async Task Oci_PushChunkAndManifest_ThenPullTagsAndReferrers()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get, "/v2/"))).StatusCode);
+        const string repository = "team/demo";
+        var config = Encoding.UTF8.GetBytes("{\"architecture\":\"amd64\",\"os\":\"linux\"}");
+        var digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(config));
+
+        using var started = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/v2/" + repository + "/blobs/uploads/"));
+        Assert.Equal(HttpStatusCode.Accepted, started.StatusCode);
+        var upload = started.Headers.Location?.AbsolutePath;
+        Assert.NotNull(upload);
+        using var patch = await client.SendAsync(WithToken(new HttpMethod("PATCH"), upload!,
+            new ByteArrayContent(config)));
+        Assert.Equal(HttpStatusCode.Accepted, patch.StatusCode);
+        using var finished = await client.SendAsync(WithToken(HttpMethod.Put,
+            upload + "?digest=" + digest, new ByteArrayContent(Array.Empty<byte>())));
+        Assert.Equal(HttpStatusCode.Created, finished.StatusCode);
+
+        var blob = "/v2/" + repository + "/blobs/" + digest;
+        using var fetched = await client.SendAsync(WithToken(HttpMethod.Get, blob));
+        Assert.Equal(HttpStatusCode.OK, fetched.StatusCode);
+        Assert.Equal(digest, fetched.Headers.GetValues("Docker-Content-Digest").Single());
+        Assert.Equal(config, await fetched.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get, "/v2/another/demo/blobs/" + digest))).StatusCode);
+
+        var manifest = new JsonObject
+        {
+            ["schemaVersion"] = 2,
+            ["mediaType"] = "application/vnd.oci.image.manifest.v1+json",
+            ["config"] = new JsonObject
+            {
+                ["mediaType"] = "application/vnd.oci.image.config.v1+json",
+                ["size"] = config.Length,
+                ["digest"] = digest
+            },
+            ["layers"] = new JsonArray()
+        };
+        var body = new StringContent(manifest.ToJsonString(), Encoding.UTF8, "application/vnd.oci.image.manifest.v1+json");
+        using var created = await client.SendAsync(WithToken(HttpMethod.Put,
+            "/v2/" + repository + "/manifests/latest", body));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var manifestDigest = created.Headers.GetValues("Docker-Content-Digest").Single();
+        Assert.StartsWith("sha256:", manifestDigest);
+
+        using var pulled = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/v2/" + repository + "/manifests/latest"));
+        Assert.Equal(HttpStatusCode.OK, pulled.StatusCode);
+        Assert.Equal(manifestDigest, pulled.Headers.GetValues("Docker-Content-Digest").Single());
+        Assert.Equal(manifest.ToJsonString(), await pulled.Content.ReadAsStringAsync());
+        var tags = await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/v2/" + repository + "/tags/list"))).Content.ReadAsStringAsync();
+        Assert.Contains("latest", tags);
+        using var referrers = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/v2/" + repository + "/referrers/" + manifestDigest));
+        Assert.Equal(HttpStatusCode.OK, referrers.StatusCode);
+        Assert.Contains("\"manifests\":[]", await referrers.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Oci_RejectsWrongDigestAndUnknownBlobReferences()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        using var start = await client.SendAsync(WithToken(HttpMethod.Post, "/v2/team/test/blobs/uploads/"));
+        var upload = start.Headers.Location!.AbsolutePath;
+        var invalidDigest = "sha256:" + new string('0', 64);
+        using var wrong = await client.SendAsync(WithToken(HttpMethod.Put,
+            upload + "?digest=" + invalidDigest, new ByteArrayContent(new byte[] { 1, 2, 3 })));
+        Assert.Equal(HttpStatusCode.BadRequest, wrong.StatusCode);
+        var manifest = new JsonObject
+        {
+            ["schemaVersion"] = 2,
+            ["mediaType"] = "application/vnd.oci.image.manifest.v1+json",
+            ["config"] = new JsonObject { ["digest"] = invalidDigest, ["size"] = 3 },
+            ["layers"] = new JsonArray()
+        };
+        using var missing = await client.SendAsync(WithToken(HttpMethod.Put,
+            "/v2/team/test/manifests/latest",
+            new StringContent(manifest.ToJsonString(), Encoding.UTF8, "application/vnd.oci.image.manifest.v1+json")));
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+    }
+
 }
