@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Packory;
 using Xunit;
 
@@ -39,8 +40,22 @@ public sealed class ApiTests
                 ["Packory:ReadToken"] = ReadToken,
                 ["Packory:AnonymousRead"] = "false"
             }));
-            builder.ConfigureTestServices(services => services.AddHttpClient("upstream")
-                .ConfigurePrimaryHttpMessageHandler(() => new FakeUpstream(upstream ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound)))));
+            builder.ConfigureTestServices(services =>
+            {
+                // Replace the concrete Settings singleton: top-level startup binds configuration
+                // before the test host configuration overlay is applied.
+                services.RemoveAll<Settings>();
+                services.AddSingleton(new Settings
+                {
+                    DataDirectory = _data,
+                    PublicBaseUrl = "http://localhost:8080",
+                    AdminToken = AdminToken,
+                    ReadToken = ReadToken,
+                    AnonymousRead = false
+                });
+                services.AddHttpClient("upstream")
+                    .ConfigurePrimaryHttpMessageHandler(() => new FakeUpstream(upstream ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
+            });
         }
         protected override void Dispose(bool disposing)
         {
