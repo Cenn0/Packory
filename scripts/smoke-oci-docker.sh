@@ -37,7 +37,7 @@ mkdir -p "$DOCKER_CONFIG" "$WORK/build"
 PACKORY_DATA_DIRECTORY="$WORK/data" \
 PACKORY_PUBLIC_BASE_URL="$BASE" \
 PACKORY_ADMIN_TOKEN="$TOKEN" \
-PACKORY_ANONYMOUS_READ=true \
+PACKORY_ANONYMOUS_READ=false \
 ASPNETCORE_URLS="$BASE" \
 dotnet "$ROOT/src/Packory/bin/Release/net10.0/Packory.dll" >"$WORK/server.log" 2>&1 &
 PID="$!"
@@ -62,7 +62,7 @@ docker build --pull=false -t "$TAG" "$WORK/build" >>"$WORK/docker.log" 2>&1
 docker push "$TAG" >>"$WORK/docker.log" 2>&1
 
 # Verify Packory actually indexed the pushed Docker tag before pulling again.
-curl --fail --silent --show-error "$BASE/v2/packory-smoke/oci/tags/list" |
+curl --fail --silent --show-error --user "packory:$TOKEN" "$BASE/v2/packory-smoke/oci/tags/list" |
   python3 -c 'import json,sys; assert "1.0.0" in json.load(sys.stdin)["tags"]'
 docker image rm -f "$TAG" >>"$WORK/docker.log" 2>&1
 docker pull "$TAG" >>"$WORK/docker.log" 2>&1
