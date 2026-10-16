@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Packory brand mark"><defs>
+ <linearGradient id="main" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F43F7F"/><stop offset=".54" stop-color="#FFB020"/><stop offset="1" stop-color="#198CFA"/></linearGradient>
+ <linearGradient id="sun" x1="0" y1="0" x2=".9" y2="1"><stop stop-color="#FFE064"/><stop offset=".52" stop-color="#18BAA9"/><stop offset="1" stop-color="#198CFA"/></linearGradient>
+ <linearGradient id="sea" x1="0" y1="0" x2=".9" y2="1"><stop stop-color="#2EEBEE"/><stop offset="1" stop-color="#198CFA"/></linearGradient>
+ <linearGradient id="shadow" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#003BAF"/><stop offset="1" stop-color="#169CFF"/></linearGradient>
+ </defs><g transform="scale(1)"><path d="M19 45 79 10 141 45 81 79Z" fill="url(#sun)"/><path d="M19 45 81 79 81 146 28 119Q19 113 19 98Z" fill="url(#main)"/><path d="M81 79 141 45 141 103Q141 115 133 120L81 146Z" fill="url(#shadow)"/><path d="M64 77 96 58 123 74 93 93Z" fill="#F8FBFF"/><path d="M64 77V105L92 121V93Z" fill="#F8FBFF"/><path d="M92 93 123 74V104L92 121Z" fill="#D5FCFF"/><path d="M74 83 96 70 114 81 92 94Z" fill="#A8F777"/><path d="M74 83V103L92 114V94Z" fill="#19C7A1"/><path d="M92 94 114 81V102L92 114Z" fill="#007F92"/></g></svg>

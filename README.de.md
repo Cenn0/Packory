@@ -1,5 +1,7 @@
 # Packory
 
+**Marke und UI:** [Logo und Hell-/Dunkel-Designvorlagen](docs/branding/README.md) (ausschließlich Entwürfe).
+
 **Sprache:** [English](README.md) · **Deutsch**
 
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)

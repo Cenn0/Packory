@@ -1,5 +1,7 @@
 # Packory
 
+**Brand and UI design:** [Logo + light/dark templates](docs/branding/README.md) (design concepts only).
+
 **Language:** **English** · [Deutsch](README.de.md)
 
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
