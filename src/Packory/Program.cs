@@ -68,8 +68,12 @@ if (settings.OidcEnabled)
         });
 }
 builder.Services.AddSingleton(settings);
-builder.Services.AddSingleton<IPackageDatabase>(_ =>
-    settings.MetadataProvider == "postgresql" ? new PostgresDatabase(settings) : new Database(settings));
+builder.Services.AddSingleton<IPackageDatabase>(provider =>
+{
+    var effective = provider.GetRequiredService<Settings>();
+    return effective.MetadataProvider == "postgresql"
+        ? new PostgresDatabase(effective) : new Database(effective);
+});
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
