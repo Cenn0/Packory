@@ -12,7 +12,8 @@ public static class NpmEndpoints
         app.MapGet("/npm/-/v1/search", (string? text, int? size, Settings settings, Database db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
-            var found = db.Search(text ?? "", "npm", Math.Clamp(size ?? 20, 1, 100));
+            var found = db.Search(text ?? "", "npm", Math.Clamp(size ?? 20, 1, 100))
+                .Where(e => !settings.DeniesNpm(e.Name)).ToList();
             return Results.Json(new { total = found.Count, objects = found.Select(e => new
             {
                 package = new { name = e.Name, version = e.Version, description = e.Description }
@@ -31,6 +32,7 @@ public static class NpmEndpoints
                 var name = parts[0]; var tail = parts[1];
                 if (!Names.Npm(name) || !tail.EndsWith(".tgz", StringComparison.Ordinal) ||
                     !Names.Version(tail[..^4])) return Results.NotFound();
+                if (settings.DeniesNpm(name)) return Results.StatusCode(403);
                 var version = tail[..^4];
                 using var gate = await locks.AcquireAsync("npm", name, version, ctx.RequestAborted);
                 var key = NpmKey(name, version);
@@ -45,7 +47,11 @@ public static class NpmEndpoints
                 var raw = await FetchMetadata(name, settings, blobs, clients.CreateClient("upstream"), ctx.RequestAborted);
                 if (raw is null) return Results.NotFound();
                 var json = JsonNode.Parse(raw) as JsonObject;
-                if (json?["versions"]?[version]?["dist"] is not JsonObject dist || dist["tarball"]?.GetValue<string>() is not { } tarball)
+                if (json?["versions"]?[version] is not JsonObject packageManifest ||
+                    packageManifest["name"]?.ToString() != name ||
+                    packageManifest["version"]?.ToString() != version ||
+                    packageManifest["dist"] is not JsonObject dist ||
+                    dist["tarball"]?.GetValue<string>() is not { } tarball)
                     return Results.NotFound();
                 if (!Uri.TryCreate(tarball, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
                     uri.Host != new Uri(settings.NpmUpstreamUrl).Host || uri.Port != 443 ||
@@ -89,6 +95,7 @@ public static class NpmEndpoints
                 nameOnly = path[..cut]; requestedVersion = path[(cut + 1)..];
                 if (!Names.Npm(nameOnly) || !Names.Version(requestedVersion)) return Results.NotFound();
             }
+            if (settings.DeniesNpm(nameOnly)) return Results.StatusCode(403);
             var packument = await BuildPackument(nameOnly, settings, db, blobs, clients.CreateClient("upstream"), ctx.RequestAborted);
             if (packument is null) return Results.NotFound();
             if (requestedVersion is not null)
@@ -102,6 +109,7 @@ public static class NpmEndpoints
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             var name = Uri.UnescapeDataString(packageName ?? "");
             if (!Names.Npm(name)) return Results.BadRequest(new { error = "Invalid npm package name" });
+            if (settings.DeniesNpm(name)) return Results.StatusCode(403);
             var data = await BlobStore.ReadBoundedAsync(ctx.Request.Body, settings.MaxArtifactBytes * 2, ctx.RequestAborted);
             JsonObject? publish;
             try { publish = JsonNode.Parse(data) as JsonObject; }

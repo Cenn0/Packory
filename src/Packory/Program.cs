@@ -24,6 +24,10 @@ if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NUGET_PREFIXES") is { }
     settings.ReservedNugetPrefixes = reservedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NPM_SCOPES") is { } reservedNpm)
     settings.ReservedNpmScopes = reservedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NUGET_PREFIXES") is { } deniedNuget)
+    settings.DeniedNugetPrefixes = deniedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NPM_SCOPES") is { } deniedNpm)
+    settings.DeniedNpmScopes = deniedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is { } maxPublish)
     settings.PublishRequestsPerMinute = int.TryParse(maxPublish, out var parsedPublish)
         ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
@@ -70,7 +74,7 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
 
 var app = builder.Build();
 app.Services.GetRequiredService<Database>().Initialize();
-var recoveryReport = app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 app.UseRouting();
 app.UseRateLimiter();
 app.Use(async (ctx, next) =>
@@ -89,11 +93,12 @@ app.Use(async (ctx, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-app.MapGet("/health/ready", (Database db) =>
+app.MapGet("/health/ready", (Database db, ArtifactRecovery recovery) =>
 {
     using var connection = db.Open();
-    return recoveryReport.MissingHostedArtifacts > 0
-        ? Results.Json(new { status = "degraded", missingHostedArtifacts = recoveryReport.MissingHostedArtifacts },
+    var missing = recovery.MissingHostedCount();
+    return missing > 0
+        ? Results.Json(new { status = "degraded", missingHostedArtifacts = missing },
             statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { status = "ready" });
 });
