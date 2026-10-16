@@ -5,6 +5,8 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
+**Explore:** [Quick start](#quick-start) · [Capabilities](#what-works-in-the-mvp) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap](docs/roadmap.md)
+
 **A self-hosted hub for NuGet, npm and versioned AI agent skills.**
 
 
@@ -60,6 +62,23 @@ npm install --registry=http://localhost:8080/npm/ lodash
 
 Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. The skills importer **validates archives but does not establish that their contents are safe to execute**.
 
+## Architecture overview
+
+```mermaid
+flowchart LR
+  C[NuGet and npm clients] --> A[Packory ASP.NET Core]
+  K[Skill ZIP importer] --> A
+  A --> N[Protocol adapters]
+  A --> S[Skills and catalog API]
+  N --> D[(SQLite metadata)]
+  S --> D
+  N --> B[(Local artifact files)]
+  S --> B
+  N -.->|Optional upstream HTTPS| U[nuget.org and npmjs.org]
+```
+
+NuGet and npm keep their **own native protocols** while sharing the catalog and storage. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
+
 ## Limitations and security
 
 - NuGet and npm support useful registry flows, but **not full protocol parity**. Verify your exact client/version/workflow before relying on Packory.
@@ -85,6 +104,6 @@ bash scripts/smoke-hosted.sh
 
 ## Documentation and contributions
 
-[Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
