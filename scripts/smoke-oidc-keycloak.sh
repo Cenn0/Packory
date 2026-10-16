@@ -24,11 +24,14 @@ cleanup() {
 trap cleanup EXIT
 test -f "$ROOT/src/Packory/bin/Release/net10.0/Packory.dll"
 mkdir -p "$WORK/tls" "$WORK/realm"
+# Keycloak runs as an unprivileged container user and must be able to traverse mounts.
+chmod 755 "$WORK" "$WORK/tls" "$WORK/realm"
 CLIENT_SECRET="$(openssl rand -hex 32)"
 openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 1 \
   -keyout "$WORK/tls/server.key" -out "$WORK/tls/server.pem" \
   -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
   >/dev/null 2>&1
+chmod 644 "$WORK/tls/server.key"
 sudo cp "$WORK/tls/server.pem" /usr/local/share/ca-certificates/packory-test-keycloak.crt
 sudo update-ca-certificates >/dev/null
 
