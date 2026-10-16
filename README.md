@@ -1,119 +1,75 @@
 # Packory
 
-**One self-hosted hub for NuGet packages, npm packages, and versioned agent skills.**
+**Language:** **English** · [Deutsch](README.de.md)
+
+**A self-hosted hub for NuGet, npm and versioned AI agent skills.**
 
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Packory's first MVP is an **ASP.NET Core 10 modular monolith**, not a general-purpose Git forge and not a collection of separate services. It provides a unified dashboard and catalog while retaining the **native NuGet v3 and npm registry protocols**. A local SQLite database tracks indexed artifacts; files live on disk. No Redis, message broker, Kubernetes, or external database is needed. The ongoing milestone-1 hardening adds in-process single-flight artifact locks, reserved private namespaces, startup reconciliation, transactional publish audit entries and role-partitioned write rate limits; production compatibility is still unverified.
+Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current **MVP** is an **ASP.NET Core / .NET 10 modular monolith**, using SQLite and local file storage. No separate database, broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
 
-> **MVP scope:** functional pull-through package downloads, basic hosted publishing, a searchable catalog of *cached/hosted* artifacts, agent-skill ZIP imports, static token permissions, a minimal dashboard, health endpoints, Docker support, and tests. Packory is not yet a production-hardened registry replacement. See [Roadmap](docs/roadmap.md) and [Limitations](#limitations).
+> **Status: MVP, not production-hardened.** Protocol coverage and real-client compatibility are incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
 
 ## Quick start
 
-Prerequisites: **Docker Compose** or the **.NET 10 SDK**.
+Requires Docker Compose. For local evaluation:
 
 ```bash
-# Choose a random 32+-character token. Keep it out of Git and shell history.
+git clone https://github.com/Cenn0/Packory.git
+cd Packory
 export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
-docker compose up --build -d
+docker compose up -d --build
 ```
 
-Open **http://localhost:8080/**. The dashboard shows packages after their first cache download or when they are hosted locally. Paste the API token in the dashboard only when importing a skill; the browser keeps it in memory, not local storage.
+Open **http://localhost:8080/**. The token enables administrative actions; do not commit it or paste it into issues. The example Compose configuration binds to `127.0.0.1:8080` and persists data in the `packory-data` volume.
 
-By default, reads are anonymous, writes require a configured token, and binding is to the local host port in Compose. **Before exposing Packory to a network**, configure TLS at a reverse proxy, access policies, and a publicly reachable `PACKORY_PUBLIC_BASE_URL`. [Operations and security](docs/operations.md) has details.
-
-Run without Docker:
+To run directly with the .NET 10 SDK instead:
 
 ```bash
 export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export PACKORY_PUBLIC_BASE_URL=http://localhost:8080
-export PACKORY_DATA_DIRECTORY=./data
 dotnet run --project src/Packory --urls http://localhost:8080
 ```
 
-### NuGet: mirror nuget.org
+See [operations](docs/operations.md) before enabling network access or choosing a permanent data directory.
 
-Packory v3 service index: `http://localhost:8080/nuget/v3/index.json`
+## What works in the MVP
+
+| Area | Implemented scope |
+| --- | --- |
+| **NuGet V3** | Service index, package/version downloads, read-through caching from nuget.org, registration metadata and basic hosted publishing |
+| **npm** | Upstream metadata and tarball caching, scoped package handling and basic single-version publishing |
+| **Agent skills** | Import, list and download versioned ZIP files containing a simple `SKILL.md` manifest |
+| **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
+| **Access** | Configurable static read, write and admin tokens; anonymous read enabled by default; admin-only successful-publish audit |
+
+### Use Packory as a registry
+
+NuGet service index: `http://localhost:8080/nuget/v3/index.json`.
 
 ```bash
-# List, restore, or install packages through Packory:
+# HTTP is appropriate only for local development.
 dotnet nuget add source http://localhost:8080/nuget/v3/index.json \
   --name packory --allow-insecure-connections
 
-# Use an isolated NuGet.Config with only Packory to prove mirror traffic flows through it:
-# See scripts/smoke-nuget.sh or docs/api.md.
-
-# Publish a local package (admin token, from the environment):
-dotnet nuget push ./your-package.1.0.0.nupkg \
-  --source http://localhost:8080/nuget/v3/index.json \
-  --api-key "$PACKORY_ADMIN_TOKEN"
-```
-
-NuGet **package version indexes**, `.nupkg`, `.nuspec`, `.sha512` and **registration metadata** are available. For upstream packages Packory contacts nuget.org on first use, caches content, verifies SHA-512 if published upstream, and rewrites registration content URLs back to Packory. Cached artifacts remain available during upstream outages. The upstream version index still requires a live upstream for fresh versions; locally published and already indexed versions remain visible.
-
-### npm: mirror registry.npmjs.org
-
-```bash
-# For a project only (avoids modifying your global npm configuration):
+# Use the local npm registry for one command.
 npm install --registry=http://localhost:8080/npm/ lodash
-
-# Publishing requires a configured token. npm login is NOT implemented.
-# Put registry and token in a local, UNTRACKED user/project .npmrc:
-# registry=http://localhost:8080/npm/
-# //localhost:8080/npm/:_authToken=${PACKORY_ADMIN_TOKEN}
-npm publish --registry=http://localhost:8080/npm/
 ```
 
-Packory rewrites npm `dist.tarball` URLs to its own endpoint, verifies upstream SHA-512 or SHA-1 if supplied, and caches the tarball. Scoped packages and single-version `npm publish` payloads are supported. **Never commit `.npmrc` with credentials.** Do not use plain HTTP for tokens except loopback development; publish through HTTPS in shared environments.
+Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. The skills importer **validates archives but does not establish that their contents are safe to execute**.
 
-### Agent skills: import a versioned ZIP
+## Limitations and security
 
-A ZIP must contain `SKILL.md` at its root or inside one top-level directory named after the skill. Its YAML frontmatter must include `name` and `description`. The importer validates the archive paths and size; it does not execute bundled code.
+- NuGet and npm support useful registry flows, but **not full protocol parity**. Verify your exact client/version/workflow before relying on Packory.
+- Search covers locally indexed artifacts. Fresh upstream metadata and uncached downloads may require connectivity.
+- Static tokens are not individual user accounts. **OIDC/SSO, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The existing admin-only log records **successful hosted publishes**, not every action or denied attempt.
+- Reserved NuGet ID prefixes and npm scopes can prevent configured private namespaces from falling back to public upstreams. This is **not** a comprehensive package-policy or malware-scanning solution. Signature enforcement, cache eviction and automatic license compliance are also absent.
+- **Cargo, PyPI, OCI, PostgreSQL, S3 and distributed services are planned, not implemented.**
 
-```bash
-curl -X POST http://localhost:8080/api/skills \
-  -H "Authorization: Bearer $PACKORY_ADMIN_TOKEN" \
-  -F 'version=1.0.0' -F 'file=@my-skill.zip'
+Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **SQLite and blobs together**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
 
-curl http://localhost:8080/api/skills
-```
-
-Skill downloads: `/api/skills/{name}/{version}/download`. The MVP recognizes **simple single-line YAML `name` and `description` fields**; full YAML semantics and portable skill-install tooling are post-MVP work.
-
-## Endpoints
-
-| Purpose | Endpoint |
-| --- | --- |
-| Dashboard | `/` |
-| Unified catalog (indexed/hosted only) | `GET /api/packages?q=&kind=&limit=` |
-| Admin-only successful publish audit | `GET /api/admin/audit?limit=&before=` |
-| NuGet v3 service index | `GET /nuget/v3/index.json` |
-| NuGet publish | `PUT /nuget/v3/push` |
-| npm registry | `/npm/` |
-| Agent skills list/import | `GET/POST /api/skills` |
-| Liveness / readiness | `/health/live`, `/health/ready` |
-
-Protocol details and manual examples: [API documentation](docs/api.md).
-
-## Design
-
-```text
- NuGet CLI / npm CLI / Dashboard / curl
-                │
-                ▼
-      ASP.NET Core 10 · Packory
-      ├── Native NuGet v3 endpoints ──── nuget.org (fixed upstream)
-      ├── Native npm endpoints ───────── registry.npmjs.org (fixed upstream)
-      ├── Skills importer / API
-      ├── Unified catalog and dashboard
-      ├── Token access control (read / write / admin)
-      └── SQLite metadata + atomic local blob storage
-```
-
-[Architecture and trust boundaries](docs/architecture.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md)
-
-## Development and tests
+## Build and test
 
 ```bash
 dotnet restore Packory.slnx
@@ -122,21 +78,10 @@ dotnet test Packory.slnx -c Release --no-build
 node --check src/Packory/wwwroot/app.js
 ```
 
-Integration tests use in-process ASP.NET hosting and a deterministic **stub registry**, covering authorization, NuGet caching/checksums/publish, npm scoped mirroring/publish, ZIP validation, and catalog operations. GitHub Actions is configured to run tests and a container build; a separate manual/scheduled workflow is configured to exercise **real nuget.org and npmjs.org installs** through the Packory proxy. See [CI](.github/workflows/ci.yml) and [live smoke test](.github/workflows/smoke-live.yml).
+[CI](.github/workflows/ci.yml) runs builds and automated tests. A [separate live smoke workflow](.github/workflows/smoke-live.yml) is available for external registry checks; workflow existence alone is not a passing acceptance result.
 
-## Limitations
+## Documentation and contributions
 
-- Single-node deployment and static environment-provided tokens; no accounts, per-package write policies, SSO, individual actor attribution, comprehensive audit trail, multi-node replication, or resilient HA yet. An administrator-only SQLite audit log currently records **successful hosted publishes**, identifying only the static token role.
-- Minimal npm publish implementation (one version per request); **npm login**, unpublish, and comprehensive npm registry endpoints are not provided. Some npm clients/workflows may require missing APIs.
-- NuGet supports principal v3 install/mirror/push operations but does not claim full v3 feature parity (symbols, deprecation, vulnerability resources, registration edge cases, advanced SemVer normalization). Full native-client compatibility must be validated per client version.
-- Search shows **cached and hosted packages only**, not all upstream entries. The dashboard is a discovery/admin MVP, not a complete registry UI.
-- Metadata may need upstream connectivity on cold starts; caches use best-effort offline fallbacks. Per-artifact locks coordinate concurrent requests **within one process only**. No quota eviction, multi-node coordination, malware scanning, package-signature enforcement, comprehensive upstream allow/block rules, or automatic license compliance checks.
-- Reserve private NuGet ID prefixes or npm scopes to prohibit fallback to public upstreams (configuration in [Operations](docs/operations.md)). Startup reconciliation quarantines unindexed immutable files, retains their bytes for manual recovery, and marks readiness degraded if hosted blobs are missing.
-- Agent skills use basic frontmatter validation rather than a complete YAML/Agent Skills conformance implementation. Import does **not** imply an uploaded skill is safe to execute.
-- PostgreSQL, S3, additional ecosystems (Cargo, PyPI, OCI), OIDC, and multi-service deployment are **roadmap items, not MVP features**.
+[Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
-## Open source
-
-[Apache License 2.0](LICENSE). Contributions are welcome through [issues and pull requests](https://github.com/Cenn0/Packory/issues). Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
-
-**Privacy:** This public repository must never contain personal contact details, credentials, keys, private URLs, internal hostnames, or private infrastructure configuration. Use GitHub issues and security advisories for communication.
+Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
