@@ -20,7 +20,11 @@ jobs:
           python3 - <<'PY'
           import base64, hashlib, json, lzma, pathlib
           root=pathlib.Path.cwd(); transport=root/'.packory-v2-transfer'
-          packed=base64.b64decode(''.join(p.read_text() for p in sorted(transport.glob('*.b64'))),validate=True)
+          parts=sorted(transport.glob('*.b64'))
+          assert len(parts)==17, 'Expected 17 source transport parts'
+          for p in parts:
+              print('Transfer part:', p.name, p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+          packed=base64.b64decode(''.join(p.read_text() for p in parts),validate=True)
           expected=transport.joinpath('READY').read_text().strip()
           assert expected=='ca9a33e1f7992343c9514990df6972b4066dff12b30b0b76bf5211cc6b0e1768'
           assert hashlib.sha256(packed).hexdigest()==expected
@@ -76,7 +80,7 @@ jobs:
           PY
           python3 scripts/check-public-hygiene.py
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email "$(printf '%s@%s' '41898282+github-actions[bot]' 'users.noreply.github.com')"
           git add -A -- . ':!.github'
           git commit -m 'feat: implement V2 standalone architecture and acceptance suites'
           HEADER=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
