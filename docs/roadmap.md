@@ -67,6 +67,15 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] OCI artifacts (hosted v2 content-addressed blob upload/download, manifests, tags and referrers implemented; real Docker/ORAS/Helm tests, Bearer-token workflow, durable multipart uploads and full conformance remain open)
 - [ ] Artifact relationships, namespace conflict rules, federated search
 
+### Safe publication repair before scale
+
+- [x] PostgreSQL single-process writer exclusion via held advisory lease.
+- [x] Opt-in read-only recovery maintenance mode for interrupted PostgreSQL/S3 publishes.
+- [x] Admin-reviewed, SHA-256-verified, ETag-conditional S3 orphan quarantine with durable recovery evidence.
+- [x] PostgreSQL + S3 crash-point tests in an isolated CI environment.
+- [ ] Validate the deployed S3 provider's conditional DELETE semantics, PostgreSQL/S3 coordinated backup and restore, and long-running interrupted upload behavior.
+- [ ] Before active-active deployment: distributed metadata/blob coordination, owner fencing, OCI upload-session durability, cache consistency, SLOs, security tests and operator runbooks. This implementation is intentionally **not** a multi-instance release.
+
 ## Milestone 4 — Scale only when justified
 
 - [ ] Background sync/GC workers, queue/outbox if throughput measurements require them

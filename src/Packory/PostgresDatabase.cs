@@ -94,6 +94,11 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                 media_type TEXT NOT NULL, size BIGINT NOT NULL, artifact_type TEXT NOT NULL,
                 PRIMARY KEY(repository,subject,digest)
             );
+            CREATE TABLE IF NOT EXISTS recovery_quarantines (
+                artifact_key TEXT PRIMARY KEY, recovery_key TEXT NOT NULL UNIQUE,
+                sha256 TEXT NOT NULL, source_etag TEXT NOT NULL,
+                created_at TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS publication_intents (
                 artifact_key TEXT PRIMARY KEY,
                 kind TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
@@ -323,6 +328,50 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         while (reader.Read()) result.Add(new PendingPublication(reader.GetString(0),
             reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
         return result;
+    }
+
+    public QuarantineEvidence? FindQuarantine(string key)
+    {
+        using var db = Open();
+        using var cmd = Command(db, "SELECT artifact_key,recovery_key,sha256,source_etag,created_at,completed FROM recovery_quarantines WHERE artifact_key=@key",
+            null, ("key", key));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new QuarantineEvidence(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt32(5) != 0) : null;
+    }
+
+    public void PrepareQuarantine(QuarantineEvidence evidence)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = Command(db, """
+            INSERT INTO recovery_quarantines(artifact_key,recovery_key,sha256,source_etag,created_at,completed)
+            SELECT @key,@archive,@sha,@etag,@created,0
+            WHERE EXISTS(SELECT 1 FROM publication_intents WHERE artifact_key=@key)
+            ON CONFLICT(artifact_key) DO NOTHING
+            """, tx, ("key", evidence.Key), ("archive", evidence.RecoveryKey),
+            ("sha", evidence.Sha256), ("etag", evidence.SourceEtag), ("created", evidence.CreatedAt)))
+        {
+            if (cmd.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("Quarantine evidence already exists or journal is missing");
+        }
+        Audit(db, tx, "prepare", "recovery", evidence.Key, "", "admin-token");
+        tx.Commit();
+    }
+
+    public void FinishQuarantine(string key)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = Command(db,
+            "UPDATE recovery_quarantines SET completed=1 WHERE artifact_key=@key AND completed=0",
+            tx, ("key", key)))
+            if (cmd.ExecuteNonQuery() != 1) throw new InvalidOperationException("Prepared quarantine not found");
+        using (var cmd = Command(db,
+            "DELETE FROM publication_intents WHERE artifact_key=@key", tx, ("key", key)))
+            if (cmd.ExecuteNonQuery() != 1) throw new InvalidOperationException("Pending intent not found");
+        Audit(db, tx, "quarantine", "recovery", key, "", "admin-token");
+        tx.Commit();
     }
 
     public void CreateManagedToken(ManagedTokenRecord token)

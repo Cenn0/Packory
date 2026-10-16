@@ -8,6 +8,8 @@ public sealed record StoredArtifact(string Kind, string Name, string Version, st
 public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
     string Actor, string CreatedAt);
 public sealed record PendingPublication(string Key, string Kind, string Name, string Version, string StartedAt);
+public sealed record QuarantineEvidence(string Key, string RecoveryKey, string Sha256,
+    string SourceEtag, string CreatedAt, bool Completed);
 public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
@@ -88,6 +90,11 @@ public sealed class Database(Settings settings) : IPackageDatabase
                 repository TEXT NOT NULL, subject TEXT NOT NULL, digest TEXT NOT NULL,
                 media_type TEXT NOT NULL, size INTEGER NOT NULL, artifact_type TEXT NOT NULL,
                 PRIMARY KEY(repository,subject,digest)
+            );
+            CREATE TABLE IF NOT EXISTS recovery_quarantines (
+                artifact_key TEXT PRIMARY KEY, recovery_key TEXT NOT NULL UNIQUE,
+                sha256 TEXT NOT NULL, source_etag TEXT NOT NULL,
+                created_at TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS publication_intents (
                 artifact_key TEXT PRIMARY KEY,
@@ -565,6 +572,64 @@ public sealed class Database(Settings settings) : IPackageDatabase
         while (reader.Read()) result.Add(new PendingPublication(reader.GetString(0),
             reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
         return result;
+    }
+
+    public QuarantineEvidence? FindQuarantine(string key)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT artifact_key,recovery_key,sha256,source_etag,created_at,completed FROM recovery_quarantines WHERE artifact_key=$key";
+        cmd.Parameters.AddWithValue("$key", key);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new QuarantineEvidence(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt32(5) != 0) : null;
+    }
+
+    public void PrepareQuarantine(QuarantineEvidence evidence)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO recovery_quarantines(artifact_key,recovery_key,sha256,source_etag,created_at,completed)
+                SELECT $key,$archive,$sha,$etag,$created,0
+                WHERE EXISTS(SELECT 1 FROM publication_intents WHERE artifact_key=$key)
+                ON CONFLICT(artifact_key) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue("$key", evidence.Key);
+            cmd.Parameters.AddWithValue("$archive", evidence.RecoveryKey);
+            cmd.Parameters.AddWithValue("$sha", evidence.Sha256);
+            cmd.Parameters.AddWithValue("$etag", evidence.SourceEtag);
+            cmd.Parameters.AddWithValue("$created", evidence.CreatedAt);
+            if (cmd.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("Quarantine evidence already exists or journal is missing");
+        }
+        InsertAudit(db, tx, "prepare", "recovery", evidence.Key, "", "admin-token");
+        tx.Commit();
+    }
+
+    public void FinishQuarantine(string key)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE recovery_quarantines SET completed=1 WHERE artifact_key=$key AND completed=0";
+            cmd.Parameters.AddWithValue("$key", key);
+            if (cmd.ExecuteNonQuery() != 1) throw new InvalidOperationException("Prepared quarantine not found");
+        }
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM publication_intents WHERE artifact_key=$key";
+            cmd.Parameters.AddWithValue("$key", key);
+            if (cmd.ExecuteNonQuery() != 1) throw new InvalidOperationException("Pending intent not found");
+        }
+        InsertAudit(db, tx, "quarantine", "recovery", key, "", "admin-token");
+        tx.Commit();
     }
 
     public void CreateManagedToken(ManagedTokenRecord token)

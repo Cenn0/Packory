@@ -35,6 +35,28 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         return missing;
     }
 
+    public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
+    {
+        "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
+        "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
+        "pypi" => database.PyFiles(pending.Name).Any(
+            file => PyPiEndpoints.Key(file.Name, file.Filename) == pending.Key),
+        _ => database.PackageOrigin(pending.Kind, pending.Name, pending.Version) == "hosted"
+    };
+
+    public string State(PendingPublication pending)
+    {
+        var exists = blobs.Contains(pending.Key);
+        var committed = MetadataCommitted(pending);
+        return (exists, committed) switch
+        {
+            (true, true) => "committed",
+            (false, false) => "not-written",
+            (false, true) => "missing-hosted-blob",
+            _ => "uncommitted-object"
+        };
+    }
+
     public RecoveryReport Reconcile()
     {
         var known = new HashSet<string>(StringComparer.Ordinal);
@@ -117,15 +139,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         foreach (var pending in database.PendingPublications())
         {
             var exists = blobs.Contains(pending.Key);
-            var committed = pending.Kind switch
-            {
-                "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
-                "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
-                "pypi" => database.PyFiles(pending.Name).Any(
-                    file => PyPiEndpoints.Key(file.Name, file.Filename) == pending.Key),
-                _ => database.PackageOrigin(pending.Kind, pending.Name, pending.Version) == "hosted"
-            };
-            if (!exists || committed)
+            var committed = MetadataCommitted(pending);
+            var prepared = database.FindQuarantine(pending.Key);
+            if (prepared is null && (!exists || committed))
             {
                 // Crash before blob creation or after committed metadata: no remote orphan.
                 database.CompletePublication(pending.Key);

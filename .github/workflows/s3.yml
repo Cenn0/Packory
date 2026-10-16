@@ -13,6 +13,21 @@ jobs:
     timeout-minutes: 20
     env:
       PACKORY_TEST_S3: http://127.0.0.1:5000
+      PACKORY_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=packory;Username=packory;Password=test
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: packory
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: packory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U packory -d packory"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,3 +49,5 @@ jobs:
           exit 1
       - name: Test real AWS S3 client requests
         run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~S3ProviderTests
+      - name: Test PostgreSQL-S3 publication recovery and exclusive writer lease
+        run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~PostgresS3RecoveryTests

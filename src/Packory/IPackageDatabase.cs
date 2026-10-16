@@ -10,6 +10,9 @@ public interface IPackageDatabase
     void BeginPublication(string key, string kind, string name, string version);
     void CompletePublication(string key);
     IReadOnlyList<PendingPublication> PendingPublications();
+    QuarantineEvidence? FindQuarantine(string key);
+    void PrepareQuarantine(QuarantineEvidence evidence);
+    void FinishQuarantine(string key);
     void CreateManagedToken(ManagedTokenRecord token);
     ManagedTokenRecord? FindManagedToken(string sha256);
     bool RevokeManagedToken(string id);

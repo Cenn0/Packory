@@ -174,5 +174,91 @@ public sealed class S3BlobStore : BlobStore, IDisposable
         }
     }
 
+    /// <summary>
+    /// Preserve an orphan as independently verified immutable evidence before any
+    /// conditional deletion. A crash before DB PrepareQuarantine leaves the original
+    /// untouched; its extra archive is intentionally not garbage-collected.
+    /// </summary>
+    public async Task<QuarantineEvidence> ArchiveOrphanAsync(string key, CancellationToken ct)
+    {
+        var original = ObjectKey(key);
+        var info = await _client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+        {
+            BucketName = _bucket, Key = original
+        }, ct);
+        var etag = info.ETag;
+        if (string.IsNullOrWhiteSpace(etag))
+            throw new InvalidDataException("S3 orphan ETag is unavailable");
+        using var response = await _client.GetObjectAsync(new GetObjectRequest
+        {
+            BucketName = _bucket, Key = original, EtagToMatch = etag
+        }, ct);
+        var payload = await ReadBoundedAsync(response.ResponseStream, _maxReadBytes, ct);
+        var checksum = Convert.ToHexStringLower(SHA256.HashData(payload));
+        var recovery = "recovery/quarantine/" + Guid.NewGuid().ToString("N") + "/" + key;
+        using (var input = new MemoryStream(payload, writable: false))
+        {
+            var saved = await _client.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = _bucket, Key = ObjectKey(recovery),
+                InputStream = input, IfNoneMatch = "*", AutoCloseStream = false
+            }, ct);
+            if (saved.HttpStatusCode != HttpStatusCode.OK)
+                throw new IOException("Recovery copy was not acknowledged");
+        }
+        var evidence = new QuarantineEvidence(key, recovery, checksum, etag,
+            DateTimeOffset.UtcNow.ToString("O"), false);
+        await VerifyArchivedAsync(evidence, ct);
+        return evidence;
+    }
+
+    public async Task VerifyArchivedAsync(QuarantineEvidence evidence, CancellationToken ct)
+    {
+        if (!evidence.RecoveryKey.StartsWith("recovery/quarantine/", StringComparison.Ordinal) ||
+            !evidence.RecoveryKey.EndsWith("/" + evidence.Key, StringComparison.Ordinal))
+            throw new InvalidDataException("Unexpected quarantine evidence location");
+        using var recovered = await _client.GetObjectAsync(new GetObjectRequest
+        {
+            BucketName = _bucket, Key = ObjectKey(evidence.RecoveryKey)
+        }, ct);
+        var bytes = await ReadBoundedAsync(recovered.ResponseStream, _maxReadBytes, ct);
+        if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != evidence.Sha256)
+            throw new InvalidDataException("Quarantine evidence SHA256 mismatch");
+    }
+
+    /// <summary>Never delete without an already persisted and verified archive.</summary>
+    public async Task DeleteOriginalConditionallyAsync(QuarantineEvidence evidence, CancellationToken ct)
+    {
+        await VerifyArchivedAsync(evidence, ct);
+        try
+        {
+            var head = await _client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+            {
+                BucketName = _bucket, Key = ObjectKey(evidence.Key)
+            }, ct);
+            if (head.ETag != evidence.SourceEtag)
+                throw new InvalidOperationException("Original S3 object changed since recovery copy");
+        }
+        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound)
+        {
+            DeleteCached(evidence.Key);
+            return; // A prior conditional deletion succeeded before a crash.
+        }
+        try
+        {
+            await _client.DeleteObjectAsync(new DeleteObjectRequest
+            {
+                BucketName = _bucket, Key = ObjectKey(evidence.Key),
+                IfMatch = evidence.SourceEtag
+            }, ct);
+        }
+        catch (AmazonS3Exception error) when (
+            error.StatusCode is HttpStatusCode.PreconditionFailed or HttpStatusCode.Conflict)
+        {
+            throw new InvalidOperationException("Conditional S3 deletion refused: object changed", error);
+        }
+        DeleteCached(evidence.Key);
+    }
+
     public void Dispose() => _client.Dispose();
 }
