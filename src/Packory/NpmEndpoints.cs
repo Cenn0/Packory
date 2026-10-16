@@ -149,10 +149,12 @@ public static class NpmEndpoints
             };
             var description = manifest["description"]?.ToString() ?? "";
             var key = NpmKey(name, version);
+            db.BeginPublication(key, "npm", name, version);
             if (!await blobs.PutAsync(key, new MemoryStream(tarball, writable: false), settings.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.Conflict();
             if (!db.PutNpmVersion(name, version, manifest.ToJsonString(), description[..Math.Min(description.Length, 2000)], tags, Access.Actor(ctx)))
                 return Results.Conflict();
+            db.CompletePublication(key);
             return Results.Json(new { ok = true, id = name, version }, statusCode: StatusCodes.Status201Created);
         }).RequireRateLimiting("publish");
     }
