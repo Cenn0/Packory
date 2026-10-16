@@ -54,6 +54,7 @@ public static class SkillEndpoints
             SkillManifest manifest;
             try { manifest = InspectZip(bytes); }
             catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            if (Access.RequireNamespace(ctx, settings, "skill", manifest.Name) is { } forbidden) return forbidden;
             var key = SkillKey(manifest.Name, version);
             using var gate = await locks.AcquireAsync("skill", manifest.Name, version, ctx.RequestAborted);
             if (db.Skills(manifest.Name).Any(x => x.Version == version) || blobs.Existing(key) is not null)
