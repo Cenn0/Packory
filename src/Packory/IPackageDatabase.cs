@@ -7,6 +7,9 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    void BeginPublication(string key, string kind, string name, string version);
+    void CompletePublication(string key);
+    IReadOnlyList<PendingPublication> PendingPublications();
     void CreateManagedToken(ManagedTokenRecord token);
     ManagedTokenRecord? FindManagedToken(string sha256);
     bool RevokeManagedToken(string id);
