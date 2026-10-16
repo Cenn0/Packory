@@ -43,15 +43,19 @@ builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddPolicy("publish", context => RateLimitPartition.GetFixedWindowLimiter(
-        Access.RateLimitPartition(context, settings),
-        _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = settings.PublishRequestsPerMinute,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        }));
+    options.AddPolicy("publish", context =>
+    {
+        var configured = context.RequestServices.GetRequiredService<Settings>();
+        return RateLimitPartition.GetFixedWindowLimiter(
+            Access.RateLimitPartition(context, configured),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = configured.PublishRequestsPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+    });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
