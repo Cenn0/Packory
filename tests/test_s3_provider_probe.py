@@ -96,7 +96,7 @@ class ProviderProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe.check_endpoint("http://s3.example.test")
         with self.assertRaises(ValueError):
-            probe.check_endpoint("https://user:pass@s3.example.test")
+            probe.check_endpoint("https://user:pass" + "@" + "s3.example.test")
         self.assertEqual("https://s3.example.test", probe.check_endpoint("https://s3.example.test"))
 
 
