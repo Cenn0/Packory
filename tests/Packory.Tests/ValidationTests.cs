@@ -58,4 +58,20 @@ public sealed class ValidationTests
             new Settings { DeniedNugetPrefixes = ["../"] }.Validate());
     }
 
+
+    [Theory]
+    [InlineData("ab", "2/ab")]
+    [InlineData("foo", "3/f/foo")]
+    [InlineData("serde", "se/rd/serde")]
+    public void CargoIndexPathFollowsSparseProtocol(string name, string expected) =>
+        Assert.Equal(expected, CargoEndpoints.IndexPath(name));
+
+    [Fact]
+    public void PythonProjectNormalizationUsesPep503Rules()
+    {
+        Assert.Equal("foo-bar-baz", PyPiEndpoints.Normalize("Foo_Bar..baz"));
+        Assert.Null(PyPiEndpoints.Normalize("../secret"));
+        Assert.False(CargoEndpoints.IsName("../foo"));
+    }
+
 }

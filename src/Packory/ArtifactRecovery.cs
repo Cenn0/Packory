@@ -19,9 +19,14 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                 "nuget" => NuGetEndpoints.NugetKey(artifact.Name, artifact.Version),
                 "npm" => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
                 "skill" => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                "cargo" => CargoEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null || blobs.Existing(key) is null) missing++;
+        }
+        foreach (var file in database.PyFiles())
+        {
+            if (blobs.Existing(PyPiEndpoints.Key(file.Name, file.Filename)) is null) missing++;
         }
         return missing;
     }
@@ -40,6 +45,8 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                     => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
                 "skill" when Names.Skill(artifact.Name) && Names.Version(artifact.Version)
                     => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                "cargo" when CargoEndpoints.IsName(artifact.Name) && CargoEndpoints.IsVersion(artifact.Version)
+                    => CargoEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null)
@@ -57,6 +64,12 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
             }
         }
 
+        foreach (var file in database.PyFiles())
+        {
+            var key = PyPiEndpoints.Key(file.Name, file.Filename);
+            known.Add(key);
+            if (blobs.Existing(key) is null) missingHosted++;
+        }
         var root = Path.Combine(Path.GetFullPath(settings.DataDirectory), "blobs");
         var quarantine = Path.Combine(Path.GetFullPath(settings.DataDirectory), "recovery", "orphaned",
             DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmss") + "-" + Guid.NewGuid().ToString("N"));
@@ -68,7 +81,12 @@ public sealed class ArtifactRecovery(Settings settings, Database database, BlobS
                 var key = Path.GetRelativePath(root, path).Replace('\\', '/');
                 var immutable = key.StartsWith("nuget/", StringComparison.Ordinal) && key.EndsWith(".nupkg", StringComparison.Ordinal) ||
                     key.StartsWith("npm/", StringComparison.Ordinal) && key.EndsWith(".tgz", StringComparison.Ordinal) ||
-                    key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal);
+                    key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal) ||
+                    key.StartsWith("cargo/", StringComparison.Ordinal) && key.EndsWith(".crate", StringComparison.Ordinal) ||
+                    key.StartsWith("pypi/", StringComparison.Ordinal) &&
+                    (key.EndsWith(".whl", StringComparison.Ordinal) ||
+                     key.EndsWith(".tar.gz", StringComparison.Ordinal) ||
+                     key.EndsWith(".zip", StringComparison.Ordinal));
                 if (!immutable || known.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

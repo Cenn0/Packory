@@ -71,6 +71,9 @@ public static class Access
             }
             catch (FormatException) { }
         }
+        if (string.IsNullOrWhiteSpace(token) && context.Request.Path.StartsWithSegments("/cargo") &&
+            !string.IsNullOrWhiteSpace(auth) && !auth.Contains(' ') && !auth.Contains('\t'))
+            token = auth; // Cargo's registry API uses a bare Authorization token.
         if (string.IsNullOrWhiteSpace(token)) token = context.Request.Headers["X-NuGet-ApiKey"].ToString();
         return !string.IsNullOrWhiteSpace(token) && token.Length <= 8192 ? token : null;
     }

@@ -59,3 +59,8 @@ SQLite is suitable for a **single writer/deployment** and basic searches at MVP 
 Moving to PostgreSQL/object storage should be behind repository interfaces, with a **single-writer lease or transactional outbox** for metadata/blob durability. Private namespace reservations suppress public upstream metadata and file fallback. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
 
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
+
+
+## Experimental native registry adapters (Cargo and PyPI)
+
+The hosted Cargo alternate registry uses its own native sparse index and Cargo publish wire format; PyPI serves PEP 503/691 HTML/JSON and accepts legacy multipart uploads. Both share SQLite catalog, static-token access, artifact locks, audit and local blobs with the existing modules. Crate and distribution files are immutable per key. See [Cargo and PyPI](cargo-pypi.md) for missing protocol features, test coverage and security limits.
