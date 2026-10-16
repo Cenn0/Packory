@@ -17,7 +17,7 @@ V2 management APIs use Bearer tokens (`Authorization: Bearer …`). API secrets 
 | GET | `/api/v1/jobs` | `system.admin` | Inspect persistent jobs |
 | POST | `/api/v1/maintenance/reconcile` | `system.admin` | Queue staging/CAS reconciliation |
 
-Valid feed protocols: `nuget`, `npm`, `raw`, `skills`, `mcp`. Valid modes: `hosted`, `proxy`. Proxy mode is restricted to NuGet and npm with known approved HTTPS origins. Unused feed protocols do **not** imply a working native adapter.
+Valid feed protocols: `nuget`, `npm`, `raw`, `skills`, `mcp`, `cargo`, `pypi`. Valid modes: `hosted`, `proxy`. Proxy mode is restricted to NuGet and npm with known approved HTTPS origins. Unused feed protocols do **not** imply a working native adapter.
 
 Token scopes: `catalog.read`, `repository.read`, `artifact.publish`, `artifact.yank`, `repository.manage`, `policy.manage`, `mcp.publish`, `system.admin`. For most client tokens, set a specific feed. Legacy environment tokens remain global for backwards compatibility.
 
@@ -36,6 +36,14 @@ Token scopes: `catalog.read`, `repository.read`, `artifact.publish`, `artifact.y
 `GET /r/npm/{feed}/{name}` returns a packument; version-specific metadata and `/-/{version}.tgz` tarballs are supported. Origin tarball URLs are restricted to approved HTTPS hosts and converted to feed-local Packory URLs. Verify `integrity` or `shasum` before catalog publication. Hosted `PUT /r/npm/{feed}/{name}` accepts single-version npm publish JSON with one base64 attachment.
 
 **Known limitation:** npm full command coverage is not claimed; `npm login`, unpublish, scoped publish edges and metadata freshness rules require additional development.
+
+## Cargo sparse index (experimental)
+
+`GET /r/cargo/{feed}/index/config.json` returns Cargo download metadata. `GET /r/cargo/{feed}/index/{path}` returns checksum-anchored JSON Lines using Cargo's crate-name sharding. `GET /r/cargo/{feed}/api/v1/crates/{crate}/{version}/download` serves an immutable `.crate` archive. The initial Packory-specific upload method is `PUT /r/cargo/{feed}/publish/{crate}/{version}` with a gzip-compatible body. Cargo standard publisher API and client conformance are not claimed.
+
+## PyPI Simple API (experimental)
+
+`GET /r/pypi/{feed}/simple/` lists hosted project names. `GET /r/pypi/{feed}/simple/{normalized-project}/` returns HTML links to hosted files with SHA-256 fragments, and `GET /r/pypi/{feed}/files/{filename}` downloads the original immutable wheel/sdist. The initial **nonstandard** upload method is `PUT /r/pypi/{feed}/upload/{project}/{version}/{filename}`. PEP 691 JSON, Twine publishing and native pip installs must still be verified.
 
 ## MCP registry (experimental)
 

@@ -35,7 +35,7 @@
         <form id="create-feed" class="panel form-panel" aria-labelledby="feed-title">
           <h3 id="feed-title">Create a repository</h3>
           <label for="feed-slug">Unique slug</label><input required id="feed-slug" name="slug" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="team-packages">
-          <label for="feed-protocol">Native protocol</label><select id="feed-protocol" name="protocol"><option value="raw">Raw files</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="skills">Skills</option><option value="mcp">MCP metadata</option></select>
+          <label for="feed-protocol">Native protocol</label><select id="feed-protocol" name="protocol"><option value="raw">Raw files</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="cargo">Cargo</option><option value="pypi">PyPI</option><option value="skills">Skills</option><option value="mcp">MCP metadata</option></select>
           <label for="feed-mode">Mode</label><select id="feed-mode" name="mode"><option value="hosted">Hosted</option><option value="proxy">Proxy (NuGet / npm)</option></select>
           <label for="feed-visibility">Visibility</label><select id="feed-visibility" name="visibility"><option value="private">Private</option><option value="public">Public read</option></select>
           <label for="feed-upstream">Proxy upstream</label><input id="feed-upstream" name="upstream" placeholder="https://api.nuget.org/v3-flatcontainer/">

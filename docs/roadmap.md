@@ -8,7 +8,7 @@ Packory V2 introduces isolated repositories, a common CAS, control-plane authori
 2. **Native protocols:** complete NuGet V3 and npm conformance, transitive cold/warm/offline actual client installs, metadata handling, typed origin errors and concurrency tests.
 3. **Enterprise access:** optional OIDC/Keycloak with strict subject-based mapping and CSRF-secured dashboard sessions; complete Keycloak E2E and role-change tests required before support.
 4. **AI distribution:** full Agent Skills schema + Git provenance/approval, MCP Registry OpenAPI pinned with publishing/namespace ownership, Packory MCP server read-only.
-5. **More distribution formats:** native Cargo, PyPI and OCI adapters (not format-emulated Raw uploads), optional content-signature attestations and larger model bundles.
+5. **More distribution formats:** initial experimental Cargo sparse and PyPI Simple endpoints now exist; finish native Cargo/PyPI publication and real client acceptance, then implement full OCI Distribution, model bundles and optional attestations.
 6. **Operations:** bounded metadata TTL, comprehensive reconciliation and GC, fault injection, checksum scrub, backup/restore drill, tenant quotas and horizontal read-only scaling.
 7. **Secondary storage profile:** PostgreSQL and S3, only after separate migrations, locking and provider tests; no unsupported multi-writer SQLite deployments.
 

@@ -27,7 +27,7 @@ public static class ControlPlaneEndpoints
         app.MapPost("/api/v1/repositories",(CreateFeedRequest input,HttpContext ctx,Settings s,V2Catalog db)=>
         {
             if(ScopedAccess.Require(ctx,s,db,null,"repository.manage") is { } denied)return denied;
-            if(!SlugRule.IsMatch(input.Slug??"") || input.Protocol is not ("nuget" or "npm" or "raw" or "skills" or "mcp") ||
+            if(!SlugRule.IsMatch(input.Slug??"") || input.Protocol is not ("nuget" or "npm" or "raw" or "skills" or "mcp" or "cargo" or "pypi") ||
                input.Mode is not ("hosted" or "proxy") || input.Visibility is not ("private" or "public"))
                 return Results.BadRequest(new {error="Invalid repository configuration"});
             if(input.Mode=="proxy" && (input.Protocol is not ("nuget" or "npm") ||

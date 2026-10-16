@@ -99,6 +99,8 @@ RawEndpoints.Map(app);
 NativeNugetV2.Map(app);
 NativeNpmV2.Map(app);
 McpRegistryEndpoints.Map(app);
+PypiEndpoints.Map(app);
+CargoEndpoints.Map(app);
 app.Run();
 
 public partial class Program { }

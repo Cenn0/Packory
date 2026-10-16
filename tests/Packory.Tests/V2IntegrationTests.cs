@@ -244,4 +244,51 @@ public sealed class V2IntegrationTests
         }
         finally{if(Directory.Exists(root))Directory.Delete(root,true);}
     }
+
+    [Fact]
+    public async Task Cargo_Hosted_SparseIndexAndCrate_UseOriginalBytes()
+    {
+        using var server=new Server();using var client=server.CreateClient();
+        Assert.Equal(HttpStatusCode.Created,(await client.SendAsync(R(HttpMethod.Post,"/api/v1/repositories",
+            NewFeed("rust-team","cargo")))).StatusCode);
+        byte[] archive=[0x1f,0x8b,0x08,0,0,0,0,0];
+        Assert.Equal(HttpStatusCode.Created,(await client.SendAsync(R(HttpMethod.Put,
+            "/r/cargo/rust-team/publish/toolbox/1.0.0",new ByteArrayContent(archive)))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,(await client.GetAsync("/r/cargo/rust-team/index/config.json")).StatusCode);
+        var config=await (await client.SendAsync(R(HttpMethod.Get,"/r/cargo/rust-team/index/config.json"))).Content.ReadAsStringAsync();
+        Assert.Contains("/r/cargo/rust-team/api/v1/crates",config);
+        var index=await (await client.SendAsync(R(HttpMethod.Get,"/r/cargo/rust-team/index/to/ol/toolbox"))).Content.ReadAsStringAsync();
+        Assert.Contains(Convert.ToHexStringLower(SHA256.HashData(archive)),index);
+        Assert.Contains("\"vers\":\"1.0.0\"",index);
+        var bytes=await (await client.SendAsync(R(HttpMethod.Get,
+            "/r/cargo/rust-team/api/v1/crates/toolbox/1.0.0/download"))).Content.ReadAsByteArrayAsync();
+        Assert.Equal(archive,bytes);
+        Assert.Equal(HttpStatusCode.Conflict,(await client.SendAsync(R(HttpMethod.Put,
+            "/r/cargo/rust-team/publish/toolbox/1.0.0",new ByteArrayContent(archive)))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Pypi_Hosted_NormalizesProjectAndServesHashedSimpleLinks()
+    {
+        using var server=new Server();using var client=server.CreateClient();
+        Assert.Equal(HttpStatusCode.Created,(await client.SendAsync(R(HttpMethod.Post,"/api/v1/repositories",
+            NewFeed("python-team","pypi",visibility:"public")))).StatusCode);
+        byte[] wheel=Encoding.UTF8.GetBytes("dummy wheel bytes for metadata boundary testing");
+        var filename="Example_Pkg-2.0.0-py3-none-any.whl";
+        Assert.Equal(HttpStatusCode.Created,(await client.SendAsync(R(HttpMethod.Put,
+            "/r/pypi/python-team/upload/Example_Pkg/2.0.0/"+filename,new ByteArrayContent(wheel)))).StatusCode);
+        var index=await client.GetStringAsync("/r/pypi/python-team/simple/example-pkg/");
+        Assert.Contains("#sha256="+Convert.ToHexStringLower(SHA256.HashData(wheel)),index);
+        Assert.Contains(filename,index);
+        Assert.Equal(wheel,await client.GetByteArrayAsync("/r/pypi/python-team/files/"+filename));
+        Assert.Equal(HttpStatusCode.BadRequest,(await client.SendAsync(R(HttpMethod.Put,
+            "/r/pypi/python-team/upload/..invalid/1.0.0/bad.txt",new ByteArrayContent(wheel)))).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Example_Pkg","example-pkg")]
+    [InlineData("foo..BAR","foo-bar")]
+    [InlineData("..invalid",null)]
+    public void PyPI_Normalizes_Names(string raw,string? expected)=>
+        Assert.Equal(expected,PypiEndpoints.NormalizeProject(raw));
 }

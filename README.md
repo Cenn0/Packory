@@ -83,6 +83,20 @@ Create a hosted feed with `protocol=npm,mode=hosted` or a proxy with `protocol=n
 
 Published tarballs are immutable and feed isolated; proxy tarballs verify declared `sha512` integrity or `sha1` shasum before their metadata becomes visible in the V2 catalog. Only public registry origins explicitly approved in the code are accepted currently. npm `login`, unpublish and client-wide conformance are **not claimed**.
 
+### Cargo (experimental native sparse index)
+
+Create a `cargo` hosted repository. Its Cargo sparse index starts at:
+
+```text
+sparse+https://your-packory-host/r/cargo/{feed}/index/
+```
+
+`GET /r/cargo/{feed}/index/config.json` describes the download URL; `GET /r/cargo/{feed}/index/{crate-index-path}` provides checksum-pinned JSONL, and `GET /r/cargo/{feed}/api/v1/crates/{name}/{version}/download` serves immutable `.crate` archives. Initial publishing uses an **Packory-specific** `PUT /r/cargo/{feed}/publish/{name}/{version}` of the `.crate` bytes. The Cargo standard `cargo publish` endpoint and crates.io Source Replacement are **not yet supported**, and actual `cargo build` conformance remains unverified.
+
+### PyPI (experimental hosted Simple API)
+
+Create a `pypi` hosted repository; use `https://your-packory-host/r/pypi/{feed}/simple/` as a pip `--index-url`. Project names are normalized according to the Simple API rules, and immutable wheel/sdist downloads include SHA-256 integrity fragments. Initial package publishing uses an **Packory-specific** `PUT /r/pypi/{feed}/upload/{project}/{version}/{filename}`. Standard Twine upload, full PEP 691 JSON metadata and real pip dependency-resolution tests remain future compatibility gates.
+
 ### MCP server discovery (metadata only)
 
 A metadata registry is available under `/v0.1/servers` and `/v0.1/publish`. Publication currently requires administrative authorization and places entries into **quarantine**. Separate approval is required before discovery; remote MCP tools are **never executed or proxied by Packory**. This is an implementation of a subset of the generic MCP Registry preview API, not full conformity certification. [Read the API details](docs/api-v2.md).

@@ -16,8 +16,8 @@ Current source state: V2 modular-monolith foundation, additive to the earlier AP
 | Audit log and persistent maintenance queue | Yes | Integration-test level | Retry/lease behavior under crash and retention/quota policy |
 | Dashboard | Existing JS with V2 administration pages | Functional UX prototype | Usability/E2E and accessible testing; React/TypeScript migration |
 | Optional Keycloak/OIDC BFF | Planned | **Not implemented** | Secure local/session design, OIDC E2E with Keycloak and CSRF |
-| Cargo native adapter | Planned | **Not implemented** | Sparse index, publish/source-replacement and client conformance |
-| PyPI native adapter | Planned | **Not implemented** | Simple API and native `pip`/Twine conformance |
+| Cargo sparse index + downloads | Yes, hosted experimental | **Not fully qualified** | Standard `cargo publish`, Source Replacement and `cargo build` E2E |
+| PyPI Simple HTML + hosted wheels/sdists | Yes, hosted experimental | **Not fully qualified** | PEP 691 JSON, Twine upload, real `pip` E2E |
 | OCI distribution / model bundles | Planned | **Not implemented** | Full `/v2/`, layers/manifests/referrers and large-object transfer |
 | PostgreSQL / S3 | Planned | **Not implemented** | Separate provider implementation and qualification |
 | Packory MCP server / MCP gateway | Planned | **Not implemented** | MCP C# SDK integration, scopes and threat model |

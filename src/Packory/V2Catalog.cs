@@ -26,7 +26,7 @@ public sealed class V2Catalog(Database db)
             );
             CREATE TABLE IF NOT EXISTS repositories (
                 slug TEXT PRIMARY KEY COLLATE BINARY,
-                protocol TEXT NOT NULL CHECK (protocol IN ('raw','nuget','npm','skills','mcp')),
+                protocol TEXT NOT NULL CHECK (protocol IN ('raw','nuget','npm','skills','mcp','cargo','pypi')),
                 mode TEXT NOT NULL CHECK (mode IN ('hosted','proxy')),
                 visibility TEXT NOT NULL CHECK (visibility IN ('private','public')),
                 upstream TEXT,

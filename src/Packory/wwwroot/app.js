@@ -71,6 +71,8 @@ function feedEndpoint(item) {
   if (item.protocol === 'raw') return `/r/raw/${item.slug}/{version}/{path}`;
   if (item.protocol === 'nuget') return `/r/nuget/${item.slug}/v3/index.json`;
   if (item.protocol === 'npm') return `/r/npm/${item.slug}/`;
+  if (item.protocol === 'cargo') return `/r/cargo/${item.slug}/index/`;
+  if (item.protocol === 'pypi') return `/r/pypi/${item.slug}/simple/`;
   return `/api/v1/repositories/${item.slug}`;
 }
 async function loadControlPlane() {
