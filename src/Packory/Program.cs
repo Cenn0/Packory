@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using Packory;
-using System.Security.Cryptography;
 using System.Text;
+using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder(args);
 var settings = new Settings();
@@ -49,6 +49,9 @@ if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NUGET_PREFIXES") is { } d
     settings.DeniedNugetPrefixes = deniedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NPM_SCOPES") is { } deniedNpm)
     settings.DeniedNpmScopes = deniedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_MAX_BLOB_STORAGE_BYTES") is { } maxBlobStorage)
+    settings.MaxBlobStorageBytes = long.TryParse(maxBlobStorage, out var parsedBlobCapacity)
+        ? parsedBlobCapacity : throw new InvalidOperationException("Invalid PACKORY_MAX_BLOB_STORAGE_BYTES.");
 if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is { } maxPublish)
     settings.PublishRequestsPerMinute = int.TryParse(maxPublish, out var parsedPublish)
         ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
@@ -138,6 +141,7 @@ app.Use(async (ctx, next) =>
     try { await next(ctx); }
     catch (Amazon.S3.AmazonS3Exception) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 503; }
     catch (PayloadTooLargeException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 413; }
+    catch (StorageQuotaExceededException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 507; }
     catch (HttpRequestException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
     catch (TaskCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
     { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 504; }
@@ -168,6 +172,13 @@ app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, IPackage
     if (before <= 0) return Results.BadRequest(new { error = "before must be positive" });
     return Results.Json(new { items = db.AuditEvents(before, limit ?? 50) });
 });
+app.MapPost("/api/admin/cache/mutable/evict", (Settings cfg, BlobStore blobs, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    if (cfg.BlobProvider != "filesystem")
+        return Results.Conflict(new { error = "Local metadata eviction is only supported with filesystem storage" });
+    return Results.Ok(new { evictedFiles = blobs.EvictMutableMetadata() });
+}).RequireRateLimiting("publish");
 app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
