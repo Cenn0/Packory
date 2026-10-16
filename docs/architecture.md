@@ -48,13 +48,13 @@ Modules:
 
 ## Persistence and consistency
 
-SQLite remains the default **single-instance** profile; PostgreSQL metadata and S3 object storage are optional and tested separately. Neither profile guarantees multi-node publishing. Database transactions and object-store writes are **not** a shared distributed ACID transaction. On unexpected termination, an artifact may exist without a catalog entry. Before traffic starts, recovery moves unindexed immutable files to `data/recovery/orphaned/` and logs the count; it does not delete them. Missing hosted blobs degrade `/health/ready` (HTTP 503). This is recovery of **visibility**, not a cross-store ACID transaction or automated restoration of missing bytes. Consistent metadata-database snapshots plus artifact-store backups are required for restoration. Avoid concurrent replicas on the same directory; WAL is not multi-host coordination.
+SQLite remains the default **single-instance** profile; PostgreSQL metadata and S3 object storage are optional and tested separately. Neither profile guarantees multi-node publishing. Database transactions and object-store writes are **not** a shared distributed ACID transaction. On unexpected termination, an artifact may exist without a catalog entry. Before traffic starts, recovery moves unindexed local immutable files to `data/recovery/orphaned/` and logs the count without deleting them. PostgreSQL/S3 publication journals and opt-in reviewed remote quarantine provide a separate recovery path; they do not constitute a real-provider restore guarantee. Missing hosted blobs degrade `/health/ready` (HTTP 503). This is recovery of **visibility**, not a cross-store ACID transaction or automated restoration of missing bytes. Consistent metadata-database snapshots plus artifact-store backups are required for restoration. Avoid concurrent replicas on the same directory; WAL is not multi-host coordination.
 
 `origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions and skills enter immediately after successful upload. Search is not federated across remote registries in MVP.
 
 ## Constraints and next decisions
 
-PostgreSQL and S3 are now selectable providers behind storage interfaces, but a **single-writer lease or transactional outbox**, migration tooling and verified combined recovery are still needed for stronger durability. Private namespace reservations suppress public upstream metadata and file fallback. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
+PostgreSQL and S3 are selectable providers. A PostgreSQL **single-writer advisory lease**, durable publication intent journal and explicit S3 orphan quarantine are implemented and emulator-tested, but this does **not** establish partition fencing, a coordinated DB/object-store transaction, migration tooling or a verified real-provider restore. Private namespace reservations suppress public upstream metadata and file fallback. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
 
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
 
@@ -67,3 +67,7 @@ The hosted Cargo alternate registry uses its own native sparse index and Cargo p
 ## Hosted OCI adapter (experimental)
 
 OCI distribution routes use their own `/v2/` namespace. Digest-indexed blobs and immutable manifests are stored in the shared artifact file store; repository/blob associations, digest-tag pointers and referrers are recorded in the selected metadata database. Uploads have bounded short-lived disk staging sessions, and manifest references require existing repository-scoped content. The adapter does not claim full OCI Distribution Spec conformance or Docker Bearer-token support. See [OCI](oci.md).
+
+## V3 evolution (not implemented)
+
+The current global catalog does **not** yet provide independent Feed/Namespace/Policy entities, CAS reference counting, or a browser BFF. Add them only through versioned migrations and separately authorized APIs. See [ADR-001](adr/0001-v3-platform-boundaries.md), [support matrix](support-matrix.md) and [release gates](release-gates.md). Restricted S3/PostgreSQL reader replicas exist, while NuGet/npm mirror GETs remain disabled on readers; no active-active writing.

@@ -2,23 +2,30 @@
 
 [← English README](../README.md) · [Deutsch](../README.de.md)
 
-Packory is a self-hosted **MVP** for NuGet, npm and versioned agent skills, not a production-certified replacement for either complete upstream registry protocol.
+Packory is an **experimental self-hosted registry hub**, not a production-certified replacement for complete upstream registries. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI and Agent Skills, each with its own compatibility limitations.
 
 | Goal | Guide |
 | --- | --- |
-| Get started locally | [Quick start](../README.md#quick-start) |
-| Protocol endpoints, authorization and examples | [API](api.md) |
-| Modular architecture and storage consistency | [Architecture](architecture.md) |
-| Deployment, TLS, static tokens and backups | [Operations](operations.md) |
-| Supported MVP features and future work | [Roadmap](roadmap.md) |
-| Contribute and report a defect | [Contributing](../CONTRIBUTING.md) |
-| Privately report a vulnerability | [Security](../SECURITY.md) |
+| Start locally | [Quick start](../README.md#quick-start) |
+| Native APIs, access and examples | [API](api.md) |
+| Actual runtime topology and persistence | [Architecture](architecture.md) |
+| Versioned architecture decision | [ADR-001 V3 boundaries](adr/0001-v3-platform-boundaries.md) |
+| Tested native clients and deployment profiles | [Support matrix](support-matrix.md) |
+| Production blockers and real-provider recovery | [Release gates](release-gates.md) |
+| Deployment, TLS, tokens and backups | [Operations](operations.md) |
+| Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
+| Cargo and PyPI specifics | [Cargo / PyPI](cargo-pypi.md) |
+| OCI capabilities | [OCI](oci.md) |
+| S3 single-writer recovery limitations | [S3](s3.md) |
+| OIDC / optional Keycloak | [OIDC](oidc-keycloak.md) |
+| Contribute/report defects | [Contributing](../CONTRIBUTING.md) |
+| Report security issues privately | [Security](../SECURITY.md) |
 
-## What the evidence means
+## Evidence is scoped
 
-- **Implemented:** core NuGet V3 package routes, npm registry routes and agent-skill ZIP import.
-- **Tested:** unit/integration cases and CI. Consult the result of the separate [live registry workflow](../.github/workflows/smoke-live.yml) for a specific real-client run; the workflow file alone proves nothing.
-- **Not guaranteed:** full native protocol parity, multi-node consistency or production suitability.
-- **Security best practice:** HTTPS via a trusted reverse proxy, credentials outside Git and a consistent backup of SQLite and artifact files.
+- **Implemented:** named routes and storage/authentication code exist on main.
+- **Tested:** consult CI workflow commit checks and [the versioned matrix](support-matrix.md), including local fake origins and Moto.
+- **Not guaranteed:** full client protocol parity, browser SSO/BFF, real S3 backup and restore, active-active/multi-writer safety or production readiness.
+- **Security best practice:** HTTPS, least-privilege runtime credentials outside Git, namespace reservations, explicit operational backup and isolated restore drills.
 
-No UI screenshot is included until a source-verified, privacy-safe capture is available. The [architecture diagram](architecture.md) documents components rather than certified deployment behavior.
+No screenshot is published until the source is verified to contain no private project, identities, secrets or addresses.

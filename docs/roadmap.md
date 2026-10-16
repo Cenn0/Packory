@@ -1,95 +1,166 @@
-# Packory roadmap
+# Packory roadmap V3 — evidence-based delivery plan
 
-The objective is **one self-hosted registry platform for heterogeneous developer and AI artifacts**, without turning it into a Git forge. Sequence work by actual native-client compatibility, security, and maintainability rather than adding microservices prematurely.
+**Baseline:** 17 October 2026; code review against [main at 5f0c6c44d0fba1de0ce41b292f06436aa5801687](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687). This is a delivery plan, not a statement that future features have shipped. The [support matrix](support-matrix.md) and [release gates](release-gates.md) are normative for support claims.
 
-## Milestone 0 — First MVP (this repository)
+## Product scope and architecture
 
-- [x] .NET 10 modular monolith, Docker runtime, SQLite + filesystem storage
-- [x] NuGet v3 service discovery, flat-container pull-through, package hash and `.nuspec`, registration rewrite, basic search and hosted push
-- [x] npm packument proxy, rewritten cached tarballs, basic scoped packages and single-version publishing
-- [x] Unified indexed/hosted catalog, simple dashboard, health endpoints
-- [x] Versioned Agent Skills ZIP import/download and basic manifest validation
-- [x] Static read/write/admin API tokens and safe-by-default write access
-- [x] Automated integration/unit tests, build + container CI, opt-in live NuGet restore smoke test
-- [x] README, API/architecture/operations/security/contribution docs
+Packory is a self-hosted distribution hub for NuGet, npm, Cargo, PyPI, OCI, Agent Skills, MCP registry metadata and eventually vetted AI model artifacts. It is **not** a Git forge, CI server, general URL proxy or execution engine. The reference runtime stays a **modular ASP.NET Core/.NET 10 monolith**; do not introduce microservices or multiple active writers without measured operational justification. Protocol adapters preserve their native wire contracts while sharing identity, policy, feed/catalog metadata and blob abstractions.
 
-**MVP exit criteria:** CI green, deterministic protocol tests green, a real `dotnet restore` via Packory from nuget.org and a real npm install through registry.npmjs.org succeed, hosted NuGet/npm publish works in tested client versions, and the deployment can be recovered from backup. **An implementation checked into main is not proof that all those runtime acceptance criteria are met**; live tests and client-version matrix must be completed before production use.
+Invariant: immutable artifact bytes and authoritative metadata visibility. PostgreSQL and S3 are **not** one ACID transaction; every publish boundary requires a durable intent and controlled recovery. Keycloak/OIDC is optional. Browsers require a future server-side BFF, not long-lived provider tokens in localStorage. AI content is never executed by the Packory process.
 
-## Milestone 1 — Hardening and client compatibility
+**Public privacy policy:** do not publish real names, personal e-mail addresses, credentials, internal URLs, operational logs or private production data anywhere in source, Git metadata, documentation, issues or CI artifacts. Keep examples synthetic.
 
-- [ ] Test and fix `dotnet restore`, `dotnet nuget push`, `npm install`, `npm publish` using real CLIs (deterministic hosted publish/restore for one NuGet package and one scoped npm package, including `npm ci`, now in pull-request CI; broader native client versions, transitive dependencies, SemVer/edge cases and live upstream acceptance are still open)
-- [ ] NuGet complete registration semantics, search fallback, version normalization, package types, content digests, controlled redirects/retries and structured errors
-- [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
-- [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks (in progress; in-process key locks, atomic SQLite skill+catalog publication, quarantine of orphan blobs and missing-hosted detection implemented; full crash-injection verification and CAS publication outstanding)
-- [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction (in progress: transactional audit of successful hosted publishing and role-partitioned write rate limits implemented; other actions, retention, metrics, quotas and eviction outstanding)
-- [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow (strict upstream NuGet checksum enforcement and NuGet/npm namespace-deny policy implemented; full security scanning and license compliance require external scanners, policies and evidence)
-- [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
+## Evidence levels
 
-### Native client acceptance additions
+| Label | Mandatory evidence |
+| --- | --- |
+| Implemented | Merged source exists; runtime behavior not implied. |
+| Tested | Versioned reproducible test of the specific operation and deployment context passes. |
+| Supported by Packory | Published client/provider/operation matrix, positive and negative tests, documented configuration, upgrade/rollback acceptance. This is **not** certification from a client vendor. |
+| Recommended for production | Security review, tested backup/restore on the actual provider, operator handbook, incident drills and measured reliability/SLO evidence. |
 
-- [x] Isolated hosted Cargo alternate registry publish and consumption via real Cargo CLI.
-- [x] Real pip install of a hosted wheel and its hosted transitive dependency via the PyPI Simple API, without a second package index.
-- [x] A dedicated CI smoke matrix repeats the hosted Cargo/pip scenarios with Python 3.12 and 3.13 on the current Linux-hosted Rust toolchain. This checks these two interpreter contexts, not broad Cargo/Twine/multi-OS compatibility.
-- [x] One isolated native Docker CLI login/push/tag-discovery/pull against Packory OCI (local scratch image, no upstream image).
-- [ ] A broader OCI / Helm / ORAS client matrix, real public registry pull-through and a broad package-version matrix are still outstanding.
+No CI green check by itself establishes the fourth level.
 
-### Milestone 1 delivery: consistency and namespace isolation
+## Baseline inventory (17 October 2026)
 
-- [x] Single-flight NuGet and npm artifact fetches and serialized hosted publishing by immutable artifact key (single process, bounded stripe pool).
-- [x] Reserved NuGet prefixes and npm scopes with explicit no-public-upstream-fallback behavior.
-- [x] One SQLite transaction for Agent Skill metadata and catalog entry; no mirrored overwrite of hosted catalog origin.
-- [x] Pre-start orphan quarantine and degraded readiness for missing hosted blobs; quarantine is non-destructive.
-- [x] Deterministic concurrency, unsigned npm payload, reserved namespace and crash-orphan regression tests.
-- [x] SQLite audit records committed atomically with hosted NuGet/npm/Skill metadata; read access restricted to the admin token.
-- [x] Configurable per-role publish rate limiter (429 on exhaustion, no unbounded partitions created from user-supplied credentials).
-- [x] Live readiness recalculates missing hosted blobs, fail-closed mirrored NuGet checksum validation and namespace-deny policies for NuGet/npm.
-- [x] Real CLI hosted acceptance: `dotnet pack` → `dotnet nuget push` → isolated `dotnet restore/build`; `npm publish` → isolated `npm install` and fresh-cache `npm ci`, including scoped package names, without public upstream fallback.
-- [ ] Per-token identity, lifecycle, immutable full action audit, storage quotas and cache eviction remain pending.
-- [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
+| Subsystem | Implemented at baseline | Open limitations |
+| --- | --- | --- |
+| NuGet | Hosted push, basic V3, upstream read-through, native CLI smoke | Registration/SemVer and failure/client matrix |
+| npm | Hosted publish, mirror, native `npm publish/install/ci` | Packument/dist-tag/auth edge cases |
+| Cargo | Hosted sparse registry, publish/consume with native Cargo | No crates.io proxy or yank/unyank |
+| PyPI | Hosted Simple API HTML/JSON, upload, pip smoke | No upstream proxy, sidecars/Twine matrix |
+| OCI | Hosted blob/manifest/tag/referrer API, Docker smoke | Local upload sessions, no standard Bearer grant server, limited clients |
+| Agent Skills | Validated ZIP import/list/download | Provenance, review and approval absent |
+| Persistence | SQLite/filesystem; optional PostgreSQL/S3, intent journal and quarantine | No proven coordinated real-provider restore |
+| Authentication | Static/hashed revocable scoped tokens; optional OIDC JWT/Keycloak tests | No interactive BFF or complete policy audit |
+| Topology | Exclusive PostgreSQL writer, restricted readers | No partition fencing or active-active guarantees |
+| UI | Static catalog/skill importer | No feed, policy, identity or operations administration |
+| Raw/MCP/models | Architecture concepts | Not implemented in main runtime |
 
-### Keycloak acceptance
+PRs [#25–#35](https://github.com/Cenn0/Packory/pulls?q=is%3Apr+is%3Amerged) already contributed offline backup, quotas, scoped tokens, native smoke tests, writer lease, read topology and strict preflight. Do not reimplement them from scratch. The historical [V2 PR #8](https://github.com/Cenn0/Packory/pull/8) was **not merged**; selectively review its feed/CAS/control-plane/Raw/MCP concepts, never mass-merge it. [Issue #36](https://github.com/Cenn0/Packory/issues/36) tracks deployment acceptance blockers.
 
-- [x] Disposable real-Keycloak HTTPS discovery, audience-mapped signed JWT and read/write/admin permission checks in dedicated CI.
-- [ ] Interactive dashboard authorization-code/PKCE login with a CSRF-protected server-side BFF session and lifecycle tests remains outstanding.
+## Delivery gates and acceptance matrix
 
-## Milestone 2 — Operational and governance features
+Priority P0 = data-loss/security/release blocking; P1 = core platform; P2 = extension; P3 = conditional scaling. The acceptance tests below apply to each feature independently, not merely the milestone heading.
 
-- [ ] Token lifecycle, scoped permissions, users/OIDC, write restrictions per namespace/package (optional OIDC JWT resource-server auth and explicit read/write/admin scopes implemented; browser BFF, identity lifecycle, native scopes by package and live Keycloak tests outstanding)
-- [ ] PostgreSQL backend; S3-compatible object storage; restore/migration tooling (full PostgreSQL metadata provider with isolated CI integration tests implemented; S3 conditional immutable object backing with local cache and Moto CI implemented; SQLite migration, cross-store transactional outbox and coordinated backups still open)
-- [ ] Registry metrics, dashboard administration, pagination, full-text search, reporting
-- [ ] Strong Agent Skills conformance, signature/provenance support and vetted import sources
-- [ ] Policy for npm upstream metadata freshness, mirror pinning and offline determinism
+### MS0 — Consolidation and engineering controls (P0)
 
-## Milestone 3 — More ecosystems
+| ID | Work and owner-independent acceptance | Evidence |
+| --- | --- | --- |
+| M0.1 | Replace contradictory historical roadmap claims with this status-driven backlog; verify PRs #25–#35 and issue #36 | Main diff + PR review |
+| M0.2 | Reconcile architecture/S3/OIDC/OCI/API docs to actual code, remove misleading support claims | Source comparison + doc link check |
+| M0.3 | Compare obsolete V2 design with current ports; record reuse decisions instead of cherry-picking unreviewed code | ADR + gap review |
+| M0.4 | Define module boundaries and explicit SQLite/PostgreSQL schema migrations with reversible rollout | ADR + migration tests |
+| M0.5 | Publish version-specific protocol/client/provider and known-gap matrix | Native CI results + version captures |
+| M0.6 | Gate PRs on build, unit, integration, native clients, providers and public-data/privacy check; document branch rules | Required checks, green per PR |
 
-- [ ] Cargo registry (hosted sparse index, checksumed crate downloads, native binary upload and API tests implemented; crates.io proxy, yanking and cross-version real client matrix still open)
-- [ ] PyPI simple API (hosted HTML/JSON simple API, basic legacy upload, SHA-256 links and API tests implemented; additional real pip/Twine client versions, metadata sidecars, requires-python and PyPI proxy still open)
-- [ ] OCI artifacts (hosted v2 content-addressed blob upload/download, manifests, tags and referrers implemented; real Docker/ORAS/Helm tests, Bearer-token workflow, durable multipart uploads and full conformance remain open)
-- [ ] Artifact relationships, namespace conflict rules, federated search
+**Exit:** docs no longer contradict main; every new feature has acceptance and test requirements; required CI green.
 
-### Safe publication repair before scale
+### MS1 — Verified integrity and disaster recovery (P0; production blocker)
 
-- [x] PostgreSQL single-process writer exclusion via held advisory lease.
-- [x] Opt-in read-only recovery maintenance mode for interrupted PostgreSQL/S3 publishes.
-- [x] Admin-reviewed, SHA-256-verified, ETag-conditional S3 orphan quarantine with durable recovery evidence.
-- [x] PostgreSQL + S3 crash-point tests in an isolated CI environment.
-- [ ] Validate the deployed S3 provider's conditional DELETE semantics, PostgreSQL/S3 coordinated backup and restore, and long-running interrupted upload behavior.
-- [x] Limited PostgreSQL/S3 multi-instance read topology: one leased writer, extra strictly read-only replicas, fail-closed NuGet/npm paths, with two-node integration verification.
-- [ ] Before active-active deployment: distributed metadata/blob coordination, owner fencing, OCI upload-session durability, cache consistency, SLOs, security tests and operator runbooks. This implementation is intentionally **not** an active-active release.
+| ID | Work and acceptance | Evidence |
+| --- | --- | --- |
+| M1.1 | Coordinated PostgreSQL/S3 snapshots including object versions, quarantine retention, metadata watermark; provide isolated restore tooling | Reproducible offline backup and restore scripts |
+| M1.2 | Restore against the **selected real S3 service** in isolated infrastructure; verify digests and native reads for all six artifact families | Signed-off RPO/RTO and inventory report |
+| M1.3 | Inject process death, timeout, retry and network abort before/after blob PUT, metadata commit, journal write and quarantine; retain inconsistent records and fail closed | Deterministic fault matrix, negative tests |
+| M1.4 | Certify provider's conditional immutable PUT, ETag conditional DELETE, concurrency, object versioning, retention and lifecycle handling | Real-provider run; Moto is **not** certification |
+| M1.5 | Migrate SQLite/filesystem to PostgreSQL/S3 from an unchanged source, validate every hash, exercise rollback | Clean staging migration and rollback |
+| M1.6 | Verify stored references across NuGet/npm/Cargo/PyPI/OCI/Skills; quarantine retention; GC only after proven reachability | Integrity job + corrupted/missing cases |
 
-### Strict deployment baseline (not production certification)
+**Exit:** all provider-specific tests and actual restore pass. No active-active write release before MS1.
 
-- [x] Opt-in strict configuration gate for HTTPS public origin, private reads, validated PostgreSQL TLS and S3.
-- [x] Stale publication intent detection in readiness and admin-only aggregate operational status.
-- [ ] Production release gate: full external S3 conformance, PostgreSQL/S3 coordinated backups and recovery restore drill, load tests, ingress and network policy review, malware/provenance scanning, actionable SLOs and incident runbooks.
-- [ ] Active-active registry publishing is not implemented. Read-only replicas do not imply distributed write safety.
+### MS2 — Unified artifact/feed control plane (P0/P1)
 
-## Milestone 4 — Scale only when justified
+| ID | Work and acceptance | Evidence |
+| --- | --- | --- |
+| M2.1 | Version `Artifact`, `ArtifactRevision`, `Blob`, `Feed`, `Upstream`, `Namespace`, `Origin`, `Policy`; separate artifact kind from native distribution format | Domain and migration tests |
+| M2.2 | Explicit hosted/proxy feeds; defer group feeds until conflict priority can be proven; unique native URLs | Two same-kind isolated feeds |
+| M2.3 | Scope authorization, retention, quotas, egress and audit to feed; reject cross-feed references | 401/403/404 matrices and SSRF tests |
+| M2.4 | CAS, digest validation and staging; preserve old physical keys until verified migration; do not GC referenced bytes | Crash/reconciliation and reachability tests |
+| M2.5 | Stable versioned CRUD API, pagination/filtering, declarative import/export and idempotent mutations | API/OpenAPI and replay tests |
+| M2.6 | Introduce explicit default feeds without breaking legacy global URLs; document deprecation and rollback | Fresh + migrated DB and native client tests |
+| M2.7 | Reserve private namespaces; hosted/proxy resolution cannot silently fall back to public package names | Dependency-confusion and isolation tests |
 
-- [ ] Background sync/GC workers, queue/outbox if throughput measurements require them
-- [ ] Multi-node coordination, horizontal scaling, durable object storage, SLOs
-- [ ] Optional service decomposition of independent registry adapters if operational benefit is demonstrated
+**Exit:** identical package names can coexist in two independently authorized feeds without collision. Existing client paths work during a documented compatibility period. MS1 gates any migration of production data.
 
-### Non-goals
+### MS3 — Native protocol conformance (P1)
 
-Git hosting, issue tracking, CI runner replacement, generic file sharing, arbitrary URL proxying, running uploaded scripts, or deploying a mandatory Kubernetes/microservice stack.
+| ID | Acceptance workload | Evidence |
+| --- | --- | --- |
+| M3.1 NuGet | Service index, SemVer2, registration, search, checksums, transitive restore/push, cold/warm/offline and upstream failures | Versioned `dotnet` matrix |
+| M3.2 npm | Full packument, scoped names, dist-tags, auth, tarball digests, lockfile-pinned `npm ci`, namespace conflicts | Versioned npm matrix |
+| M3.3 Cargo | Yank/unyank, sparse index coherency, native API; add crates.io proxy only after integrity acceptance | Multi-version Cargo matrix |
+| M3.4 PyPI | Multiple wheels/sdist per version, Requires-Python, metadata sidecars, yanked, Twine, safe proxy without `extra-index` fallback | pip/Twine matrix |
+| M3.5 OCI | Standard Bearer challenge/scopes, resumable sessions across restart, chunk/range/redirect, large blobs and referrers | Docker + ORAS + Helm individually |
+| M3.6 Harness | Shared cold/warm/offline, negative, hash, concurrency, timeout and upstream failure cases | Reusable reproducible scripts |
+
+**Exit:** advertise only tested client versions, provider combinations and operations; no protocol-wide blanket certification.
+
+### MS4 — Identity, governance and dashboard (P1)
+
+| ID | Work and acceptance | Evidence |
+| --- | --- | --- |
+| M4.1 | Authorization Code + PKCE with server-side BFF, CSRF, session rotation, logout, key rotation and secure cookies | Browser/E2E security cases |
+| M4.2 | Feed/namespace Read, Publish, Manage and Admin scopes; group claims; documented local break-glass; retain existing managed-token lifecycle | Authorization matrix + token revocation |
+| M4.3 | Redacted action/denial/recovery/quarantine audit with explicit retention and tamper-evident export | Tamper/PII tests |
+| M4.4 | Responsive accessible TypeScript admin app for feeds, explorer, policies, credentials, jobs, quarantine, status, client setup | Browser E2E + accessibility |
+| M4.5 | Versioned API + E2E tests for login, CSRF, role changes, feed isolation, upload, failure | CI browser matrix |
+| M4.6 | Atomic per-feed capacity reservation for filesystem and S3, not just local filesystem quota | Concurrency tests and accounting |
+
+**Exit:** administer a feed via UI; limited native publisher, instant revoke, audit and no cross-feed access or persistent browser token storage. Keycloak remains optional.
+
+### MS5 — AI distribution, Skills and MCP (P1/P2)
+
+| ID | Work and acceptance | Evidence |
+| --- | --- | --- |
+| M5.1 | Agent Skill spec/archive validation, pinned Git origin, review/quarantine/approval and download profiles | Hostile ZIP, provenance, approval tests |
+| M5.2 | Version-pinned `server.json`/MCP Registry API, owner proof, external imports with origin and unverified/verified/approved states | Registry schema + import tests |
+| M5.3 | **Separate read-only** Packory MCP service (authorized search/feed/artifact/approval metadata only); no mutation before security gate | Native MCP client + AuthZ tests |
+| M5.4 | Immutable generic blobs with MIME, digest, version, policy and controlled signed references; no arbitrary URL proxy | Upload, traversal and authorization tests |
+| M5.5 | OCI-backed model catalog: immutable manifests, license and provenance; large-file streaming only after capacity tests | Multi-GB integrity and capacity |
+| M5.6 | Publisher identity, signature/attestation, scanning and policy status represented independently from SHA/hash | Tampering and unsupported signature tests |
+| M5.7 | Optional remote MCP Gateway only after separate SSRF, token forwarding, tool-permission, injection and sandbox review | Separate threat model and release |
+
+**Exit:** skill and MCP registry entry can be reviewed and discovered **without execution**. Read-only MCP tool never leaks private metadata.
+
+### MS6 — Production hardening and release engineering (P0 for stable release)
+
+| ID | Acceptance requirement | Evidence |
+| --- | --- | --- |
+| M6.1 | Split issue #36 into deployment-specific measurable blockers; no HA gate for initial single-writer release | Reviewed release checklist |
+| M6.2 | SAST, dependencies, license, container, secret scans, SBOM, signed image provenance, pinned base/build images | Verifiable CI artifacts |
+| M6.3 | Load/stress/fuzz, slow uploads, client aborts, disk/DB/S3 outages, saturation and backpressure | Reproducible load report |
+| M6.4 | OpenTelemetry-compatible traces/metrics with controlled label cardinality; alerts for latency/errors/storage/intents/backups | Alert drill |
+| M6.5 | AuthZ, SSRF/DNS rebinding, logging/header redaction, TLS/proxy/OIDC, supply chain, ZIP/archives and private feeds | Independent security review |
+| M6.6 | Migrations, runbooks, restore/rollback/upgrade drills and measured deployment-specific RPO/RTO/SLO | Fresh install + upgrade + incident |
+| M6.7 | Reproducible signed tagged release and upgrade guide; exact verified support scope | Released artifacts and verification guide |
+
+**Exit:** only a scoped **single-writer** release if all relevant MS1 and MS6 gates pass, plus MS2–MS5 feature-specific gates for what is included.
+
+### MS7 — Optional multi-node/active-active (P3; not committed to release)
+
+| ID | Prerequisite and tests | Evidence |
+| --- | --- | --- |
+| M7.1 | Remove GET-side writes from NuGet/npm before general readers; invalidate caches and test restart | Multi-node readonly tests |
+| M7.2 | Durable cross-node OCI upload sessions with retry and node switch | Failover session test |
+| M7.3 | Monotonic fencing epoch/term; advisory lock alone cannot fence partitioned writers | Split-brain/partition test |
+| M7.4 | Idempotent publication and unified metadata/object visibility under concurrent writes | Partition+race matrix |
+| M7.5 | Compare measured throughput, latency, SLO and operating costs against single writer + readers; only then consider services | Benchmarks and ADR |
+
+**Exit:** no split brain, silently lost data or unproved failover; otherwise stay single writer.
+
+## Dependency graph and PR slicing
+
+`MS0 -> MS1 -> MS6 release gate`; `MS0 -> MS2 -> (MS3, MS4) -> MS5`; `MS7` depends on **MS1 and MS6** and an explicit scalability justification. Native client tests, UI experiments and observability hardening may proceed in parallel, but schema/metadata changes must rerun fault/restore tests.
+
+Recommended reviewable PR series: (1) baseline, support and ADRs; (2) real S3 conformance harness; (3) coordinated snapshot/restore; (4) fault injection; (5) schema migration; (6) feed domain and isolation; (7) default-feed migration; (8) feed CRUD/audit; (9) native harness by adapter; (10) BFF; (11) admin UI; (12) AI metadata/Raw/MCP as separately accepted features; (13) single-writer release gate. Do not merge a red CI PR and do not mark external gates passed based on mocks.
+
+## Release labels are *targets*, not existing releases
+
+- **Technical preview:** existing bounded single-writer functionality, explicitly experimental.
+- **v1.0 single-writer reference release:** MS0, MS1 and applicable MS6 gates; only explicitly qualified adapters.
+- **v1.x Unified Hub:** MS2, MS4 and accepted MS3 additions.
+- **AI Hub:** separately accepted MS5 parts; MCP registry, platform MCP and Gateway have distinct support levels.
+- **Distributed release (optional):** only after MS7 operational proof.
+
+Open decisions: first real S3 provider/PG topology; hosted+proxy before any group feed; feed and namespace isolation vs future tenancy; TypeScript UI framework; native client version/OS pins; exact MCP Registry schema; OCI/AI retention; economic justification for active-active.
