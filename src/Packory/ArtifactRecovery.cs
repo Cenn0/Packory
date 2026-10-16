@@ -158,16 +158,21 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             var exists = blobs.Contains(pending.Key);
             var committed = MetadataCommitted(pending);
             var prepared = database.FindQuarantine(pending.Key);
-            if (prepared is null && (!exists || committed))
+            // Only two states are safe to clear automatically:
+            // - neither bytes nor metadata exist (the write never became visible)
+            // - both exist (the metadata commit is complete).
+            // Metadata referencing missing bytes MUST retain its intent. Clearing it
+            // would discard essential recovery evidence after a storage failure.
+            if (prepared is null && (exists == committed))
             {
-                // Crash before blob creation or after committed metadata: no remote orphan.
                 database.CompletePublication(pending.Key);
             }
             else
             {
-                // Fail closed: no automatic remote S3 deletes or unverified DB reconstruction.
-                logger.LogError("Uncommitted artifact bytes require operator reconciliation: {Kind} {Key}",
-                    pending.Kind, pending.Key);
+                // Prepared quarantine evidence and all mismatched DB/blob states
+                // remain operator-visible. Never auto-delete or reconstruct bytes.
+                logger.LogError("Publication requires operator investigation: {Kind} {Key}; BlobExists={BlobExists}; MetadataCommitted={MetadataCommitted}; PreparedEvidence={PreparedEvidence}",
+                    pending.Kind, pending.Key, exists, committed, prepared is not null);
             }
         }
         return new RecoveryReport(moved, missingHosted);
