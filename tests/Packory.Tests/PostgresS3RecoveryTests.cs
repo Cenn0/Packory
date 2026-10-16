@@ -196,6 +196,25 @@ public sealed class PostgresS3RecoveryTests
     }
 
     [Fact]
+    public void ConcurrentLeaseDisposalIsIdempotentAndCannotDoubleDisposeConnection()
+    {
+        var pg = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(pg)) return;
+        var cfg = new Settings { MetadataProvider = "postgresql", PostgresConnectionString = pg };
+        var lease = new PostgresSingleWriterLease(cfg);
+        lease.Acquire();
+        var failures = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+        Parallel.For(0, 64, _ =>
+        {
+            try { lease.Dispose(); }
+            catch (Exception error) { failures.Add(error); }
+        });
+        Assert.Empty(failures);
+        Assert.False(lease.IsHeld());
+        lease.Dispose();
+    }
+
+    [Fact]
     public void PostgreSqlExclusiveWriterLockPreventsSecondInstance()
     {
         var dir = Path.Combine(Path.GetTempPath(), "packory-lease-" + Guid.NewGuid().ToString("N"));
