@@ -115,6 +115,7 @@ app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, Database
     return Results.Json(new { items = db.AuditEvents(before, limit ?? 50) });
 });
 CargoEndpoints.Map(app);
+PyPiEndpoints.Map(app);
 NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
