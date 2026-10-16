@@ -16,6 +16,7 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_S3_ACCESS_KEY`, `PACKORY_S3_SECRET_KEY` | *(unset)* | Optional paired static secrets; IAM roles preferred |
 | `PACKORY_S3_ALLOW_LOOPBACK_HTTP` | `false` | Local test emulator only; remote HTTP is prohibited |
 | `PACKORY_METADATA_PROVIDER` | `sqlite` | Select `sqlite` or `postgresql` metadata provider |
+| `PACKORY_INSTANCE_ROLE` | `writer` | `writer` holds the exclusive PostgreSQL advisory lease; `reader` is opt-in PostgreSQL/S3 read-only replica with a restricted protocol allowlist |
 | `PACKORY_POSTGRES_CONNECTION_STRING` | *(unset)* | PostgreSQL ADO.NET connection string (runtime secret; required for postgresql provider) |
 | `PACKORY_DATA_DIRECTORY` | `./data` or `/data` in Docker | SQLite + blob root |
 | `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute origin (no path) advertised to clients |
@@ -39,6 +40,32 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_OIDC_REQUIRE_NAMESPACE_GRANTS` | `false` | When true, every OIDC `packory.write` request must include matching signed `packory_namespace` claims; administrators remain unrestricted |
 
 All defined tokens must be unique, at least 32 characters. **Unset tokens mean no permission of that type is available**; the service will not silently enable writes. Runtime settings can also be set via the `Packory` JSON section, but do not persist real secrets there.
+
+### Limited multi-instance topology: one writer plus read-only replicas
+
+After completing the PostgreSQL/S3 recovery procedure, Packory supports an
+explicit **read-only replica** role for a narrow set of native protocols.
+Run one normal `PACKORY_INSTANCE_ROLE=writer` deployment (default) with
+PostgreSQL and S3. Each additional node sets
+`PACKORY_INSTANCE_ROLE=reader`, the same PostgreSQL database and S3
+bucket/prefix, but a **different local data/cache directory**.
+
+Reader nodes never initialize schemas, reconcile local/remote publication
+intents, acquire a writer lease, or accept HTTP mutation methods. They permit
+read-only catalog, skill, Cargo, hosted PyPI and OCI blob/manifest/tag endpoints.
+They reject **all** `/nuget/` and `/npm/` traffic, because those adapters
+currently write remote metadata or cache bytes even during GET operations.
+OCI upload-session URLs and admin APIs are also refused. A refused request
+returns HTTP 503. Keep all writes, NuGet mirroring and npm mirroring routed
+**only** to the writer. The two-node PostgreSQL/S3 CI test exercises real
+concurrent writer/reader hosts and rejects a second writer.
+
+This is **NOT** full active-active Packory, a distributed transaction,
+an officially certified multi-node architecture, or a substitute for sticky
+OCI uploads, DB fencing, remote cache invalidation, coordinated snapshots,
+capacity management and operational SLO validation. Do not route an arbitrary
+mix of native protocols to readers. Prefer explicit reverse-proxy routing
+based on tested paths, and use TLS on all exposed endpoints.
 
 ### Secure baseline
 
