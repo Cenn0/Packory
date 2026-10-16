@@ -22,10 +22,15 @@ jobs:
         run: dotnet build Packory.slnx --configuration Release --no-restore -warnaserror
       - name: Test all protocol adapters
         run: dotnet test Packory.slnx --configuration Release --no-build --logger 'console;verbosity=normal'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh
+      - name: Exercise real hosted NuGet and npm clients
+        run: bash scripts/smoke-hosted.sh
   container:
     name: Build Docker image
     runs-on: ubuntu-latest
