@@ -10,6 +10,9 @@ namespace Packory;
 public static class Access
 {
     private const string ActorKey = "packory.actor";
+    private const string RoleKey = "packory.role";
+    private const string ManagedNamespaceKey = "packory.managed-namespace";
+    private const string ManagedIdKey = "packory.managed-id";
 
     public static IResult? Require(HttpContext context, Settings settings, bool write = false)
     {
@@ -18,12 +21,14 @@ public static class Access
         if (string.IsNullOrEmpty(token) && OidcCredentialRole(context, settings) is null)
             return Results.Unauthorized();
 
-        var role = (token is null ? null : CredentialRole(token, settings)) ??
+        var role = (token is null ? null : CredentialRole(token, settings, context)) ??
             OidcCredentialRole(context, settings);
-        if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" ||
-            (!write && role is "read-token" or "oidc-read"))
+        if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" or "managed-write" ||
+            (!write && role is "read-token" or "oidc-read" or "managed-read"))
         {
-            context.Items[ActorKey] = role;
+            context.Items[RoleKey] = role;
+            context.Items[ActorKey] = role.StartsWith("managed-", StringComparison.Ordinal)
+                ? "managed-token:" + (context.Items[ManagedIdKey] as string ?? "unknown") : role;
             return null;
         }
         return Results.Json(new { error = "Token lacks required permissions" },
@@ -71,13 +76,16 @@ public static class Access
     /// </summary>
     public static IResult? RequireNamespace(HttpContext context, Settings settings, string kind, string name)
     {
-        var role = Actor(context);
+        var role = context.Items.TryGetValue(RoleKey, out var value)
+            ? value as string ?? Actor(context) : Actor(context);
         if (role is "admin-token" or "oidc-admin") return null;
         if (role == "write-token" && settings.WriteNamespaces.Length == 0) return null;
         if (role == "oidc-write" && !settings.RequireOidcNamespaceGrants) return null;
         IEnumerable<string> grants = role switch
         {
             "write-token" => settings.WriteNamespaces,
+            "managed-write" when context.Items[ManagedNamespaceKey] is string grant =>
+                new[] { grant },
             "oidc-write" when context.User.Identity?.IsAuthenticated == true =>
                 context.User.FindAll("packory_namespace").Select(x => x.Value),
             _ => []
@@ -113,12 +121,24 @@ public static class Access
         return string.Equals(name, value, StringComparison.Ordinal);
     }
 
-    private static string? CredentialRole(string token, Settings settings)
+    private static string? CredentialRole(string token, Settings settings, HttpContext? context = null)
     {
         if (Matches(token, settings.AdminToken)) return "admin-token";
         if (Matches(token, settings.WriteToken)) return "write-token";
         if (Matches(token, settings.ReadToken)) return "read-token";
-        return null;
+        // Only generated 32-byte hexadecimal tokens can trigger a database lookup.
+        // This avoids unbounded DB reads for arbitrary Authorization garbage.
+        if (context is null || token.Length != 64 || !token.All(Uri.IsHexDigit)) return null;
+        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        var record = context.RequestServices?.GetService<IPackageDatabase>()?.FindManagedToken(hash);
+        if (record is null ||
+            !DateTimeOffset.TryParse(record.ExpiresAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var expires) ||
+            expires <= DateTimeOffset.UtcNow) return null;
+        if (record.Role is not ("read" or "write")) return null;
+        context.Items[ManagedNamespaceKey] = record.Namespace;
+        context.Items[ManagedIdKey] = record.Id;
+        return record.Role == "write" ? "managed-write" : "managed-read";
     }
 
     private static string? ExtractToken(HttpContext context)
