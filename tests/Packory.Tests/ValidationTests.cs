@@ -193,5 +193,27 @@ public sealed class ValidationTests
         Assert.Null(Access.RequireNamespace(ctx, cfg, "npm", "@trusted/library"));
         Assert.NotNull(Access.RequireNamespace(ctx, cfg, "npm", "@other/library"));
     }
+    [Fact]
+    public void ReadReplicaRequiresPostgresS3AndIndependentNonmaintenanceRole()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { InstanceRole = "reader" }.Validate());
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { InstanceRole = "unknown" }.Validate());
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings
+            {
+                InstanceRole = "reader", MetadataProvider = "postgresql",
+                PostgresConnectionString = "Host=localhost", BlobProvider = "s3",
+                S3Bucket = "packory-tests", RecoveryMaintenance = true
+            }.Validate());
+        new Settings
+        {
+            InstanceRole = "reader", MetadataProvider = "postgresql",
+            PostgresConnectionString = "Host=localhost", BlobProvider = "s3",
+            S3Bucket = "packory-tests"
+        }.Validate();
+    }
+
 
 }
