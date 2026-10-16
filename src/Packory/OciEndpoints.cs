@@ -236,6 +236,7 @@ public static class OciEndpoints
             if (actual != digest) return Error(400, "DIGEST_INVALID", "SHA256 does not match");
             source.Position = 0;
             var key = BlobKey(digest);
+            db.BeginPublication(key, "oci-blob", repository, digest);
             if (!await blobs.PutAsync(key, source, cfg.MaxArtifactBytes, ctx.RequestAborted))
             {
                 var existing = blobs.Existing(key);
@@ -246,6 +247,7 @@ public static class OciEndpoints
                 if (existingHash != digest) return Error(500, "DIGEST_INVALID", "Existing CAS blob corrupted");
             }
             db.OciAddBlob(repository, digest);
+            db.CompletePublication(key);
             sessions.End(id);
             ctx.Response.Headers.Location = cfg.Base + "/v2/" + repository + "/blobs/" + digest;
             ctx.Response.Headers["Docker-Content-Digest"] = digest;
@@ -308,6 +310,7 @@ public static class OciEndpoints
                 return Error(400, "DIGEST_INVALID", "Manifest reference digest mismatch");
             using var lease = await locks.AcquireAsync("oci", repository, reference, ctx.RequestAborted);
             var key = ManifestKey(digest);
+            db.BeginPublication(key, "oci-manifest", repository, digest);
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), cfg.MaxMetadataBytes, ctx.RequestAborted))
             {
                 var existing = blobs.Existing(key);
@@ -317,8 +320,10 @@ public static class OciEndpoints
                 if (!bytes.AsSpan().SequenceEqual(existingBytes))
                     return Error(500, "MANIFEST_INVALID", "Content-addressed manifest collision");
             }
-            db.OciPutManifest(repository, reference,
-                new OciManifestEntry(digest, media, bytes.Length), subject, artifactType, Access.Actor(ctx));
+            if (!db.OciPutManifest(repository, reference,
+                    new OciManifestEntry(digest, media, bytes.Length), subject, artifactType, Access.Actor(ctx)))
+                return Error(409, "MANIFEST_INVALID", "Manifest metadata publication conflict");
+            db.CompletePublication(key);
             ctx.Response.Headers.Location = cfg.Base + "/v2/" + repository + "/manifests/" + digest;
             ctx.Response.Headers["Docker-Content-Digest"] = digest;
             return Results.StatusCode(201);
