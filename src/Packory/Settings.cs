@@ -24,6 +24,10 @@ public sealed class Settings
     public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-semver2/";
     public bool AnonymousRead { get; set; } = true;
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
+    // Optional single-node filesystem capacity guard. Zero disables it.
+    // This does not provide a distributed S3 usage quota.
+    public long MaxBlobStorageBytes { get; set; }
+
     public int PublishRequestsPerMinute { get; set; } = 60;
     public int MaxMetadataBytes { get; set; } = 16 * 1024 * 1024;
     // Optional OIDC resource-server authentication; configure both fields or neither.
@@ -99,6 +103,9 @@ public sealed class Settings
             !string.IsNullOrEmpty(oidc.Query) || !string.IsNullOrEmpty(oidc.Fragment) ||
             string.IsNullOrWhiteSpace(OidcAudience) || OidcAudience.Length > 256))
             throw new InvalidOperationException("OIDC requires an HTTPS authority and nonempty audience.");
+        if (MaxBlobStorageBytes < 0 || MaxBlobStorageBytes > 1_099_511_627_776L ||
+            (MaxBlobStorageBytes != 0 && BlobProvider != "filesystem"))
+            throw new InvalidOperationException("Filesystem blob quota must be 0..1 TiB and requires filesystem provider.");
         if (PublishRequestsPerMinute is < 1 or > 10000)
             throw new InvalidOperationException("PublishRequestsPerMinute must be between 1 and 10000.");
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)
