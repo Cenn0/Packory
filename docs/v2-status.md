@@ -9,7 +9,7 @@ Current source state: V2 modular-monolith foundation, additive to the earlier AP
 | Hosted Raw immutable files | Yes | Integration-test level | Large-file load tests, range and operational limits |
 | Scoped tokens, expiry and revocation | Yes | Integration-test level | Full permission matrix, key rotation and audit retention |
 | Repository-level public/private reads | Yes | Integration-test level | Cross-tenant and browser-origin abuse testing |
-| NuGet hosted/proxy V2 routes | Yes, subset, registration metadata rewritten | **Not fully qualified** | Live client smoke, cold/warm/offline transitive graphs and full registration compatibility |
+| NuGet hosted/proxy V2 routes | Yes, subset, registration metadata rewritten and integrity provenance distinguished | **Not fully qualified** | Live client smoke, cold/warm/offline transitive graphs and full registration compatibility |
 | npm hosted/proxy V2 routes | Yes, subset | **Not fully qualified** | `npm ci` scopes, lockfiles, all metadata variants, error cases |
 | MCP Registry metadata and approval | Yes, subset | **Experimental** | Pin OpenAPI revision, schema validation and publisher ownership |
 | Agent Skills | Legacy ZIP import | **Legacy subset** | Git provenance, schema validation, V2 feed integration and approval workflow |

@@ -192,6 +192,22 @@ public sealed class V2IntegrationTests
     }
 
     [Fact]
+    public async Task NugetV2_Mirror_Accepts_Official_FlatContainer_Without_Undocumented_Checksum_Sidecar()
+    {
+        var bytes=NugetPackage("Test.Library","2.0.0");
+        using var server=new Server(req=>req.RequestUri!.AbsolutePath.EndsWith(".nupkg",StringComparison.Ordinal)
+            ? Remote(bytes) : new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var client=server.CreateClient();
+        Assert.Equal(HttpStatusCode.Created,(await client.SendAsync(R(HttpMethod.Post,"/api/v1/repositories",
+            NewFeed("realistic-origin","nuget","proxy",upstream:"https://api.nuget.org/v3-flatcontainer/")))).StatusCode);
+        const string url="/r/nuget/realistic-origin/v3/flatcontainer/test.library/2.0.0/test.library.2.0.0.nupkg";
+        Assert.Equal(bytes,await (await client.SendAsync(R(HttpMethod.Get,url))).Content.ReadAsByteArrayAsync());
+        using var catalog=JsonDocument.Parse(await (await client.SendAsync(R(HttpMethod.Get,
+            "/api/v1/catalog?kind=nuget"))).Content.ReadAsStringAsync());
+        Assert.Contains("mirror-tls",catalog.RootElement.ToString());
+    }
+
+    [Fact]
     public async Task NpmV2_Hosted_Publishes_And_Uses_Isolated_Tarball_Urls()
     {
         using var server=new Server();using var client=server.CreateClient();

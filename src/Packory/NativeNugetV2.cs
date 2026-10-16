@@ -197,24 +197,33 @@ public static class NativeNugetV2
             if(!response.IsSuccessStatusCode)throw new HttpRequestException("NuGet origin request failed",null,response.StatusCode);
             var checksumUri=uri+".sha512";
             using var checkResponse=await http.GetAsync(checksumUri,HttpCompletionOption.ResponseHeadersRead,ct);
-            if(!checkResponse.IsSuccessStatusCode)throw new InvalidDataException("Missing origin checksum");
-            var hashString=Encoding.UTF8.GetString(await BlobStore.ReadBoundedAsync(
-                await checkResponse.Content.ReadAsStreamAsync(ct),1024,ct)).Trim();
-            byte[]? expected;
-            try {expected=Convert.FromBase64String(hashString);}
-            catch(FormatException){throw new InvalidDataException("Invalid NuGet origin checksum");}
-            if(expected.Length!=64)throw new InvalidDataException("Invalid SHA512 digest length");
+            // NuGet's PackageBaseAddress V3 contract documents .nupkg and .nuspec,
+            // but does not require publishing an origin .nupkg.sha512 sidecar.
+            // A missing sidecar is not a checksum mismatch. Preserve that fact in
+            // provenance instead of falsely treating TLS-only fetches as SHA512-verified.
+            byte[]? expected=null;
+            if(checkResponse.StatusCode!=HttpStatusCode.NotFound)
+            {
+                if(!checkResponse.IsSuccessStatusCode)
+                    throw new HttpRequestException("NuGet origin checksum fetch failed",null,checkResponse.StatusCode);
+                var hashString=Encoding.UTF8.GetString(await BlobStore.ReadBoundedAsync(
+                    await checkResponse.Content.ReadAsStreamAsync(ct),1024,ct)).Trim();
+                try {expected=Convert.FromBase64String(hashString);}
+                catch(FormatException){throw new InvalidDataException("Invalid NuGet origin checksum");}
+                if(expected.Length!=64)throw new InvalidDataException("Invalid SHA512 digest length");
+            }
             if(response.Content.Headers.ContentLength>settings.MaxArtifactBytes)throw new PayloadTooLargeException();
             var blob=await cas.PutAsync(await response.Content.ReadAsStreamAsync(ct),settings.MaxArtifactBytes,ct);
             await using(var fs=File.OpenRead(blob.Path))
             {
                 var actual=await SHA512.HashDataAsync(fs,ct);
-                if(!CryptographicOperations.FixedTimeEquals(expected,actual))throw new InvalidDataException("NuGet origin digest mismatch");
+                if(expected is not null && !CryptographicOperations.FixedTimeEquals(expected,actual))
+                    throw new InvalidDataException("NuGet origin digest mismatch");
             }
             var info=ParsePackage(blob.Path);
             if(info.Id!=id||info.Version!=version)throw new InvalidDataException("NuGet package identity mismatch");
             var asset=new StoredAsset(feed,"nuget",id,version,filename,blob.Sha256,blob.Size,"application/octet-stream",
-                "mirror","published",DateTimeOffset.UtcNow.ToString("O"));
+                expected is null?"mirror-tls":"mirror-sha512","published",DateTimeOffset.UtcNow.ToString("O"));
             if(!catalog.Publish(asset))return catalog.Asset(feed,"nuget",id,version,filename);
             return asset;
         }

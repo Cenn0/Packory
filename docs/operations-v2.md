@@ -18,7 +18,7 @@ Do not put credentials in URL query strings, browser local storage, README examp
 
 Large artifacts are streamed into `staging/` using bounded buffers and incremental SHA-256. Staged files are moved into immutable digest-addressed paths before publishing the reference in SQLite. The two systems do not have a global ACID transaction: a crash can leave unreferenced CAS files, not half-visible published asset references. The `blob.reconcile` job removes abandoned staging older than two hours and unreferenced CAS files older than 24 hours. It does not delete hosted artifacts still referenced by active records.
 
-Artifact hash is an integrity marker **not** a publisher identity guarantee. npm/NuGet native origin checksums are additionally verified for proxy content; malformed or mismatched content is not published in the feed. A raw file's `X-Packory-SHA256` optionally provides an expected digest supplied by the publisher.
+Artifact hash is an integrity marker **not** a publisher identity guarantee. npm integrity values and NuGet origin SHA-512 sidecars are verified **when present**; malformed or mismatched content is not published in the feed. Official NuGet V3 flat-container origins do not have to supply a `.nupkg.sha512` sidecar. In that case NuGet uses HTTPS transport, validates the package ID/version and stores a local SHA-256, marked `mirror-tls` instead of `mirror-sha512`; this does not independently authenticate publisher provenance. A raw file's `X-Packory-SHA256` optionally provides an expected digest supplied by the publisher.
 
 ## Network egress
 
