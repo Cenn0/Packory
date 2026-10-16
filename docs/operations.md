@@ -8,6 +8,13 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `PACKORY_BLOB_PROVIDER` | `filesystem` | Select `filesystem` or `s3` artifact backend |
+| `PACKORY_S3_BUCKET` | *(unset)* | Required private bucket when using S3 |
+| `PACKORY_S3_REGION` | `us-east-1` | AWS signature region |
+| `PACKORY_S3_KEY_PREFIX` | `packory` | Object key namespace for Packory |
+| `PACKORY_S3_ENDPOINT` | *(unset)* | Optional S3-compatible HTTPS endpoint; omit for AWS S3 |
+| `PACKORY_S3_ACCESS_KEY`, `PACKORY_S3_SECRET_KEY` | *(unset)* | Optional paired static secrets; IAM roles preferred |
+| `PACKORY_S3_ALLOW_LOOPBACK_HTTP` | `false` | Local test emulator only; remote HTTP is prohibited |
 | `PACKORY_METADATA_PROVIDER` | `sqlite` | Select `sqlite` or `postgresql` metadata provider |
 | `PACKORY_POSTGRES_CONNECTION_STRING` | *(unset)* | PostgreSQL ADO.NET connection string (runtime secret; required for postgresql provider) |
 | `PACKORY_DATA_DIRECTORY` | `./data` or `/data` in Docker | SQLite + blob root |
@@ -85,3 +92,8 @@ The bearer-token resource-server integration requires valid JWTs from an HTTPS O
 ### PostgreSQL metadata backend
 
 Set `PACKORY_METADATA_PROVIDER=postgresql` and provide `PACKORY_POSTGRES_CONNECTION_STRING` from the runtime secret manager. Packory creates its catalog, native-adapter metadata and audit tables with additive `CREATE TABLE IF NOT EXISTS` statements. The SQLite profile is unchanged and remains the default. **This is a fresh-deployment backend**: automatic SQLite-to-PostgreSQL migration is not implemented; export/import tooling and a verified migration sequence remain open work. The PostgreSQL backend does **not** make filesystem blobs shared or enable multi-node operation. Use TLS and `SSL Mode=VerifyFull` in the connection string for networked PostgreSQL connections where certificates are provisioned, and perform consistent relational and blob backups together. A disposable PostgreSQL 17 CI container runs provider integration tests.
+
+
+### S3 artifact backing
+
+For optional S3-compatible artifact storage configure `PACKORY_BLOB_PROVIDER=s3` and review the [S3 operations and limitations](s3.md). AWS SDK conditional immutable writes and a local read-through materialization cache are used. This remains a **single-node design**, and switching to S3 does not automatically migrate or garbage-collect old filesystem blobs. Use remote encrypted transport, minimum-privilege IAM/bucket permissions and consistent backups.
