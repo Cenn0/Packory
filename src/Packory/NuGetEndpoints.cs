@@ -142,9 +142,9 @@ public static class NuGetEndpoints
                 return Results.Conflict(new { error = "Version already exists" });
             using var content = new MemoryStream(bytes, writable: false);
             if (!await blobs.PutAsync(key, content, settings.MaxArtifactBytes, ctx.RequestAborted)) return Results.Conflict();
-            db.UpsertPackage("nuget", id, version, spec.Description, "hosted");
+            if (!db.PublishNuget(id, version, spec.Description, Access.Actor(ctx))) return Results.Conflict();
             return Results.StatusCode(StatusCodes.Status201Created);
-        });
+        }).RequireRateLimiting("publish");
     }
 
     public static string NugetKey(string id, string version) => $"nuget/{id}/{version}/{id}.{version}.nupkg";

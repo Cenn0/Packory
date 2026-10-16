@@ -21,7 +21,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] NuGet complete registration semantics, search fallback, version normalization, package types, content digests, controlled redirects/retries and structured errors
 - [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
 - [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks (in progress; in-process key locks, atomic SQLite skill+catalog publication, quarantine of orphan blobs and missing-hosted detection implemented; full crash-injection verification and CAS publication outstanding)
-- [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction
+- [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction (in progress: transactional audit of successful hosted publishing and role-partitioned write rate limits implemented; other actions, retention, metrics, quotas and eviction outstanding)
 - [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow
 - [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
 
@@ -32,6 +32,9 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [x] One SQLite transaction for Agent Skill metadata and catalog entry; no mirrored overwrite of hosted catalog origin.
 - [x] Pre-start orphan quarantine and degraded readiness for missing hosted blobs; quarantine is non-destructive.
 - [x] Deterministic concurrency, unsigned npm payload, reserved namespace and crash-orphan regression tests.
+- [x] SQLite audit records committed atomically with hosted NuGet/npm/Skill metadata; read access restricted to the admin token.
+- [x] Configurable per-role publish rate limiter (429 on exhaustion, no unbounded partitions created from user-supplied credentials).
+- [ ] Per-token identity, lifecycle, immutable full action audit, storage quotas and cache eviction remain pending.
 - [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
 
 ## Milestone 2 — Operational and governance features

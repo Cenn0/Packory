@@ -20,6 +20,12 @@ Token values must be **at least 32 characters**, distinct, and delivered via `Au
 
 Operators may set `PACKORY_RESERVED_NUGET_PREFIXES` (comma-separated ID prefixes, matched case-insensitively) and `PACKORY_RESERVED_NPM_SCOPES` (comma-separated lowercase scopes, each beginning with `@`). For matching package names, Packory returns only locally hosted/cached metadata and artifacts and **never calls a configured public upstream**. A missing privately reserved package returns 404. Prefixes apply to the complete NuGet ID string, so use a deliberate delimiter (for example `internal.`) to avoid unintentionally reserving additional IDs. Both settings are optional but recommended wherever internal package names could collide with public ones.
 
+## Administrative audit and write throttling
+
+`GET /api/admin/audit?limit=50&before=<exclusive-id>` returns up to 100 successful hosted publish events, ordered newest first. **Only `PACKORY_ADMIN_TOKEN` can read this endpoint**; a write token receives 403, no token receives 401. Event fields: `id`, `action`, `kind`, `name`, `version`, `actor`, `createdAt`. `actor` is a static credential class (`admin-token` or `write-token`), not a person. Tokens, passwords, IP addresses and email addresses are not written into audit rows. Audit creation is part of the same SQLite transaction as hosted metadata publication, but blob storage remains outside SQLite transactions.
+
+Writes to NuGet push, npm publish and Skills import are subject to `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` (default `60`) separately per credential class. Requests exceeding the limit receive HTTP 429. Since the limiter is in-process, its counters reset on restart and it does not coordinate multiple instances; it is not a replacement for upstream rate limiting at the reverse proxy.
+
 ## NuGet v3
 
 - Service index: `GET /nuget/v3/index.json`

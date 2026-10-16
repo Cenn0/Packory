@@ -5,6 +5,8 @@ namespace Packory;
 public sealed record CatalogEntry(string Kind, string Name, string Version, string Description, string Origin, string UpdatedAt);
 public sealed record SkillEntry(string Name, string Version, string Description, string UpdatedAt);
 public sealed record StoredArtifact(string Kind, string Name, string Version, string Origin);
+public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
+    string Actor, string CreatedAt);
 
 public sealed class Database(Settings settings)
 {
@@ -50,6 +52,13 @@ public sealed class Database(Settings settings)
                 name TEXT NOT NULL, version TEXT NOT NULL, description TEXT NOT NULL,
                 updated_at TEXT NOT NULL, PRIMARY KEY(name, version)
             );
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL, kind TEXT NOT NULL,
+                name TEXT NOT NULL, version TEXT NOT NULL,
+                actor TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS audit_created ON audit_events(id DESC);
             """;
         command.ExecuteNonQuery();
     }
@@ -72,6 +81,27 @@ public sealed class Database(Settings settings)
         command.Parameters.AddWithValue("$origin", origin);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>Publish hosted NuGet metadata and audit record in one SQLite transaction.</summary>
+    public bool PublishNuget(string name, string version, string description, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('nuget',$name,$version,$description,'hosted',$updated)
+            """;
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$description", description);
+        cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "publish", "nuget", name, version, actor);
+        tx.Commit();
+        return true;
     }
 
     public IReadOnlyList<string> Versions(string kind, string name)
@@ -141,7 +171,8 @@ public sealed class Database(Settings settings)
         return cmd.ExecuteScalar() is not null;
     }
 
-    public bool PutNpmVersion(string name, string version, string json, string description, IReadOnlyDictionary<string, string> tags)
+    public bool PutNpmVersion(string name, string version, string json, string description,
+        IReadOnlyDictionary<string, string> tags, string actor)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -168,6 +199,7 @@ public sealed class Database(Settings settings)
             cmd.ExecuteNonQuery();
             cmd.Parameters.RemoveAt("$tag");
         }
+        InsertAudit(db, tx, "publish", "npm", name, version, actor);
         tx.Commit();
         return true;
     }
@@ -198,7 +230,7 @@ public sealed class Database(Settings settings)
         return (versions, tags);
     }
 
-    public bool AddSkill(string name, string version, string description)
+    public bool AddSkill(string name, string version, string description, string actor)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -215,8 +247,46 @@ public sealed class Database(Settings settings)
             VALUES('skill',$name,$version,$description,'hosted',$updated)
             """;
         cmd.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "skill", name, version, actor);
         tx.Commit();
         return true;
+    }
+
+    public IReadOnlyList<AuditEntry> AuditEvents(long? before, int limit)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT id,action,kind,name,version,actor,created_at FROM audit_events
+            WHERE ($before IS NULL OR id < $before)
+            ORDER BY id DESC LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$before", (object?)before ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 100));
+        using var reader = cmd.ExecuteReader();
+        var entries = new List<AuditEntry>();
+        while (reader.Read())
+            entries.Add(new AuditEntry(reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+                reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6)));
+        return entries;
+    }
+
+    private static void InsertAudit(SqliteConnection connection, SqliteTransaction tx,
+        string action, string kind, string name, string version, string actor)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO audit_events(action,kind,name,version,actor,created_at)
+            VALUES($action,$kind,$name,$version,$actor,$time)
+            """;
+        cmd.Parameters.AddWithValue("$action", action);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$actor", actor);
+        cmd.Parameters.AddWithValue("$time", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
     }
 
     public IReadOnlyList<SkillEntry> Skills(string? name = null)

@@ -35,6 +35,7 @@ Modules:
 - `BlobStore`: writes to an unpredictable temporary file, enforces size limits and renames into place (create-only for immutable packages, replace for upstream metadata).
 - `ArtifactLocks`: bounded striped per-artifact coordination for uploads and cache cold misses, **single-process only**.
 - `ArtifactRecovery`: scans immutable blob keys against SQLite references before serving traffic; unindexed files are moved to a non-destructive local recovery directory.
+- `Database`: hosted publication transactions append a limited audit event (credential role, not a user identity); read access is restricted to the administrator token. A bounded in-process rate limiter guards mutation endpoints.
 - `Access`: access scopes from static API tokens. Read is anonymous by default; writes require a token.
 - `wwwroot`: standalone JS/CSS dashboard, no third-party runtime CDN.
 

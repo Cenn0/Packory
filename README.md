@@ -5,7 +5,7 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-Packory's first MVP is an **ASP.NET Core 10 modular monolith**, not a general-purpose Git forge and not a collection of separate services. It provides a unified dashboard and catalog while retaining the **native NuGet v3 and npm registry protocols**. A local SQLite database tracks indexed artifacts; files live on disk. No Redis, message broker, Kubernetes, or external database is needed. The ongoing milestone-1 hardening adds in-process single-flight artifact locks, reserved private namespaces, and startup reconciliation; production compatibility is still unverified.
+Packory's first MVP is an **ASP.NET Core 10 modular monolith**, not a general-purpose Git forge and not a collection of separate services. It provides a unified dashboard and catalog while retaining the **native NuGet v3 and npm registry protocols**. A local SQLite database tracks indexed artifacts; files live on disk. No Redis, message broker, Kubernetes, or external database is needed. The ongoing milestone-1 hardening adds in-process single-flight artifact locks, reserved private namespaces, startup reconciliation, transactional publish audit entries and role-partitioned write rate limits; production compatibility is still unverified.
 
 > **MVP scope:** functional pull-through package downloads, basic hosted publishing, a searchable catalog of *cached/hosted* artifacts, agent-skill ZIP imports, static token permissions, a minimal dashboard, health endpoints, Docker support, and tests. Packory is not yet a production-hardened registry replacement. See [Roadmap](docs/roadmap.md) and [Limitations](#limitations).
 
@@ -87,6 +87,7 @@ Skill downloads: `/api/skills/{name}/{version}/download`. The MVP recognizes **s
 | --- | --- |
 | Dashboard | `/` |
 | Unified catalog (indexed/hosted only) | `GET /api/packages?q=&kind=&limit=` |
+| Admin-only successful publish audit | `GET /api/admin/audit?limit=&before=` |
 | NuGet v3 service index | `GET /nuget/v3/index.json` |
 | NuGet publish | `PUT /nuget/v3/push` |
 | npm registry | `/npm/` |
@@ -125,7 +126,7 @@ Integration tests use in-process ASP.NET hosting and a deterministic **stub regi
 
 ## Limitations
 
-- Single-node deployment and static environment-provided tokens; no accounts, per-package policies, SSO, audit trail, multi-node replication, or resilient HA yet.
+- Single-node deployment and static environment-provided tokens; no accounts, per-package write policies, SSO, individual actor attribution, comprehensive audit trail, multi-node replication, or resilient HA yet. An administrator-only SQLite audit log currently records **successful hosted publishes**, identifying only the static token role.
 - Minimal npm publish implementation (one version per request); **npm login**, unpublish, and comprehensive npm registry endpoints are not provided. Some npm clients/workflows may require missing APIs.
 - NuGet supports principal v3 install/mirror/push operations but does not claim full v3 feature parity (symbols, deprecation, vulnerability resources, registration edge cases, advanced SemVer normalization). Full native-client compatibility must be validated per client version.
 - Search shows **cached and hosted packages only**, not all upstream entries. The dashboard is a discovery/admin MVP, not a complete registry UI.
