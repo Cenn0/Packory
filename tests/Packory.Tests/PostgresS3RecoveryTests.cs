@@ -62,6 +62,7 @@ public sealed class PostgresS3RecoveryTests
             Assert.True(evidence.Completed);
             await s3.VerifyArchivedAsync(evidence, CancellationToken.None);
             Assert.DoesNotContain(db.PendingPublications(), p => p.Key == key);
+            Assert.True(await s3.PutAsync(key, new MemoryStream(bytes), 2048, CancellationToken.None));
             Assert.True(db.PublishNuget(name, "1.0.0", "new metadata", "writer"));
             Assert.Equal("hosted", db.PackageOrigin("nuget", name, "1.0.0"));
         }
