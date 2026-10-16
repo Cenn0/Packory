@@ -55,6 +55,8 @@ if (Environment.GetEnvironmentVariable("PACKORY_MAX_BLOB_STORAGE_BYTES") is { } 
 if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is { } maxPublish)
     settings.PublishRequestsPerMinute = int.TryParse(maxPublish, out var parsedPublish)
         ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OCI_AUTHENTICATED_PING"), out var ociPing))
+    settings.OciAuthenticatedPing = ociPing;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
     settings.AnonymousRead = anonymousRead;
 settings.Validate();

@@ -39,6 +39,15 @@ public static class OciEndpoints
         app.MapGet("/v2/", (Settings cfg, HttpContext ctx) =>
         {
             ctx.Response.Headers["Docker-Distribution-API-Version"] = "registry/2.0";
+            // Docker learns its Basic challenge at /v2/. With anonymous reads,
+            // some clients otherwise do not retry credentials on a later write 401.
+            // This opt-in requires authenticated writers for the handshake.
+            if (cfg.OciAuthenticatedPing &&
+                Access.Require(ctx, cfg, write: true) is { } pingDenied)
+            {
+                ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";
+                return pingDenied;
+            }
             if (Access.Require(ctx, cfg) is { } denied)
             {
                 ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";

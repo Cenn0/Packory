@@ -37,6 +37,8 @@ jobs:
         run: bash scripts/smoke-ecosystems.sh
       - name: Exercise real hosted OCI registry with Docker
         run: bash scripts/smoke-oci-docker.sh
+      - name: Exercise Docker with anonymous generic reads and forced OCI authenticated ping
+        run: PACKORY_SMOKE_ANONYMOUS_READ=true PACKORY_SMOKE_AUTHENTICATED_PING=true bash scripts/smoke-oci-docker.sh
   container:
     name: Build Docker image
     runs-on: ubuntu-latest
