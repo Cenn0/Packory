@@ -45,6 +45,7 @@ builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
+builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("publish", context =>
