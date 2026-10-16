@@ -15,11 +15,13 @@ public static class Access
     {
         if (!write && settings.AnonymousRead) return null;
         var token = ExtractToken(context);
-        if (string.IsNullOrEmpty(token)) return Results.Unauthorized();
+        if (string.IsNullOrEmpty(token) && OidcCredentialRole(context, settings) is null)
+            return Results.Unauthorized();
 
-        var role = CredentialRole(token, settings);
-        if (role == "admin-token" || role == "write-token" ||
-            (!write && role == "read-token"))
+        var role = (token is null ? null : CredentialRole(token, settings)) ??
+            OidcCredentialRole(context, settings);
+        if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" ||
+            (!write && role is "read-token" or "oidc-read"))
         {
             context.Items[ActorKey] = role;
             return null;
@@ -31,7 +33,7 @@ public static class Access
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
-        return Actor(context) == "admin-token"
+        return Actor(context) is "admin-token" or "oidc-admin"
             ? null : Results.Json(new { error = "Administrator credential required" },
                 statusCode: StatusCodes.Status403Forbidden);
     }
@@ -44,7 +46,22 @@ public static class Access
     public static string RateLimitPartition(HttpContext context, Settings settings)
     {
         var token = ExtractToken(context);
-        return token is null ? "unauthenticated" : CredentialRole(token, settings) ?? "unauthenticated";
+        return (token is null ? null : CredentialRole(token, settings))
+            ?? OidcCredentialRole(context, settings) ?? "unauthenticated";
+    }
+
+    private static string? OidcCredentialRole(HttpContext context, Settings settings)
+    {
+        if (!settings.OidcEnabled || context.User.Identity?.IsAuthenticated != true) return null;
+        // No blanket access based only on being logged in: require an explicit
+        // Packory scope from the access token. Never store subject/email claims.
+        var scopes = context.User.FindAll("scope").Concat(context.User.FindAll("scp"))
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.Ordinal);
+        if (scopes.Contains("packory.admin")) return "oidc-admin";
+        if (scopes.Contains("packory.write")) return "oidc-write";
+        if (scopes.Contains("packory.read")) return "oidc-read";
+        return null;
     }
 
     private static string? CredentialRole(string token, Settings settings)

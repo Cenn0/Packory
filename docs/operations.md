@@ -18,6 +18,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_RESERVED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes (e.g. `@internal`); packages under these scopes never fall back to registry.npmjs.org |
 | `PACKORY_DENIED_NUGET_PREFIXES` | *(empty)* | Comma-separated ID prefixes blocked for both read and publish, case-insensitively |
 | `PACKORY_DENIED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes blocked for both read and publish |
+| `PACKORY_OIDC_AUTHORITY` | *(unset)* | HTTPS authority / issuer URL for optional JWT validation |
+| `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
 | `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` | `60` | Maximum attempts per minute in each credential-role partition (admin, write, read, unauthenticated). Range 1–10000; 429 when exceeded |
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
 | `PACKORY_READ_TOKEN` | *(unset)* | Optional read-only credential |
@@ -71,3 +73,8 @@ After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` 
 ## Public repository hygiene
 
 Do not commit personal emails, contact details, tokens, `.env`, `.npmrc`, generated archives, SQLite files, local volumes, private hostnames, or system logs. Depend on GitHub Issues, Pull Requests and Security Advisories, not personal contacts. Review **commit author metadata and existing history**, not just tracked source files; deleting a source file does not scrub Git history. Rewriting already-public history additionally requires GitHub's sensitive-data removal procedure and credential/key rotation where applicable.
+
+
+### Optional OIDC / Keycloak API integration
+
+The bearer-token resource-server integration requires valid JWTs from an HTTPS OIDC authority and explicit Packory scopes. Refer to [OIDC and Keycloak](oidc-keycloak.md) for Keycloak audience-mapper configuration and security boundaries. The web dashboard does not yet implement interactive SSO; do not assume logging into Keycloak unlocks a browser session.
