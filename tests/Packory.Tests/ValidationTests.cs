@@ -74,4 +74,16 @@ public sealed class ValidationTests
         Assert.False(CargoEndpoints.IsName("../foo"));
     }
 
+
+    [Fact]
+    public void OciRejectsInvalidRepositoriesDigestsAndReferences()
+    {
+        Assert.True(OciEndpoints.ValidRepository("team/service"));
+        Assert.False(OciEndpoints.ValidRepository("../service"));
+        Assert.False(OciEndpoints.ValidRepository("HTTP://test"));
+        Assert.False(OciEndpoints.ValidDigest("sha256:xyz"));
+        Assert.True(OciEndpoints.ValidReference("latest"));
+        Assert.False(OciEndpoints.ValidReference("../../latest"));
+    }
+
 }
