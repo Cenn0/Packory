@@ -94,6 +94,11 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                 media_type TEXT NOT NULL, size BIGINT NOT NULL, artifact_type TEXT NOT NULL,
                 PRIMARY KEY(repository,subject,digest)
             );
+            CREATE TABLE IF NOT EXISTS publication_intents (
+                artifact_key TEXT PRIMARY KEY,
+                kind TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+                started_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS managed_tokens (
                 id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
                 namespace TEXT, expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
@@ -284,6 +289,40 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             list.Add(new SkillEntry(reader.GetString(0), reader.GetString(1),
                 reader.GetString(2), reader.GetString(3)));
         return list;
+    }
+
+    public void BeginPublication(string key, string kind, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            INSERT INTO publication_intents(artifact_key,kind,name,version,started_at)
+            VALUES(@key,@kind,@name,@version,@started)
+            ON CONFLICT(artifact_key) DO NOTHING
+            """, null, ("key", key), ("kind", kind), ("name", name),
+            ("version", version), ("started", DateTimeOffset.UtcNow.ToString("O")));
+        cmd.ExecuteNonQuery();
+    }
+
+    public void CompletePublication(string key)
+    {
+        using var db = Open();
+        using var cmd = Command(db,
+            "DELETE FROM publication_intents WHERE artifact_key=@key", null, ("key", key));
+        cmd.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<PendingPublication> PendingPublications()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT artifact_key,kind,name,version,started_at
+            FROM publication_intents ORDER BY started_at
+            """);
+        using var reader = cmd.ExecuteReader();
+        var result = new List<PendingPublication>();
+        while (reader.Read()) result.Add(new PendingPublication(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        return result;
     }
 
     public void CreateManagedToken(ManagedTokenRecord token)
