@@ -1,0 +1,38 @@
+name: Live registry mirror smoke
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '19 3 * * 0'
+permissions:
+  contents: read
+jobs:
+  restore-from-nuget-org-through-packory:
+    name: Real NuGet restore via Packory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish and serve Packory
+        run: |
+          dotnet publish src/Packory/Packory.csproj -c Release -o /tmp/packory-server
+          mkdir -p /tmp/packory-data
+          PACKORY_DATA_DIRECTORY=/tmp/packory-data PACKORY_PUBLIC_BASE_URL=http://localhost:8080 \
+            ASPNETCORE_URLS=http://127.0.0.1:8080 dotnet /tmp/packory-server/Packory.dll >/tmp/packory.log 2>&1 &
+          echo $! > /tmp/packory.pid
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/health/ready && exit 0; sleep 1; done
+          cat /tmp/packory.log
+          exit 1
+      - name: Restore a real package without fallback source
+        run: bash scripts/smoke-nuget.sh
+      - name: Install a real npm package through Packory
+        run: PACKORY_PUBLIC_BASE_URL=http://localhost:8080 bash scripts/smoke-npm.sh
+      - name: Stop service
+        if: always()
+        run: |
+          if test -f /tmp/packory.pid; then kill "$(cat /tmp/packory.pid)" || true; fi
