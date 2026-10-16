@@ -57,6 +57,8 @@ if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is
         ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OCI_AUTHENTICATED_PING"), out var ociPing))
     settings.OciAuthenticatedPing = ociPing;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_RECOVERY_MAINTENANCE"), out var maintenance))
+    settings.RecoveryMaintenance = maintenance;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
     settings.AnonymousRead = anonymousRead;
 settings.Validate();
@@ -101,6 +103,8 @@ builder.Services.AddSingleton<BlobStore>(provider =>
 });
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
+builder.Services.AddSingleton<PublicationRecoveryService>();
+builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddRateLimiter(options =>
 {
@@ -130,9 +134,29 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
     });
 
 var app = builder.Build();
+var startupLease = app.Services.GetRequiredService<PostgresSingleWriterLease>();
+startupLease.Acquire();
+app.Lifetime.ApplicationStopped.Register(startupLease.Dispose);
 app.Services.GetRequiredService<IPackageDatabase>().Initialize();
 app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 app.UseRouting();
+app.Use(async (ctx, next) =>
+{
+    // A lost PostgreSQL lease must fail closed, never permit a second writer.
+    if (ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" && !startupLease.IsHeld())
+    {
+        ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        return;
+    }
+    if (settings.RecoveryMaintenance &&
+        !ctx.Request.Path.StartsWithSegments("/api/admin/publications") &&
+        !ctx.Request.Path.StartsWithSegments("/health"))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        return;
+    }
+    await next(ctx);
+});
 if (settings.OidcEnabled) app.UseAuthentication();
 app.UseRateLimiter();
 app.Use(async (ctx, next) =>
@@ -155,7 +179,10 @@ app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
-    db.IsHealthy();
+    if (settings.RecoveryMaintenance || !startupLease.IsHeld() || !db.IsHealthy())
+        return Results.Json(new { status = "maintenance-or-lease-lost" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+
     var missing = recovery.MissingHostedCount();
     return missing > 0
         ? Results.Json(new { status = "degraded", missingHostedArtifacts = missing },
@@ -207,12 +234,28 @@ app.MapDelete("/api/admin/tokens/{id}", (string id, Settings cfg, IPackageDataba
     if (!Guid.TryParseExact(id, "N", out _)) return Results.BadRequest(new { error = "Invalid token id" });
     return db.RevokeManagedToken(id) ? Results.NoContent() : Results.NotFound();
 }).RequireRateLimiting("publish");
-app.MapGet("/api/admin/publications/pending", (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+app.MapGet("/api/admin/publications/pending", (Settings cfg, PublicationRecoveryService recovery, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
     ctx.Response.Headers.CacheControl = "no-store";
-    return Results.Ok(new { items = db.PendingPublications() });
+    return Results.Ok(new { items = recovery.Inspect() });
 });
+app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, PublicationRecoveryService recovery,
+    HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    if (!cfg.RecoveryMaintenance)
+        return Results.Conflict(new { error = "Exclusive maintenance mode is required" });
+    RecoveryReconcileRequest? request;
+    try { request = await ctx.Request.ReadFromJsonAsync<RecoveryReconcileRequest>(ctx.RequestAborted); }
+    catch (System.Text.Json.JsonException) { return Results.BadRequest(); }
+    if (request is null || string.IsNullOrWhiteSpace(request.Key) ||
+        string.IsNullOrWhiteSpace(request.ExpectedStartedAt))
+        return Results.BadRequest();
+    ctx.Response.Headers.CacheControl = "no-store";
+    try { return Results.Ok(await recovery.ResolveAsync(request.Key, request.ExpectedStartedAt, ctx.RequestAborted)); }
+    catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
+}).RequireRateLimiting("publish");
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
@@ -223,3 +266,5 @@ app.Run();
 
 public partial class Program { }
 public sealed record ManagedTokenRequest(string Role, string? Namespace, int ExpiresInHours);
+
+public sealed record RecoveryReconcileRequest(string Key, string ExpectedStartedAt);
