@@ -813,4 +813,41 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Accepted, allowedOci.StatusCode);
     }
 
+    [Fact]
+    public async Task ManagedWriteToken_CannotEscalateScopeAndIsRevokedImmediately()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        using var create = await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+            new StringContent("""
+                {"role":"write","namespace":"nuget:approved.*","expiresInHours":2}
+                """, Encoding.UTF8, "application/json")));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        using var doc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var id = doc.RootElement.GetProperty("id").GetString()!;
+        var token = doc.RootElement.GetProperty("token").GetString()!;
+        Assert.Equal(64, token.Length);
+        Assert.True(create.Headers.CacheControl?.NoStore);
+
+        static MultipartFormDataContent Package(string name)
+        {
+            var data = new MultipartFormDataContent();
+            data.Add(new ByteArrayContent(Nupkg(name, "1.0.0")), "file", name + ".1.0.0.nupkg");
+            return data;
+        }
+        using var denied = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            Package("outside.demo"), token));
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var allowed = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            Package("approved.demo"), token));
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        using var revoke = await client.SendAsync(WithToken(HttpMethod.Delete, "/api/admin/tokens/" + id));
+        Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
+        using var expired = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
+            Package("approved.next"), token));
+        Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);
+        Assert.DoesNotContain(token, await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/audit"))).Content.ReadAsStringAsync());
+    }
+
 }
