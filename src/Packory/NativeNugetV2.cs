@@ -223,8 +223,10 @@ public static class NativeNugetV2
             var info=ParsePackage(blob.Path);
             if(info.Id!=id||info.Version!=version)throw new InvalidDataException("NuGet package identity mismatch");
             var asset=new StoredAsset(feed,"nuget",id,version,filename,blob.Sha256,blob.Size,"application/octet-stream",
-                expected is null?"mirror-tls":"mirror-sha512","published",DateTimeOffset.UtcNow.ToString("O"));
+                "mirror","published",DateTimeOffset.UtcNow.ToString("O"));
             if(!catalog.Publish(asset))return catalog.Asset(feed,"nuget",id,version,filename);
+            catalog.Audit("origin:nuget.org","nuget.mirror.verification",feed+"/"+id+"/"+version,
+                expected is null?"tls-only; local-sha256":"origin-sha512; local-sha256");
             return asset;
         }
         finally {semaphore.Release();}

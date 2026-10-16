@@ -204,7 +204,9 @@ public sealed class V2IntegrationTests
         Assert.Equal(bytes,await (await client.SendAsync(R(HttpMethod.Get,url))).Content.ReadAsByteArrayAsync());
         using var catalog=JsonDocument.Parse(await (await client.SendAsync(R(HttpMethod.Get,
             "/api/v1/catalog?kind=nuget"))).Content.ReadAsStringAsync());
-        Assert.Contains("mirror-tls",catalog.RootElement.ToString());
+        Assert.Contains("test.library",catalog.RootElement.ToString());
+        var audit=await (await client.SendAsync(R(HttpMethod.Get,"/api/v1/audit"))).Content.ReadAsStringAsync();
+        Assert.Contains("tls-only; local-sha256",audit);
     }
 
     [Fact]
