@@ -1,0 +1,53 @@
+name: V2 public validation dependencies
+on:
+  push:
+    branches: [feat/v2-architecture]
+    paths: [.github/workflows/v2-validation-dependencies.yml]
+permissions:
+  contents: read
+jobs:
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Restore isolated public packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NUGET_PACKAGES="$RUNNER_TEMP/dependencies/packages"
+          mkdir -p "$RUNNER_TEMP/restore" "$RUNNER_TEMP/dependencies/web"
+          cd "$RUNNER_TEMP/restore"
+          cat > TestDependencies.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net10.0</TargetFramework><IsTestProject>true</IsTestProject></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
+              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+              <PackageReference Include="xunit" Version="2.9.3" />
+              <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore TestDependencies.csproj --use-lock-file
+          cp packages.lock.json "$RUNNER_TEMP/dependencies/test-packages.lock.json"
+          cd "$RUNNER_TEMP/dependencies/web"
+          cat > package.json <<'EOF'
+          {"name":"packory-web","private":true,"version":"2.0.0-rc.1","type":"module","dependencies":{"react":"19.3.1","react-dom":"19.3.1"},"devDependencies":{"typescript":"7.0.2","vite":"8.3.4","@types/react":"19.3.0","@types/react-dom":"19.3.0","@playwright/test":"1.64.1"},"scripts":{"build":"tsc --noEmit && vite build","dev":"vite --host 127.0.0.1","test:e2e":"playwright test"}}
+          EOF
+          npm install --ignore-scripts --no-fund
+          cp "$(command -v node)" "$RUNNER_TEMP/dependencies/node"
+          node --version
+          npm --version
+          tar -C "$RUNNER_TEMP/dependencies" -czf "$RUNNER_TEMP/packory-validation-dependencies.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packory-public-validation-dependencies
+          path: ${{ runner.temp }}/packory-validation-dependencies.tar.gz
+          compression-level: 0
+          retention-days: 1
