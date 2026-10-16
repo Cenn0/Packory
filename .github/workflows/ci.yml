@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Validate offline backup and restore tooling
+        run: python3 -m unittest discover -s tests -p test_offline_backup.py -v
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Validate shell smoke scripts

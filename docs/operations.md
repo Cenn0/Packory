@@ -79,6 +79,30 @@ After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` 
 - Disk exhaustion: requests fail; cache size is not bounded in MVP. Provide monitoring and volume headroom.
 - A compromised publish token permits arbitrary artifacts with the holder's scope. Rotate immediately and manually review affected versions. A limited `GET /api/admin/audit` feed records **successful hosted publishes only** and identifies static token classes (e.g. `write-token`), not individuals. It does not prove who performed an action, capture denied attempts, rotate/revoke credentials, or replace reverse-proxy access controls. SQLite audit records have **no automatic retention policy** yet; include the DB in backups and implement retention before sustained high-volume publishing.
 
+
+
+### Verified offline backup and restore (SQLite + filesystem only)
+
+Use `scripts/offline_backup.py` only if **both** `PACKORY_METADATA_PROVIDER=sqlite`
+and `PACKORY_BLOB_PROVIDER=filesystem`. Stop Packory and any other writers
+before creating a backup. The script refuses remaining SQLite WAL/SHM files;
+checkpoint cleanly first. It copies the complete data directory to a *new*
+destination, includes an SHA-256/size manifest and runs SQLite `PRAGMA quick_check`.
+Restores target a new, empty location and never overwrite existing data.
+
+```bash
+python3 scripts/offline_backup.py create --source /srv/packory/data --destination /srv/packory/backup-001 --offline-confirmed
+python3 scripts/offline_backup.py verify --source /srv/packory/backup-001
+python3 scripts/offline_backup.py restore --source /srv/packory/backup-001 --destination /srv/packory/restore-test --offline-confirmed
+```
+
+Run a real artifact restore and readiness test in an isolated instance before
+accepting the backup. This is not a hot backup, migration or atomic snapshot
+of PostgreSQL plus S3. An SHA-256 manifest detects accidental byte changes;
+it is not a cryptographic signature and cannot detect an attacker who edits
+both manifest and files. Encrypt and protect backup destinations separately.
+Do not upload backups to the public repository.
+
 ## Public repository hygiene
 
 Do not commit personal emails, contact details, tokens, `.env`, `.npmrc`, generated archives, SQLite files, local volumes, private hostnames, or system logs. Depend on GitHub Issues, Pull Requests and Security Advisories, not personal contacts. Review **commit author metadata and existing history**, not just tracked source files; deleting a source file does not scrub Git history. Rewriting already-public history additionally requires GitHub's sensitive-data removal procedure and credential/key rotation where applicable.

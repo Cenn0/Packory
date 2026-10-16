@@ -79,19 +79,21 @@ public sealed class S3BlobStore : BlobStore, IDisposable
             return null;
         }
 
-        if (base.Existing(key) is { } cached) return cached;
-
-        using var response = _client.GetObjectAsync(new GetObjectRequest
-        {
-            BucketName = _bucket, Key = ObjectKey(key)
-        }).ConfigureAwait(false).GetAwaiter().GetResult();
-        var completed = base.PutAsync(key, response.ResponseStream, _maxReadBytes,
-            CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
         var path = base.Existing(key);
-        if (!completed && path is null)
-            throw new IOException("S3 local materialization failed");
+        if (path is null)
+        {
+            using var response = _client.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = _bucket, Key = ObjectKey(key)
+            }).ConfigureAwait(false).GetAwaiter().GetResult();
+            var completed = base.PutAsync(key, response.ResponseStream, _maxReadBytes,
+                CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+            path = base.Existing(key);
+            if (!completed && path is null)
+                throw new IOException("S3 local materialization failed");
+        }
 
-        // Content-addressed OCI keys allow independent corruption detection on reads.
+        // Check cached OCI bytes too: previously downloaded data can be corrupted locally.
         if (key.StartsWith("oci/blobs/sha256/", StringComparison.Ordinal) &&
             key.EndsWith(".blob", StringComparison.Ordinal) ||
             key.StartsWith("oci/manifests/sha256/", StringComparison.Ordinal) &&
