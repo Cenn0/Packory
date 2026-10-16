@@ -16,6 +16,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_ANONYMOUS_READ` | `true` | Permit unauthenticated registry read |
 | `PACKORY_RESERVED_NUGET_PREFIXES` | *(empty)* | Comma-separated private NuGet ID prefixes (e.g. `internal.`); package names under these prefixes never fall back to nuget.org |
 | `PACKORY_RESERVED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes (e.g. `@internal`); packages under these scopes never fall back to registry.npmjs.org |
+| `PACKORY_DENIED_NUGET_PREFIXES` | *(empty)* | Comma-separated ID prefixes blocked for both read and publish, case-insensitively |
+| `PACKORY_DENIED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes blocked for both read and publish |
 | `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` | `60` | Maximum attempts per minute in each credential-role partition (admin, write, read, unauthenticated). Range 1–10000; 429 when exceeded |
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
 | `PACKORY_READ_TOKEN` | *(unset)* | Optional read-only credential |
@@ -61,7 +63,7 @@ After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` 
 
 - Upstream request fails: if the artifact has been downloaded before, its blob can still be served; version discovery and metadata rely on a best-effort online request with local fallback. A first download while offline fails.
 - Unexpected shutdown between immutable blob write and SQLite insert: pre-start recovery moves unindexed immutable package/skill files to `/data/recovery/orphaned/<startup-id>/`. This operation preserves bytes but does **not** reconstruct missing DB metadata or validate quarantined content. Inspect and verify before manually restoring an artifact; do not blindly copy it back.
-- Hosted metadata exists but its blob is missing: `/health/ready` reports HTTP 503 after reconciliation on startup. Restore the matching blob from a consistent backup; do not substitute an upstream artifact. Health state is sampled at startup and requires a restart after manual repair.
+- Hosted metadata exists but its blob is missing: `/health/ready` reports HTTP 503 after reconciliation on startup. Restore the matching blob from a consistent backup; do not substitute an upstream artifact. Health is evaluated on each readiness request, including deletions after startup. Restart after manually repairing blob files to rerun orphan reconciliation.
 - Multiple processes sharing `/data`: **unsupported**. Per-artifact locks and startup recovery only coordinate **one process**; do not horizontally scale until external coordinated persistence is implemented.
 - Disk exhaustion: requests fail; cache size is not bounded in MVP. Provide monitoring and volume headroom.
 - A compromised publish token permits arbitrary artifacts with the holder's scope. Rotate immediately and manually review affected versions. A limited `GET /api/admin/audit` feed records **successful hosted publishes only** and identifies static token classes (e.g. `write-token`), not individuals. It does not prove who performed an action, capture denied attempts, rotate/revoke credentials, or replace reverse-proxy access controls. SQLite audit records have **no automatic retention policy** yet; include the DB in backups and implement retention before sustained high-volume publishing.

@@ -523,4 +523,63 @@ public sealed class ApiTests
             "/nuget/v3/push", Form("admin.one")))).StatusCode);
     }
 
+    [Fact]
+    public async Task Nuget_RefusesAnUpstreamPackageWithoutChecksum()
+    {
+        var bytes = Nupkg();
+        using var host = new Host(request =>
+            request.RequestUri!.AbsolutePath.EndsWith(".nupkg", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/nuget/v3/flatcontainer/example.package/1.2.3/example.package.1.2.3.nupkg"))).StatusCode);
+        var catalog = await (await client.SendAsync(WithToken(HttpMethod.Get, "/api/packages?kind=nuget")))
+            .Content.ReadAsStringAsync();
+        Assert.DoesNotContain("example.package", catalog);
+    }
+
+    [Fact]
+    public async Task DenyPolicyBlocksLocalPublishingAndPublicLookups()
+    {
+        var calledUpstream = 0;
+        using var host = new Host(_ =>
+        {
+            Interlocked.Increment(ref calledUpstream);
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }, cfg =>
+        {
+            cfg.DeniedNugetPrefixes = ["blocked."];
+            cfg.DeniedNpmScopes = ["@blocked"];
+        });
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/nuget/v3/flatcontainer/blocked.widget/index.json"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/npm/%40blocked%2Fwidget"))).StatusCode);
+        var form = new MultipartFormDataContent();
+        form.Add(new ByteArrayContent(Nupkg("Blocked.Widget", "1.0.0")), "package", "blocked.widget.1.0.0.nupkg");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", form))).StatusCode);
+        Assert.Equal(0, Volatile.Read(ref calledUpstream));
+    }
+
+    [Fact]
+    public async Task ReadinessDetectsHostedArtifactDeletionAfterStartup()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var form = new MultipartFormDataContent();
+        form.Add(new ByteArrayContent(Nupkg("Lost.Widget", "1.0.0")), "package", "lost.widget.1.0.0.nupkg");
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", form))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
+        var blob = Path.Combine(host.DataDirectory, "blobs", "nuget", "lost.widget", "1.0.0", "lost.widget.1.0.0.nupkg");
+        File.Delete(blob);
+        var ready = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("missingHostedArtifacts", await ready.Content.ReadAsStringAsync());
+    }
+
 }

@@ -22,7 +22,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
 - [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks (in progress; in-process key locks, atomic SQLite skill+catalog publication, quarantine of orphan blobs and missing-hosted detection implemented; full crash-injection verification and CAS publication outstanding)
 - [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction (in progress: transactional audit of successful hosted publishing and role-partitioned write rate limits implemented; other actions, retention, metrics, quotas and eviction outstanding)
-- [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow
+- [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow (strict upstream NuGet checksum enforcement and NuGet/npm namespace-deny policy implemented; full security scanning and license compliance require external scanners, policies and evidence)
 - [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
 
 ### Milestone 1 delivery: consistency and namespace isolation
@@ -34,6 +34,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [x] Deterministic concurrency, unsigned npm payload, reserved namespace and crash-orphan regression tests.
 - [x] SQLite audit records committed atomically with hosted NuGet/npm/Skill metadata; read access restricted to the admin token.
 - [x] Configurable per-role publish rate limiter (429 on exhaustion, no unbounded partitions created from user-supplied credentials).
+- [x] Live readiness recalculates missing hosted blobs, fail-closed mirrored NuGet checksum validation and namespace-deny policies for NuGet/npm.
 - [x] Real CLI hosted acceptance: `dotnet pack` → `dotnet nuget push` → isolated `dotnet restore/build`; `npm publish` → isolated `npm install` and fresh-cache `npm ci`, including scoped package names, without public upstream fallback.
 - [ ] Per-token identity, lifecycle, immutable full action audit, storage quotas and cache eviction remain pending.
 - [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
