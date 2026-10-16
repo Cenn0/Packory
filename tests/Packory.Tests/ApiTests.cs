@@ -42,8 +42,6 @@ public sealed class ApiTests
             }));
             builder.ConfigureTestServices(services =>
             {
-                // Replace the concrete Settings singleton: top-level startup binds configuration
-                // before the test host configuration overlay is applied.
                 services.RemoveAll<Settings>();
                 services.AddSingleton(new Settings
                 {

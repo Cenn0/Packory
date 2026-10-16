@@ -30,6 +30,9 @@ builder.Services.Configure<FormOptions>(options =>
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
+builder.Services.AddSingleton<V2Catalog>();
+builder.Services.AddSingleton<CasStore>();
+builder.Services.AddHostedService<JobWorker>();
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
@@ -42,6 +45,7 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
 
 var app = builder.Build();
 app.Services.GetRequiredService<Database>().Initialize();
+app.Services.GetRequiredService<V2Catalog>().Initialize();
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -72,6 +76,11 @@ app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, 
 NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
+ControlPlaneEndpoints.Map(app);
+RawEndpoints.Map(app);
+NativeNugetV2.Map(app);
+NativeNpmV2.Map(app);
+McpRegistryEndpoints.Map(app);
 app.Run();
 
 public partial class Program { }
