@@ -903,4 +903,25 @@ public sealed class ApiTests
         Assert.Empty(db.PendingPublications());
     }
 
+    [Fact]
+    public async Task OperationsStatusIsAdminOnlyAndDoesNotExposeCredentials()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/admin/operations/status")).StatusCode);
+        using var reader = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/operations/status", token: ReadToken));
+        Assert.Equal(HttpStatusCode.Forbidden, reader.StatusCode);
+        using var admin = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/operations/status"));
+        Assert.Equal(HttpStatusCode.OK, admin.StatusCode);
+        Assert.True(admin.Headers.CacheControl?.NoStore);
+        var output = await admin.Content.ReadAsStringAsync();
+        Assert.Contains("pendingPublicationCount", output);
+        Assert.Contains("staleUnresolvedCount", output);
+        Assert.DoesNotContain(AdminToken, output);
+        Assert.DoesNotContain(ReadToken, output);
+    }
+
 }

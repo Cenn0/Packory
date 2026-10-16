@@ -67,6 +67,39 @@ capacity management and operational SLO validation. Do not route an arbitrary
 mix of native protocols to readers. Prefer explicit reverse-proxy routing
 based on tested paths, and use TLS on all exposed endpoints.
 
+### Opt-in strict deployment preflight
+
+Set `PACKORY_STRICT_DEPLOYMENT=true` to **reject unsafe runtime
+configurations at startup**. This preflight requires PostgreSQL metadata,
+S3 blob storage, a non-loopback HTTPS `PACKORY_PUBLIC_BASE_URL`,
+non-anonymous package reads, an administrator token or configured OIDC issuer,
+and PostgreSQL `SSL Mode=VerifyFull` with trusted hostname-validated
+certificates. It rejects the loopback-HTTP S3 emulator option. Secrets
+remain runtime-provided; no credentials or private contact details belong
+in the public repository.
+
+For example, an external PostgreSQL connection must set
+`SSL Mode=VerifyFull` and present a hostname-matching certificate
+under a trusted CA. `SSL Mode=Require` alone does **not** validate the
+server identity. Do not disable certificate checking to get a deployment
+passing. Keep the reverse proxy's forwarded-header trust list restrictive.
+
+**Strict preflight is not a production certification.** It cannot verify
+the external S3 provider's conditional-delete conformance, database backup
+retention and restore recoverability, reverse-proxy TLS termination, object
+versioning, vulnerability scanning, malware/attestation policy, multi-node
+fencing or recovery drills. Those require independent deployment-specific
+acceptance evidence.
+
+`GET /health/ready` now returns HTTP 503 if there are missing hosted
+blobs or unresolved publication intents older than five minutes, or if
+prepared quarantine evidence remains. Normal in-flight uploads within the
+grace window do not cause this alert. Admin-only
+`GET /api/admin/operations/status` exposes provider/role and aggregate
+health counts without tokens or private identifiers. Monitor these
+counts and alert on sustained 503 before treating the deployment as
+reliable. Reader nodes must retain separate writable local cache roots.
+
 ### Secure baseline
 
 1. Generate tokens using a cryptographically secure RNG; store them in a deployment secrets manager. Rotate by changing the environment and restarting the process. For an HTTP reverse proxy, enforce HTTPS for **all** authenticated reads and writes.

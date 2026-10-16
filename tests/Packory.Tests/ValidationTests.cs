@@ -216,4 +216,56 @@ public sealed class ValidationTests
     }
 
 
+    [Fact]
+    public void StrictDeploymentRequiresHttpsPrivateAccessAndVerifiedPostgresTls()
+    {
+        var cfg = new Settings
+        {
+            StrictDeployment = true, MetadataProvider = "postgresql",
+            BlobProvider = "s3", S3Bucket = "packory-example",
+            PostgresConnectionString = "Host=db.example.test;Database=packory;Username=packory;Password=fixture;SSL Mode=VerifyFull",
+            PublicBaseUrl = "https://packages.example.test",
+            AnonymousRead = false, AdminToken = new string('a', 40)
+        };
+        cfg.Validate();
+        cfg.PublicBaseUrl = "http://packages.example.test";
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.PublicBaseUrl = "https://packages.example.test";
+        cfg.AnonymousRead = true;
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.AnonymousRead = false;
+        cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=Require";
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=VerifyCA";
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+        cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=VerifyFull";
+        cfg.S3AllowLoopbackHttp = true;
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+    }
+
+    [Fact]
+    public async Task StalePublicationReadinessDetectsUncommittedBytesWithoutReplaying()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-stale-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cfg = new Settings { DataDirectory = root };
+            var db = new Database(cfg);
+            db.Initialize();
+            var blobs = new BlobStore(cfg);
+            var recovery = new ArtifactRecovery(cfg, db, blobs,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ArtifactRecovery>.Instance);
+            var key = NuGetEndpoints.NugetKey("pending-test", "1.0.0");
+            db.BeginPublication(key, "nuget", "pending-test", "1.0.0");
+            Assert.True(await blobs.PutAsync(key, new MemoryStream(new byte[] { 1, 2, 3 }),
+                1024, CancellationToken.None));
+            Assert.Equal(1, recovery.StaleUnresolvedCount(TimeSpan.Zero));
+            Assert.Empty(db.Versions("nuget", "pending-test"));
+            db.PrepareQuarantine(new QuarantineEvidence(key, "recovery/quarantine/fixture/" + key,
+                new string('a', 64), "test-etag", DateTimeOffset.UtcNow.ToString("O"), false));
+            Assert.Equal(1, recovery.StaleUnresolvedCount());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
 }

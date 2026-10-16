@@ -57,6 +57,23 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         };
     }
 
+    /// <summary>
+    /// Only overdue unresolved publish intents affect readiness: in-flight writes
+    /// do not make the process flap. Prepared evidence remains a blocker.
+    /// </summary>
+    public int StaleUnresolvedCount(TimeSpan? grace = null)
+    {
+        var deadline = DateTimeOffset.UtcNow - (grace ?? TimeSpan.FromMinutes(5));
+        return database.PendingPublications().Count(pending =>
+        {
+            var evidence = database.FindQuarantine(pending.Key);
+            if (evidence is not null && !evidence.Completed) return true;
+            if (!DateTimeOffset.TryParse(pending.StartedAt, out var started) || started > deadline)
+                return false;
+            return State(pending) is "uncommitted-object" or "missing-hosted-blob";
+        });
+    }
+
     public RecoveryReport Reconcile()
     {
         var known = new HashSet<string>(StringComparer.Ordinal);

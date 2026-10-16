@@ -1,6 +1,6 @@
 # Security policy
 
-Packory is at the **initial MVP stage**. It has no security-support guarantee, audit-trail enforcement, content-signature trust policy, or hardened production certification.
+Packory is an **experimental registry platform** with optional stricter deployment preflight, scoped credentials and limited read-only replicas. It has no security-support guarantee, comprehensive immutable audit trail, content-signature trust policy, or certified production release.
 
 ## Reporting vulnerabilities
 
@@ -14,7 +14,7 @@ No personal email contact is published or required. See also [Operations](docs/o
 - The operator controls upstream settings and deployment egress.
 - Local SQLite and blob storage are trusted storage on one host.
 - Uploaded code and skills are untrusted and must not be executed by Packory or clients without separate checks.
-- Only basic shared-token authentication exists; treat publisher credentials as privileged.
+- Static tokens, short-lived revocable scoped tokens and optional validated OIDC bearer authorization exist. Treat all publisher credentials as privileged.
 
 ## Supported versions
 
