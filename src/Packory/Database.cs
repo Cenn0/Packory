@@ -7,6 +7,7 @@ public sealed record SkillEntry(string Name, string Version, string Description,
 public sealed record StoredArtifact(string Kind, string Name, string Version, string Origin);
 public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
     string Actor, string CreatedAt);
+public sealed record PendingPublication(string Key, string Kind, string Name, string Version, string StartedAt);
 public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
@@ -87,6 +88,11 @@ public sealed class Database(Settings settings) : IPackageDatabase
                 repository TEXT NOT NULL, subject TEXT NOT NULL, digest TEXT NOT NULL,
                 media_type TEXT NOT NULL, size INTEGER NOT NULL, artifact_type TEXT NOT NULL,
                 PRIMARY KEY(repository,subject,digest)
+            );
+            CREATE TABLE IF NOT EXISTS publication_intents (
+                artifact_key TEXT PRIMARY KEY,
+                kind TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+                started_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS managed_tokens (
                 id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
@@ -518,6 +524,47 @@ public sealed class Database(Settings settings) : IPackageDatabase
         InsertAudit(db, tx, "publish", "skill", name, version, actor);
         tx.Commit();
         return true;
+    }
+
+    public void BeginPublication(string key, string kind, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO publication_intents(artifact_key,kind,name,version,started_at)
+            VALUES($key,$kind,$name,$version,$started)
+            ON CONFLICT(artifact_key) DO NOTHING
+            """;
+        cmd.Parameters.AddWithValue("$key", key);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$started", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
+    }
+
+    public void CompletePublication(string key)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "DELETE FROM publication_intents WHERE artifact_key=$key";
+        cmd.Parameters.AddWithValue("$key", key);
+        cmd.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<PendingPublication> PendingPublications()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT artifact_key,kind,name,version,started_at
+            FROM publication_intents ORDER BY started_at
+            """;
+        using var reader = cmd.ExecuteReader();
+        var result = new List<PendingPublication>();
+        while (reader.Read()) result.Add(new PendingPublication(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        return result;
     }
 
     public void CreateManagedToken(ManagedTokenRecord token)
