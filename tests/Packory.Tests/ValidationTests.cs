@@ -236,7 +236,7 @@ public sealed class ValidationTests
         cfg.AnonymousRead = false;
         cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=Require";
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
-        cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=VerifyFull;Trust Server Certificate=true";
+        cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=VerifyCA";
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
         cfg.PostgresConnectionString = "Host=db.example.test;Database=packory;SSL Mode=VerifyFull";
         cfg.S3AllowLoopbackHttp = true;
