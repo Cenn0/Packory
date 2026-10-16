@@ -1,5 +1,9 @@
 # Packory brand identity and UI concepts
 
+## Brand banners
+
+The logo and **ONE HUB. ENDLESS POSSIBILITIES.** tagline appear together in the README banner. It switches between self-contained [light](banner-light.svg) and [dark](banner-dark.svg) SVG variants using `<picture>`, and contains no remote assets. The established [compact P/package mark](logo.svg) remains the application's favicon and header symbol.
+
 **Design reference, not a product screenshot or an implementation claim.**
 
 ![Packory light theme](design-light.svg)
