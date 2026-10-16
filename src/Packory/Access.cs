@@ -18,7 +18,8 @@ public static class Access
         if (string.IsNullOrEmpty(token) && OidcCredentialRole(context, settings) is null)
             return Results.Unauthorized();
 
-        var role = CredentialRole(token, settings) ?? OidcCredentialRole(context, settings);
+        var role = (token is null ? null : CredentialRole(token, settings)) ??
+            OidcCredentialRole(context, settings);
         if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" ||
             (!write && role is "read-token" or "oidc-read"))
         {
