@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using Packory;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +24,9 @@ if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NUGET_PREFIXES") is { }
     settings.ReservedNugetPrefixes = reservedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_RESERVED_NPM_SCOPES") is { } reservedNpm)
     settings.ReservedNpmScopes = reservedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_PUBLISH_REQUESTS_PER_MINUTE") is { } maxPublish)
+    settings.PublishRequestsPerMinute = int.TryParse(maxPublish, out var parsedPublish)
+        ? parsedPublish : throw new InvalidOperationException("Invalid PACKORY_PUBLISH_REQUESTS_PER_MINUTE.");
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
     settings.AnonymousRead = anonymousRead;
 settings.Validate();
@@ -36,6 +41,19 @@ builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("publish", context => RateLimitPartition.GetFixedWindowLimiter(
+        Access.RateLimitPartition(context, settings),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = settings.PublishRequestsPerMinute,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
@@ -49,6 +67,8 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
 var app = builder.Build();
 app.Services.GetRequiredService<Database>().Initialize();
 var recoveryReport = app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+app.UseRouting();
+app.UseRateLimiter();
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -78,6 +98,12 @@ app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, 
     if (Access.Require(ctx, cfg) is { } denied) return denied;
     if (kind is not null && kind is not ("nuget" or "npm" or "skill")) return Results.BadRequest(new { error = "Unknown package kind" });
     return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50) });
+});
+app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, Database db, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    if (before <= 0) return Results.BadRequest(new { error = "before must be positive" });
+    return Results.Json(new { items = db.AuditEvents(before, limit ?? 50) });
 });
 NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);

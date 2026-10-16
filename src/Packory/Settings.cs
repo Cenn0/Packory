@@ -13,6 +13,7 @@ public sealed class Settings
     public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-semver2/";
     public bool AnonymousRead { get; set; } = true;
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
+    public int PublishRequestsPerMinute { get; set; } = 60;
     public int MaxMetadataBytes { get; set; } = 16 * 1024 * 1024;
     public string? AdminToken { get; set; }
     public string? ReadToken { get; set; }
@@ -39,6 +40,8 @@ public sealed class Settings
                 !string.IsNullOrEmpty(upstream.UserInfo) || !string.IsNullOrEmpty(upstream.Query) || !string.IsNullOrEmpty(upstream.Fragment))
                 throw new InvalidOperationException("Upstream registry URL must use HTTPS and contain no credentials, query, or fragment.");
         }
+        if (PublishRequestsPerMinute is < 1 or > 10000)
+            throw new InvalidOperationException("PublishRequestsPerMinute must be between 1 and 10000.");
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)
             throw new InvalidOperationException("Configured upload limits are outside supported bounds.");
         if (ReservedNugetPrefixes.Any(prefix => string.IsNullOrEmpty(prefix) || !Names.Nuget(prefix)) ||

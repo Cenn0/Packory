@@ -60,10 +60,10 @@ public static class SkillEndpoints
                 return Results.Conflict(new { error = "Skill version already exists" });
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), settings.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.Conflict();
-            if (!db.AddSkill(manifest.Name, version, manifest.Description)) return Results.Conflict();
+            if (!db.AddSkill(manifest.Name, version, manifest.Description, Access.Actor(ctx))) return Results.Conflict();
             return Results.Json(new { name = manifest.Name, version, description = manifest.Description },
                 statusCode: StatusCodes.Status201Created);
-        });
+        }).RequireRateLimiting("publish");
     }
 
     public static string SkillKey(string name, string version) => $"skills/{name}/{version}.zip";
