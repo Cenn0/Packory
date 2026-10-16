@@ -20,7 +20,7 @@ public static class NpmEndpoints
         });
 
         app.MapGet("/npm/{**resource}", async (string? resource, Settings settings, Database db, BlobStore blobs,
-            IHttpClientFactory clients, HttpContext ctx) =>
+            IHttpClientFactory clients, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (string.IsNullOrEmpty(resource)) return Results.NotFound();
@@ -32,8 +32,16 @@ public static class NpmEndpoints
                 if (!Names.Npm(name) || !tail.EndsWith(".tgz", StringComparison.Ordinal) ||
                     !Names.Version(tail[..^4])) return Results.NotFound();
                 var version = tail[..^4];
+                using var gate = await locks.AcquireAsync("npm", name, version, ctx.RequestAborted);
                 var key = NpmKey(name, version);
-                if (blobs.Existing(key) is { } local) return Results.File(local, "application/octet-stream", enableRangeProcessing: true);
+                var origin = db.PackageOrigin("npm", name, version);
+                if (blobs.Existing(key) is { } local)
+                {
+                    if (origin is not null) return Results.File(local, "application/octet-stream", enableRangeProcessing: true);
+                    throw new InvalidDataException("Unindexed npm blob requires recovery");
+                }
+                if (origin == "hosted") throw new InvalidDataException("Hosted npm blob is missing");
+                if (settings.IsReservedNpm(name)) return Results.NotFound();
                 var raw = await FetchMetadata(name, settings, blobs, clients.CreateClient("upstream"), ctx.RequestAborted);
                 if (raw is null) return Results.NotFound();
                 var json = JsonNode.Parse(raw) as JsonObject;
@@ -55,10 +63,18 @@ public static class NpmEndpoints
                     if (!string.Equals(integrity[7..], Convert.ToBase64String(SHA512.HashData(bytes)), StringComparison.Ordinal))
                         return Results.StatusCode(502);
                 }
-                else if (dist["shasum"]?.GetValue<string>() is { } checksum &&
-                    !string.Equals(checksum, Convert.ToHexStringLower(SHA1.HashData(bytes)), StringComparison.OrdinalIgnoreCase))
+                else if (dist["shasum"]?.GetValue<string>() is { } checksum)
+                {
+                    if (!string.Equals(checksum, Convert.ToHexStringLower(SHA1.HashData(bytes)), StringComparison.OrdinalIgnoreCase))
+                        return Results.StatusCode(502);
+                }
+                else
+                {
+                    // No integrity claim from the upstream: do not publish unverified content.
                     return Results.StatusCode(502);
-                await blobs.PutAsync(key, new MemoryStream(bytes, writable: false), settings.MaxArtifactBytes, ctx.RequestAborted);
+                }
+                if (!await blobs.PutAsync(key, new MemoryStream(bytes, writable: false), settings.MaxArtifactBytes, ctx.RequestAborted))
+                    throw new InvalidDataException("npm cache blob was concurrently replaced");
                 var description = json["versions"]?[version]?["description"]?.ToString() ?? json["description"]?.ToString() ?? "";
                 db.UpsertPackage("npm", name, version, description[..Math.Min(description.Length, 2000)], "mirror");
                 return Results.File(blobs.Existing(key)!, "application/octet-stream", enableRangeProcessing: true);
@@ -81,7 +97,7 @@ public static class NpmEndpoints
         });
 
         app.MapPut("/npm/{**packageName}", async (string? packageName, Settings settings, Database db,
-            BlobStore blobs, HttpContext ctx) =>
+            BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             var name = Uri.UnescapeDataString(packageName ?? "");
@@ -97,6 +113,7 @@ public static class NpmEndpoints
             if (!Names.Version(version) || value is not JsonObject manifest ||
                 manifest["name"]?.ToString() != name || manifest["version"]?.ToString() != version)
                 return Results.BadRequest(new { error = "Invalid package manifest" });
+            using var gate = await locks.AcquireAsync("npm", name, version, ctx.RequestAborted);
             if (db.HasPackage("npm", name, version) || blobs.Existing(NpmKey(name, version)) is not null)
                 return Results.Conflict(new { error = "Version already exists" });
             var attachment = attachments.First().Value as JsonObject;
@@ -138,6 +155,7 @@ public static class NpmEndpoints
 
     public static async Task<byte[]?> FetchMetadata(string name, Settings settings, BlobStore blobs, HttpClient http, CancellationToken ct)
     {
+        if (settings.IsReservedNpm(name)) return null;
         var key = $"npm-metadata/{Names.HashName(name)}.json";
         var cached = blobs.Existing(key);
         var url = settings.NpmUpstreamUrl.TrimEnd('/') + "/" + Names.EscapedNpm(name);
