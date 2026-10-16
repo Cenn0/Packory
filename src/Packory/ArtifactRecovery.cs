@@ -22,16 +22,16 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                 "cargo" => CargoEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
-            if (key is null || blobs.Existing(key) is null) missing++;
+            if (key is null || !blobs.Contains(key)) missing++;
         }
         foreach (var file in database.PyFiles())
         {
-            if (blobs.Existing(PyPiEndpoints.Key(file.Name, file.Filename)) is null) missing++;
+            if (!blobs.Contains(PyPiEndpoints.Key(file.Name, file.Filename))) missing++;
         }
         foreach (var digest in database.OciAllBlobDigests())
-            if (blobs.Existing(OciEndpoints.BlobKey(digest)) is null) missing++;
+            if (!blobs.Contains(OciEndpoints.BlobKey(digest))) missing++;
         foreach (var digest in database.OciAllManifestDigests())
-            if (blobs.Existing(OciEndpoints.ManifestKey(digest)) is null) missing++;
+            if (!blobs.Contains(OciEndpoints.ManifestKey(digest))) missing++;
         return missing;
     }
 
@@ -60,7 +60,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                 continue;
             }
             known.Add(key);
-            if (artifact.Origin == "hosted" && blobs.Existing(key) is null)
+            if (artifact.Origin == "hosted" && !blobs.Contains(key))
             {
                 missingHosted++;
                 logger.LogError("Hosted artifact is missing: {Kind} {Name} {Version}",
@@ -72,19 +72,19 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         {
             var key = PyPiEndpoints.Key(file.Name, file.Filename);
             known.Add(key);
-            if (blobs.Existing(key) is null) missingHosted++;
+            if (!blobs.Contains(key)) missingHosted++;
         }
         foreach (var digest in database.OciAllBlobDigests())
         {
             var key = OciEndpoints.BlobKey(digest);
             known.Add(key);
-            if (blobs.Existing(key) is null) missingHosted++;
+            if (!blobs.Contains(key)) missingHosted++;
         }
         foreach (var digest in database.OciAllManifestDigests())
         {
             var key = OciEndpoints.ManifestKey(digest);
             known.Add(key);
-            if (blobs.Existing(key) is null) missingHosted++;
+            if (!blobs.Contains(key)) missingHosted++;
         }
         var root = Path.Combine(Path.GetFullPath(settings.DataDirectory), "blobs");
         var quarantine = Path.Combine(Path.GetFullPath(settings.DataDirectory), "recovery", "orphaned",

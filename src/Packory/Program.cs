@@ -21,6 +21,15 @@ settings.ReadToken = TokenFromEnv("PACKORY_READ_TOKEN") ?? settings.ReadToken;
 settings.WriteToken = TokenFromEnv("PACKORY_WRITE_TOKEN") ?? settings.WriteToken;
 settings.DataDirectory = Environment.GetEnvironmentVariable("PACKORY_DATA_DIRECTORY") ?? settings.DataDirectory;
 settings.MetadataProvider = Environment.GetEnvironmentVariable("PACKORY_METADATA_PROVIDER") ?? settings.MetadataProvider;
+settings.BlobProvider = Environment.GetEnvironmentVariable("PACKORY_BLOB_PROVIDER") ?? settings.BlobProvider;
+settings.S3Endpoint = Environment.GetEnvironmentVariable("PACKORY_S3_ENDPOINT") ?? settings.S3Endpoint;
+settings.S3Bucket = Environment.GetEnvironmentVariable("PACKORY_S3_BUCKET") ?? settings.S3Bucket;
+settings.S3Region = Environment.GetEnvironmentVariable("PACKORY_S3_REGION") ?? settings.S3Region;
+settings.S3KeyPrefix = Environment.GetEnvironmentVariable("PACKORY_S3_KEY_PREFIX") ?? settings.S3KeyPrefix;
+settings.S3AccessKey = Environment.GetEnvironmentVariable("PACKORY_S3_ACCESS_KEY") ?? settings.S3AccessKey;
+settings.S3SecretKey = Environment.GetEnvironmentVariable("PACKORY_S3_SECRET_KEY") ?? settings.S3SecretKey;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_S3_ALLOW_LOOPBACK_HTTP"), out var s3Loopback))
+    settings.S3AllowLoopbackHttp = s3Loopback;
 settings.PostgresConnectionString = Environment.GetEnvironmentVariable("PACKORY_POSTGRES_CONNECTION_STRING") ?? settings.PostgresConnectionString;
 settings.PublicBaseUrl = Environment.GetEnvironmentVariable("PACKORY_PUBLIC_BASE_URL") ?? settings.PublicBaseUrl;
 settings.NugetUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NUGET_UPSTREAM_URL") ?? settings.NugetUpstreamUrl;
@@ -74,7 +83,11 @@ builder.Services.AddSingleton<IPackageDatabase>(provider =>
     return effective.MetadataProvider == "postgresql"
         ? new PostgresDatabase(effective) : new Database(effective);
 });
-builder.Services.AddSingleton<BlobStore>();
+builder.Services.AddSingleton<BlobStore>(provider =>
+{
+    var cfg = provider.GetRequiredService<Settings>();
+    return cfg.BlobProvider == "s3" ? new S3BlobStore(cfg) : new BlobStore(cfg);
+});
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
 builder.Services.AddSingleton<OciUploadStore>();
