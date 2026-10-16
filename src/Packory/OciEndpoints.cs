@@ -217,7 +217,7 @@ public static class OciEndpoints
         try
         {
             var count = await Append(session, ctx.Request.Body, cfg.MaxArtifactBytes, ctx.RequestAborted);
-            session.LastTouched = DateTimeOffset.UtcNow;
+            sessions.Touch(session);
             SetUploadHeaders(ctx, cfg, repository, id, count);
             return Results.StatusCode(202);
         }

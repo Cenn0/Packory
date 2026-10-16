@@ -18,7 +18,7 @@ single-node implementation, **not** full distribution-spec certification.
   descriptors must resolve within the repository before publishing.
 - `GET /v2/<repo>/tags/list`: sorted tags and paginated Link header.
 - `GET /v2/<repo>/referrers/<digest>`: OCI 1.1 style subject index.
-- Single-process upload tracking, startup orphan quarantine, read/write
+- Single-writer locally persisted upload sessions (restart resume on the same data directory), startup orphan quarantine, read/write
   credentials, published-manifest audit, and container-independent tests.
 
 ### Authentication
@@ -62,3 +62,9 @@ by digest.
 Example endpoint: `http://localhost:8080/v2/` for loopback evaluation.
 
 Primary specification: https://github.com/opencontainers/distribution-spec/blob/main/spec.md
+
+## Single-writer session restart semantics
+
+Upload bytes and a bounded repository-bound session descriptor are persisted under `data/oci-staging/`. After a process restart on the **same host/data directory**, eligible 30-minute sessions can resume. Corrupt metadata, oversized bytes or an unknown/reused UUID fail closed; old unbound `.tmp` files remain for operator retention handling. The descriptor is atomically replaced after successful PATCH. 
+
+This is **not** multi-node session transfer, distributed locking, multipart S3, process-failover fencing or power-failure durability certification. Do not use it to claim general OCI upload-resume or active-active support; test the exact native client/version and fault boundary for each support claim.
