@@ -50,6 +50,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | --- | --- |
 | **NuGet V3** | Service index, package/version downloads, read-through caching from nuget.org, registration metadata and basic hosted publishing |
 | **npm** | Upstream metadata and tarball caching, scoped package handling and basic single-version publishing |
+| **OCI (experimental)** | Hosted Distribution v2 endpoints for SHA-256 blobs, chunk uploads, manifests, tags and referrers; incomplete client/auth support |
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Agent skills** | Import, list and download versioned ZIP files containing a simple `SKILL.md` manifest |
 | **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
@@ -112,6 +113,6 @@ bash scripts/smoke-hosted.sh
 
 ## Documentation and contributions
 
-[Documentation index](docs/README.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
