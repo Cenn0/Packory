@@ -20,6 +20,7 @@ public sealed class ApiTests
 {
     private const string AdminToken = "test-admin-token-which-is-at-least-32-characters";
     private const string ReadToken = "test-reader-token-which-is-at-least-32-characters";
+    private const string WriteToken = "test-writer-token-which-is-at-least-32-characters";
 
     private sealed class FakeUpstream(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler
     {
@@ -53,6 +54,7 @@ public sealed class ApiTests
                     PublicBaseUrl = "http://localhost:8080",
                     AdminToken = AdminToken,
                     ReadToken = ReadToken,
+                    WriteToken = WriteToken,
                     AnonymousRead = false
                 };
                 configure?.Invoke(cfg);
@@ -429,6 +431,96 @@ public sealed class ApiTests
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+
+    [Fact]
+    public async Task AuditEvents_RecordSuccessfulHostedPublishesWithoutCredentials()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/admin/audit")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/audit", token: WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/audit?before=0"))).StatusCode);
+
+        var nugetForm = new MultipartFormDataContent();
+        nugetForm.Add(new ByteArrayContent(Nupkg("Audit.Example", "1.0.0")), "package", "audit.example.1.0.0.nupkg");
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", nugetForm, WriteToken))).StatusCode);
+
+        var tarball = new byte[] { 0x1f, 0x8b, 8, 0, 0, 0, 0, 0 };
+        var publish = new JsonObject
+        {
+            ["name"] = "audit-example",
+            ["versions"] = new JsonObject
+            {
+                ["2.0.0"] = new JsonObject { ["name"] = "audit-example", ["version"] = "2.0.0" }
+            },
+            ["dist-tags"] = new JsonObject { ["latest"] = "2.0.0" },
+            ["_attachments"] = new JsonObject
+            {
+                ["audit-example-2.0.0.tgz"] = new JsonObject { ["data"] = Convert.ToBase64String(tarball) }
+            }
+        };
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/npm/audit-example", new StringContent(publish.ToJsonString(), Encoding.UTF8, "application/json")))).StatusCode);
+
+        using var mem = new MemoryStream();
+        using (var zip = new ZipArchive(mem, ZipArchiveMode.Create, true))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("audit-skill/SKILL.md").Open());
+            writer.Write("---\nname: audit-skill\ndescription: Demonstrate audited imports\n---\n# Test\n");
+        }
+        var skillForm = new MultipartFormDataContent();
+        skillForm.Add(new StringContent("1.0.0"), "version");
+        skillForm.Add(new ByteArrayContent(mem.ToArray()), "file", "audit-skill.zip");
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/skills", skillForm))).StatusCode);
+
+        using var auditResponse = await client.SendAsync(WithToken(HttpMethod.Get, "/api/admin/audit?limit=10"));
+        Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
+        var json = await auditResponse.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(AdminToken, json);
+        Assert.DoesNotContain(WriteToken, json);
+        using var audit = JsonDocument.Parse(json);
+        var items = audit.RootElement.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(3, items.Length);
+        Assert.Contains(items, e => e.GetProperty("kind").GetString() == "nuget" &&
+                                    e.GetProperty("actor").GetString() == "write-token");
+        Assert.Contains(items, e => e.GetProperty("kind").GetString() == "npm" &&
+                                    e.GetProperty("actor").GetString() == "admin-token");
+        Assert.Contains(items, e => e.GetProperty("kind").GetString() == "skill");
+        var latestId = items[0].GetProperty("id").GetInt64();
+        using var page = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/audit?before=" + latestId + "&limit=1"));
+        using var pagedJson = JsonDocument.Parse(await page.Content.ReadAsStringAsync());
+        Assert.Single(pagedJson.RootElement.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task PublishRateLimits_AreSeparatedByCredentialRole()
+    {
+        using var host = new Host(configure: cfg => cfg.PublishRequestsPerMinute = 1);
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PutAsync("/nuget/v3/push", new StringContent(""))).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await client.PutAsync("/nuget/v3/push", new StringContent(""))).StatusCode);
+
+        static MultipartFormDataContent Form(string name)
+        {
+            var form = new MultipartFormDataContent();
+            form.Add(new ByteArrayContent(Nupkg(name, "1.0.0")), "package", name + ".1.0.0.nupkg");
+            return form;
+        }
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", Form("writer.one"), WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", Form("writer.two"), WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Put,
+            "/nuget/v3/push", Form("admin.one")))).StatusCode);
     }
 
 }

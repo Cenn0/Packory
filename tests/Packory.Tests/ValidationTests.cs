@@ -39,4 +39,14 @@ public sealed class ValidationTests
         cfg.NpmUpstreamUrl = "http://registry.npmjs.org/";
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10001)]
+    public void RejectsUnsupportedPublishRateLimits(int value)
+    {
+        var cfg = new Settings { PublishRequestsPerMinute = value };
+        Assert.Throws<InvalidOperationException>(() => cfg.Validate());
+    }
+
 }
