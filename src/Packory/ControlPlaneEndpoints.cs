@@ -35,8 +35,8 @@ public static class ControlPlaneEndpoints
                 return Results.BadRequest(new {error="Upstream is not an approved HTTPS origin"});
             if(input.Mode=="hosted" && input.Upstream is not null)return Results.BadRequest(new {error="Hosted feeds cannot specify an upstream"});
             if(!db.CreateFeed(input.Slug!,input.Protocol,input.Mode,input.Visibility,input.Upstream))return Results.Conflict();
-            db.Audit(ScopedAccess.Actor(ctx,s,db),"repository.create",input.Slug,input.Protocol+":"+input.Mode);
-            return Results.Created("/api/v1/repositories/"+input.Slug,db.FeedBySlug(input.Slug));
+            db.Audit(ScopedAccess.Actor(ctx,s,db),"repository.create",input.Slug!,input.Protocol+":"+input.Mode);
+            return Results.Created("/api/v1/repositories/"+input.Slug,db.FeedBySlug(input.Slug!));
         });
         app.MapPatch("/api/v1/repositories/{slug}/visibility",(string slug,VisibilityRequest request,HttpContext ctx,Settings s,V2Catalog db)=>
         {
