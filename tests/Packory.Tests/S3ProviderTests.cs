@@ -43,6 +43,18 @@ public sealed class S3ProviderTests
             Assert.True(await store.PutAsync(package, new MemoryStream(bytes), 1024, CancellationToken.None));
             Assert.True(store.Contains(package));
             Assert.False(await store.PutAsync(package, new MemoryStream(bytes), 1024, CancellationToken.None));
+            // Crash after the S3 write but before DB commit must retain an
+            // operator-visible remote orphan record rather than silently losing it.
+            IPackageDatabase metadata = new Database(settings);
+            metadata.Initialize();
+            metadata.BeginPublication(package, "nuget", "test", "1.0.0");
+            var recovery = new ArtifactRecovery(settings, metadata, store,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ArtifactRecovery>.Instance);
+            recovery.Reconcile();
+            Assert.Contains(metadata.PendingPublications(), pending => pending.Key == package);
+            Assert.True(metadata.PublishNuget("test", "1.0.0", "test", "integration-writer"));
+            recovery.Reconcile();
+            Assert.Empty(metadata.PendingPublications());
             const string metadata = "npm-metadata/demo.json";
             await store.ReplaceAsync(metadata, new MemoryStream(Encoding.UTF8.GetBytes("v1")), 1024, CancellationToken.None);
             await store.ReplaceAsync(metadata, new MemoryStream(Encoding.UTF8.GetBytes("v2")), 1024, CancellationToken.None);
