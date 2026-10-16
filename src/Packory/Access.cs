@@ -51,7 +51,7 @@ public static class Access
     public static string RateLimitPartition(HttpContext context, Settings settings)
     {
         var token = ExtractToken(context);
-        return (token is null ? null : CredentialRole(token, settings))
+        return (token is null ? null : CredentialRole(token, settings, context))
             ?? OidcCredentialRole(context, settings) ?? "unauthenticated";
     }
 
