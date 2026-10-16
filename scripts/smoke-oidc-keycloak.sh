@@ -42,21 +42,22 @@ import sys
 path, secret = sys.argv[1:]
 realm = {
     "realm": "packory-test", "enabled": True,
+    "clientScopes": [
+        {"name": "packory.read", "protocol": "openid-connect",
+         "attributes": {"include.in.token.scope": "true"}},
+        {"name": "packory.write", "protocol": "openid-connect",
+         "attributes": {"include.in.token.scope": "true"}}
+    ],
     "clients": [{
         "clientId": "packory-ci", "enabled": True, "protocol": "openid-connect",
         "secret": secret, "clientAuthenticatorType": "client-secret",
         "publicClient": False, "serviceAccountsEnabled": True,
         "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
+        "defaultClientScopes": ["packory.read", "packory.write"],
         "protocolMappers": [
             {"name": "packory-api-audience", "protocol": "openid-connect",
              "protocolMapper": "oidc-audience-mapper",
              "config": {"included.client.audience": "packory-api",
-                        "access.token.claim": "true"}},
-            {"name": "packory-scopes", "protocol": "openid-connect",
-             "protocolMapper": "oidc-hardcoded-claim-mapper",
-             "config": {"claim.name": "scope",
-                        "claim.value": "packory.read packory.write",
-                        "jsonType.label": "String",
                         "access.token.claim": "true"}}
         ]
     }]
