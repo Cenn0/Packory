@@ -614,7 +614,11 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(request)).StatusCode);
         using var config = await client.SendAsync(WithToken(HttpMethod.Get, "/cargo/index/config.json"));
         var configJson = await config.Content.ReadAsStringAsync();
-        Assert.Contains("/cargo/api/v1/crates", configJson);
+        using var configDocument = JsonDocument.Parse(configJson);
+        var registryApi = configDocument.RootElement.GetProperty("api").GetString();
+        var downloadApi = configDocument.RootElement.GetProperty("dl").GetString();
+        Assert.Equal("/cargo", new Uri(registryApi!).AbsolutePath);
+        Assert.Equal("/cargo/api/v1/crates", new Uri(downloadApi!).AbsolutePath);
         Assert.DoesNotContain("crates.io", configJson);
         var url = "/cargo/index/pa/ck/packory-demo";
         using var index = await client.SendAsync(WithToken(HttpMethod.Get, url));
