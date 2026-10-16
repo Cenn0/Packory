@@ -21,6 +21,14 @@ public sealed class Settings
     // Explicit reservations prevent upstream fallback for private namespaces.
     public string[] ReservedNugetPrefixes { get; set; } = [];
     public string[] ReservedNpmScopes { get; set; } = [];
+    // Registry publication/use policy; empty by default to avoid surprising existing users.
+    public string[] DeniedNugetPrefixes { get; set; } = [];
+    public string[] DeniedNpmScopes { get; set; } = [];
+
+    public bool DeniesNuget(string name) => DeniedNugetPrefixes.Any(
+        prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    public bool DeniesNpm(string name) => DeniedNpmScopes.Any(
+        scope => name.StartsWith(scope + "/", StringComparison.Ordinal));
 
     public bool IsReservedNuget(string id) => ReservedNugetPrefixes.Any(
         prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
@@ -44,8 +52,8 @@ public sealed class Settings
             throw new InvalidOperationException("PublishRequestsPerMinute must be between 1 and 10000.");
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)
             throw new InvalidOperationException("Configured upload limits are outside supported bounds.");
-        if (ReservedNugetPrefixes.Any(prefix => string.IsNullOrEmpty(prefix) || !Names.Nuget(prefix)) ||
-            ReservedNpmScopes.Any(scope => string.IsNullOrEmpty(scope) || !scope.StartsWith('@') ||
+        if (ReservedNugetPrefixes.Concat(DeniedNugetPrefixes).Any(prefix => string.IsNullOrEmpty(prefix) || !Names.Nuget(prefix)) ||
+            ReservedNpmScopes.Concat(DeniedNpmScopes).Any(scope => string.IsNullOrEmpty(scope) || !scope.StartsWith('@') ||
                                            !Names.Npm(scope + "/test")))
             throw new InvalidOperationException("Invalid reserved NuGet prefix or npm scope.");
         foreach (var token in new[] { AdminToken, ReadToken, WriteToken }.Where(t => t is not null))

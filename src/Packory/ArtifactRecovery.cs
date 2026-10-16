@@ -9,6 +9,23 @@ public sealed record RecoveryReport(int QuarantinedOrphans, int MissingHostedArt
 /// </summary>
 public sealed class ArtifactRecovery(Settings settings, Database database, BlobStore blobs, ILogger<ArtifactRecovery> logger)
 {
+    public int MissingHostedCount()
+    {
+        var missing = 0;
+        foreach (var artifact in database.StoredArtifacts().Where(x => x.Origin == "hosted"))
+        {
+            var key = artifact.Kind switch
+            {
+                "nuget" => NuGetEndpoints.NugetKey(artifact.Name, artifact.Version),
+                "npm" => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
+                "skill" => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                _ => null
+            };
+            if (key is null || blobs.Existing(key) is null) missing++;
+        }
+        return missing;
+    }
+
     public RecoveryReport Reconcile()
     {
         var known = new HashSet<string>(StringComparer.Ordinal);

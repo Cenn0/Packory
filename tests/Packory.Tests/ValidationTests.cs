@@ -49,4 +49,13 @@ public sealed class ValidationTests
         Assert.Throws<InvalidOperationException>(() => cfg.Validate());
     }
 
+    [Fact]
+    public void RejectsInvalidBlocklistConfigurations()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { DeniedNpmScopes = ["plain"] }.Validate());
+        Assert.Throws<InvalidOperationException>(() =>
+            new Settings { DeniedNugetPrefixes = ["../"] }.Validate());
+    }
+
 }

@@ -33,6 +33,7 @@ public static class NuGetEndpoints
             if (Access.Require(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant();
             if (!Names.Nuget(id)) return Results.BadRequest(new { error = "Invalid NuGet package ID" });
+            if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var versions = new HashSet<string>(db.Versions("nuget", id), StringComparer.OrdinalIgnoreCase);
             if (settings.IsReservedNuget(id))
                 return versions.Count == 0 ? Results.NotFound() : Results.Json(new { versions = versions.OrderBy(v => v, StringComparer.Ordinal).ToArray() });
@@ -64,6 +65,7 @@ public static class NuGetEndpoints
             if (Access.Require(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant(); version = version.ToLowerInvariant();
             if (!Names.Nuget(id) || !Names.Version(version)) return Results.BadRequest();
+            if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var prefix = $"{id}.{version}";
             if (!string.Equals(file, prefix + ".nupkg", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(file, prefix + ".nupkg.sha512", StringComparison.OrdinalIgnoreCase) &&
@@ -88,6 +90,7 @@ public static class NuGetEndpoints
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Nuget(id)) return Results.BadRequest();
+            if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var result = await NugetRegistration.GetIndex(id.ToLowerInvariant(), settings, db, blobs,
                 clients.CreateClient("upstream"), ctx.RequestAborted);
             return result is null ? Results.NotFound() : Results.Json(result);
@@ -98,6 +101,7 @@ public static class NuGetEndpoints
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Nuget(id) || string.IsNullOrEmpty(suffix)) return Results.BadRequest();
+            if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var resource = await NugetRegistration.GetResource(id.ToLowerInvariant(), Uri.UnescapeDataString(suffix),
                 settings, db, blobs, clients.CreateClient("upstream"), ctx.RequestAborted);
             return resource is null ? Results.NotFound() : Results.Json(resource);
@@ -106,7 +110,7 @@ public static class NuGetEndpoints
         app.MapGet("/nuget/v3/search", (string? q, int? skip, int? take, Settings settings, Database db, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
-            var matching = db.Search(q ?? "", "nuget", 100);
+            var matching = db.Search(q ?? "", "nuget", 100).Where(x => !settings.DeniesNuget(x.Name)).ToList();
             var groups = matching.GroupBy(x => x.Name).Skip(Math.Clamp(skip ?? 0, 0, 10000)).Take(Math.Clamp(take ?? 20, 1, 100));
             var records = groups.Select(g => new
             {
@@ -136,6 +140,7 @@ public static class NuGetEndpoints
             catch (Exception e) when (e is InvalidDataException or XmlException or InvalidOperationException)
             { return Results.BadRequest(new { error = "Invalid nupkg or nuspec" }); }
             var id = spec.Id.ToLowerInvariant(); var version = spec.Version.ToLowerInvariant();
+            if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var key = NugetKey(id, version);
             using var gate = await locks.AcquireAsync("nuget", id, version, ctx.RequestAborted);
             if (db.HasPackage("nuget", id, version) || blobs.Existing(key) is not null)
@@ -175,7 +180,9 @@ public static class NuGetEndpoints
         var bytes = await BlobStore.ReadBoundedAsync(stream, settings.MaxArtifactBytes, ct);
         var checksumUrl = settings.NugetUpstreamUrl.TrimEnd('/') + $"/{id}/{version}/{id}.{version}.nupkg.sha512";
         using var checksumResponse = await http.GetAsync(checksumUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (checksumResponse.IsSuccessStatusCode)
+        // Do not silently cache a mirror artifact without upstream integrity evidence.
+        if (!checksumResponse.IsSuccessStatusCode)
+            throw new InvalidDataException("NuGet upstream SHA512 checksum unavailable");
         {
             // Bound the checksum document; a Base64-encoded SHA-512 checksum is 88 chars.
             await using var checksumStream = await checksumResponse.Content.ReadAsStreamAsync(ct);
