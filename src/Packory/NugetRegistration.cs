@@ -8,7 +8,8 @@ public static class NugetRegistration
     public static async Task<JsonObject?> GetIndex(string id, Settings settings, Database db,
         BlobStore blobs, HttpClient client, CancellationToken ct)
     {
-        var remote = await Fetch(id, "index.json", settings, blobs, client, ct);
+        var remote = settings.IsReservedNuget(id)
+            ? null : await Fetch(id, "index.json", settings, blobs, client, ct);
         var local = db.Search(id, "nuget", 100).Where(x => x.Name == id && x.Origin == "hosted").ToList();
         if (remote is null && local.Count == 0) return null;
         var origin = settings.Base + "/nuget/v3/registration/" + id + "/";
@@ -48,7 +49,7 @@ public static class NugetRegistration
             var local = db.Search(id, "nuget", 100).FirstOrDefault(x => x.Name == id && x.Version == version && x.Origin == "hosted");
             if (local is not null) return LocalLeaf(local, settings, blobs);
         }
-        return await Fetch(id, suffix, settings, blobs, client, ct);
+        return settings.IsReservedNuget(id) ? null : await Fetch(id, suffix, settings, blobs, client, ct);
     }
 
     private static async Task<JsonObject?> Fetch(string id, string suffix, Settings settings,

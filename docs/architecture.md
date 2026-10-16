@@ -1,6 +1,6 @@
 # Architecture decision record: Packory MVP
 
-Status: **Implemented (MVP)** · October 2026
+Status: **MVP plus initial milestone-1 hardening** · October 2026
 
 ## Decision
 
@@ -33,6 +33,8 @@ Modules:
 - `SkillEndpoints`: archive validation, manifest metadata, versioned downloads. No archive extraction/execution on disk.
 - `Database`: SQLite catalog, npm hosted versions/dist-tags, skills. WAL mode, unique keys and scoped queries.
 - `BlobStore`: writes to an unpredictable temporary file, enforces size limits and renames into place (create-only for immutable packages, replace for upstream metadata).
+- `ArtifactLocks`: bounded striped per-artifact coordination for uploads and cache cold misses, **single-process only**.
+- `ArtifactRecovery`: scans immutable blob keys against SQLite references before serving traffic; unindexed files are moved to a non-destructive local recovery directory.
 - `Access`: access scopes from static API tokens. Read is anonymous by default; writes require a token.
 - `wwwroot`: standalone JS/CSS dashboard, no third-party runtime CDN.
 
@@ -47,12 +49,12 @@ Modules:
 
 ## Persistence and consistency
 
-SQLite is suitable for a **single writer/deployment** and basic searches at MVP scale. Files and SQLite are not a distributed ACID transaction. On unexpected termination, an artifact may exist without a catalog entry. Cache/download paths are idempotent but an operator may need to remove a stranded blob. Database snapshots plus blob backups are required for restoration. Avoid concurrent replicas on the same directory; WAL is not multi-host coordination.
+SQLite is suitable for a **single writer/deployment** and basic searches at MVP scale. Files and SQLite are not a distributed ACID transaction. On unexpected termination, an artifact may exist without a catalog entry. Before traffic starts, recovery moves unindexed immutable files to `data/recovery/orphaned/` and logs the count; it does not delete them. Missing hosted blobs degrade `/health/ready` (HTTP 503). This is recovery of **visibility**, not a cross-store ACID transaction or automated restoration of missing bytes. Database snapshots plus blob backups are required for restoration. Avoid concurrent replicas on the same directory; WAL is not multi-host coordination.
 
 `origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions and skills enter immediately after successful upload. Search is not federated across remote registries in MVP.
 
 ## Constraints and next decisions
 
-Moving to PostgreSQL/object storage should be behind repository interfaces, with a **single-writer lease or transactional outbox** for metadata/blob durability. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
+Moving to PostgreSQL/object storage should be behind repository interfaces, with a **single-writer lease or transactional outbox** for metadata/blob durability. Private namespace reservations suppress public upstream metadata and file fallback. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
 
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.

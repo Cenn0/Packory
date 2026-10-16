@@ -5,7 +5,7 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-Packory's first MVP is an **ASP.NET Core 10 modular monolith**, not a general-purpose Git forge and not a collection of separate services. It provides a unified dashboard and catalog while retaining the **native NuGet v3 and npm registry protocols**. A local SQLite database tracks indexed artifacts; files live on disk. No Redis, message broker, Kubernetes, or external database is needed.
+Packory's first MVP is an **ASP.NET Core 10 modular monolith**, not a general-purpose Git forge and not a collection of separate services. It provides a unified dashboard and catalog while retaining the **native NuGet v3 and npm registry protocols**. A local SQLite database tracks indexed artifacts; files live on disk. No Redis, message broker, Kubernetes, or external database is needed. The ongoing milestone-1 hardening adds in-process single-flight artifact locks, reserved private namespaces, and startup reconciliation; production compatibility is still unverified.
 
 > **MVP scope:** functional pull-through package downloads, basic hosted publishing, a searchable catalog of *cached/hosted* artifacts, agent-skill ZIP imports, static token permissions, a minimal dashboard, health endpoints, Docker support, and tests. Packory is not yet a production-hardened registry replacement. See [Roadmap](docs/roadmap.md) and [Limitations](#limitations).
 
@@ -129,7 +129,8 @@ Integration tests use in-process ASP.NET hosting and a deterministic **stub regi
 - Minimal npm publish implementation (one version per request); **npm login**, unpublish, and comprehensive npm registry endpoints are not provided. Some npm clients/workflows may require missing APIs.
 - NuGet supports principal v3 install/mirror/push operations but does not claim full v3 feature parity (symbols, deprecation, vulnerability resources, registration edge cases, advanced SemVer normalization). Full native-client compatibility must be validated per client version.
 - Search shows **cached and hosted packages only**, not all upstream entries. The dashboard is a discovery/admin MVP, not a complete registry UI.
-- Metadata may need upstream connectivity on cold starts; caches use best-effort offline fallbacks. No quota eviction, coordinated cache locks, malware scanning, package-signature enforcement, upstream allow/block rules, or automatic license compliance checks.
+- Metadata may need upstream connectivity on cold starts; caches use best-effort offline fallbacks. Per-artifact locks coordinate concurrent requests **within one process only**. No quota eviction, multi-node coordination, malware scanning, package-signature enforcement, comprehensive upstream allow/block rules, or automatic license compliance checks.
+- Reserve private NuGet ID prefixes or npm scopes to prohibit fallback to public upstreams (configuration in [Operations](docs/operations.md)). Startup reconciliation quarantines unindexed immutable files, retains their bytes for manual recovery, and marks readiness degraded if hosted blobs are missing.
 - Agent skills use basic frontmatter validation rather than a complete YAML/Agent Skills conformance implementation. Import does **not** imply an uploaded skill is safe to execute.
 - PostgreSQL, S3, additional ecosystems (Cargo, PyPI, OCI), OIDC, and multi-service deployment are **roadmap items, not MVP features**.
 

@@ -34,6 +34,8 @@ public static class NuGetEndpoints
             id = id.ToLowerInvariant();
             if (!Names.Nuget(id)) return Results.BadRequest(new { error = "Invalid NuGet package ID" });
             var versions = new HashSet<string>(db.Versions("nuget", id), StringComparer.OrdinalIgnoreCase);
+            if (settings.IsReservedNuget(id))
+                return versions.Count == 0 ? Results.NotFound() : Results.Json(new { versions = versions.OrderBy(v => v, StringComparer.Ordinal).ToArray() });
             var uri = settings.NugetUpstreamUrl.TrimEnd('/') + "/" + id + "/index.json";
             try
             {
@@ -46,7 +48,7 @@ public static class NuGetEndpoints
                         foreach (var v in collection.EnumerateArray())
                             if (v.ValueKind == JsonValueKind.String && v.GetString() is { } version && Names.Version(version)) versions.Add(version.ToLowerInvariant());
                 }
-                else if (response.StatusCode != System.Net.HttpStatusCode.NotFound) return Results.StatusCode(502);
+                else if (response.StatusCode != System.Net.HttpStatusCode.NotFound && versions.Count == 0) return Results.StatusCode(502);
             }
             catch (HttpRequestException) when (versions.Count > 0) { }
             catch (TaskCanceledException) when (versions.Count > 0 && !ctx.RequestAborted.IsCancellationRequested) { }
@@ -57,7 +59,7 @@ public static class NuGetEndpoints
 
         app.MapGet("/nuget/v3/flatcontainer/{id}/{version}/{file}", async (
             string id, string version, string file, Settings settings, Database db, BlobStore blobs,
-            IHttpClientFactory clients, HttpContext ctx) =>
+            IHttpClientFactory clients, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant(); version = version.ToLowerInvariant();
@@ -66,7 +68,7 @@ public static class NuGetEndpoints
             if (!string.Equals(file, prefix + ".nupkg", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(file, prefix + ".nupkg.sha512", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(file, id + ".nuspec", StringComparison.OrdinalIgnoreCase)) return Results.NotFound();
-            var path = await EnsureNuget(id, version, settings, db, blobs, clients.CreateClient("upstream"), ctx.RequestAborted);
+            var path = await EnsureNuget(id, version, settings, db, blobs, clients.CreateClient("upstream"), locks, ctx.RequestAborted);
             if (path is null) return Results.NotFound();
             if (file.EndsWith(".sha512", StringComparison.OrdinalIgnoreCase))
             {
@@ -115,7 +117,7 @@ public static class NuGetEndpoints
             return Results.Json(new { totalHits = matching.Select(x => x.Name).Distinct().Count(), data = records });
         });
 
-        app.MapMethods("/nuget/v3/push", ["PUT", "POST"], async (Settings settings, Database db, BlobStore blobs, HttpContext ctx) =>
+        app.MapMethods("/nuget/v3/push", ["PUT", "POST"], async (Settings settings, Database db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart NuGet push" });
@@ -135,6 +137,7 @@ public static class NuGetEndpoints
             { return Results.BadRequest(new { error = "Invalid nupkg or nuspec" }); }
             var id = spec.Id.ToLowerInvariant(); var version = spec.Version.ToLowerInvariant();
             var key = NugetKey(id, version);
+            using var gate = await locks.AcquireAsync("nuget", id, version, ctx.RequestAborted);
             if (db.HasPackage("nuget", id, version) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Version already exists" });
             using var content = new MemoryStream(bytes, writable: false);
@@ -146,10 +149,20 @@ public static class NuGetEndpoints
 
     public static string NugetKey(string id, string version) => $"nuget/{id}/{version}/{id}.{version}.nupkg";
 
-    public static async Task<string?> EnsureNuget(string id, string version, Settings settings, Database db, BlobStore blobs, HttpClient http, CancellationToken ct)
+    public static async Task<string?> EnsureNuget(string id, string version, Settings settings, Database db,
+        BlobStore blobs, HttpClient http, ArtifactLocks locks, CancellationToken ct)
     {
+        using var gate = await locks.AcquireAsync("nuget", id, version, ct);
         var key = NugetKey(id, version);
-        if (blobs.Existing(key) is { } available) return available;
+        var origin = db.PackageOrigin("nuget", id, version);
+        if (blobs.Existing(key) is { } available)
+        {
+            if (origin is not null) return available;
+            throw new InvalidDataException("Unindexed NuGet blob requires recovery");
+        }
+        // A missing hosted release must never be substituted with a package from an upstream.
+        if (origin == "hosted") throw new InvalidDataException("Hosted NuGet blob is missing");
+        if (settings.IsReservedNuget(id)) return null;
         var url = settings.NugetUpstreamUrl.TrimEnd('/') + $"/{id}/{version}/{id}.{version}.nupkg";
         using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
@@ -182,7 +195,8 @@ public static class NuGetEndpoints
                 throw new InvalidDataException("NuGet package identity does not match request");
         }
         using var package = new MemoryStream(bytes, writable: false);
-        await blobs.PutAsync(key, package, settings.MaxArtifactBytes, ct);
+        if (!await blobs.PutAsync(key, package, settings.MaxArtifactBytes, ct))
+            throw new InvalidDataException("NuGet cache blob was concurrently replaced");
         db.UpsertPackage("nuget", id, version, spec.Description, "mirror");
         return blobs.Existing(key);
     }

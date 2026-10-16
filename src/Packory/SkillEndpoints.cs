@@ -18,18 +18,20 @@ public static class SkillEndpoints
             return skill is null ? Results.NotFound() : Results.Json(skill);
         });
 
-        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, Database db, BlobStore blobs, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
+            if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             var file = blobs.Existing(SkillKey(name, version));
             return file is null ? Results.NotFound() : Results.File(file, "application/zip", fileDownloadName: name + "-" + version + ".zip");
         });
 
-        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, Database db, BlobStore blobs, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
+            if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             var path = blobs.Existing(SkillKey(name, version));
             if (path is null) return Results.NotFound();
             using var archive = ZipFile.OpenRead(path);
@@ -38,7 +40,7 @@ public static class SkillEndpoints
             return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
         });
 
-        app.MapPost("/api/skills", async (Settings settings, Database db, BlobStore blobs, HttpContext ctx) =>
+        app.MapPost("/api/skills", async (Settings settings, Database db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart form-data" });
@@ -53,12 +55,12 @@ public static class SkillEndpoints
             try { manifest = InspectZip(bytes); }
             catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
             var key = SkillKey(manifest.Name, version);
+            using var gate = await locks.AcquireAsync("skill", manifest.Name, version, ctx.RequestAborted);
             if (db.Skills(manifest.Name).Any(x => x.Version == version) || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Skill version already exists" });
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), settings.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.Conflict();
             if (!db.AddSkill(manifest.Name, version, manifest.Description)) return Results.Conflict();
-            db.UpsertPackage("skill", manifest.Name, version, manifest.Description, "hosted");
             return Results.Json(new { name = manifest.Name, version, description = manifest.Description },
                 statusCode: StatusCodes.Status201Created);
         });

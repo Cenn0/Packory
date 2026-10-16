@@ -17,6 +17,15 @@ public sealed class Settings
     public string? AdminToken { get; set; }
     public string? ReadToken { get; set; }
     public string? WriteToken { get; set; }
+    // Explicit reservations prevent upstream fallback for private namespaces.
+    public string[] ReservedNugetPrefixes { get; set; } = [];
+    public string[] ReservedNpmScopes { get; set; } = [];
+
+    public bool IsReservedNuget(string id) => ReservedNugetPrefixes.Any(
+        prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    public bool IsReservedNpm(string name) => ReservedNpmScopes.Any(
+        scope => name.StartsWith(scope + "/", StringComparison.Ordinal));
 
     public void Validate()
     {
@@ -32,6 +41,10 @@ public sealed class Settings
         }
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)
             throw new InvalidOperationException("Configured upload limits are outside supported bounds.");
+        if (ReservedNugetPrefixes.Any(prefix => string.IsNullOrEmpty(prefix) || !Names.Nuget(prefix)) ||
+            ReservedNpmScopes.Any(scope => string.IsNullOrEmpty(scope) || !scope.StartsWith('@') ||
+                                           !Names.Npm(scope + "/test")))
+            throw new InvalidOperationException("Invalid reserved NuGet prefix or npm scope.");
         foreach (var token in new[] { AdminToken, ReadToken, WriteToken }.Where(t => t is not null))
         {
             if (token!.Length < 32) throw new InvalidOperationException("API tokens must contain at least 32 characters.");

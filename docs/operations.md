@@ -14,6 +14,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_NUGET_REGISTRATION_URL` | `https://api.nuget.org/v3/registration5-semver2/` | Trusted NuGet registration source |
 | `PACKORY_NPM_UPSTREAM_URL` | `https://registry.npmjs.org/` | Trusted npm upstream |
 | `PACKORY_ANONYMOUS_READ` | `true` | Permit unauthenticated registry read |
+| `PACKORY_RESERVED_NUGET_PREFIXES` | *(empty)* | Comma-separated private NuGet ID prefixes (e.g. `internal.`); package names under these prefixes never fall back to nuget.org |
+| `PACKORY_RESERVED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes (e.g. `@internal`); packages under these scopes never fall back to registry.npmjs.org |
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
 | `PACKORY_READ_TOKEN` | *(unset)* | Optional read-only credential |
 | `PACKORY_WRITE_TOKEN` | *(unset)* | Optional publish credential |
@@ -53,8 +55,9 @@ Stop Packory before a simple file-level backup of `/data`. Online backups requir
 ### Known failure modes
 
 - Upstream request fails: if the artifact has been downloaded before, its blob can still be served; version discovery and metadata rely on a best-effort online request with local fallback. A first download while offline fails.
-- Unexpected shutdown between immutable blob write and SQLite insert: a blob may be orphaned. Inspect before removal; there is no automated recovery/GC in MVP.
-- Multiple processes sharing `/data`: **unsupported**. Do not horizontally scale until external coordinated persistence is implemented.
+- Unexpected shutdown between immutable blob write and SQLite insert: pre-start recovery moves unindexed immutable package/skill files to `/data/recovery/orphaned/<startup-id>/`. This operation preserves bytes but does **not** reconstruct missing DB metadata or validate quarantined content. Inspect and verify before manually restoring an artifact; do not blindly copy it back.
+- Hosted metadata exists but its blob is missing: `/health/ready` reports HTTP 503 after reconciliation on startup. Restore the matching blob from a consistent backup; do not substitute an upstream artifact. Health state is sampled at startup and requires a restart after manual repair.
+- Multiple processes sharing `/data`: **unsupported**. Per-artifact locks and startup recovery only coordinate **one process**; do not horizontally scale until external coordinated persistence is implemented.
 - Disk exhaustion: requests fail; cache size is not bounded in MVP. Provide monitoring and volume headroom.
 - A compromised publish token permits arbitrary artifacts with the holder's scope. Rotate immediately and manually review affected versions. There is no built-in revoke/UI or audit stream yet.
 
