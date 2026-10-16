@@ -77,9 +77,9 @@ public static class SkillEndpoints
             long uncompressed = 0;
             foreach (var e in zip.Entries)
             {
-                var name = e.FullName;
-                if (name.Length > 512 || name.Contains('\\') || name.StartsWith('/') || name.Contains(':') ||
-                    name.Split('/').Any(p => p is "." or "..") ||
+                var entryName = e.FullName;
+                if (entryName.Length > 512 || entryName.Contains('\\') || entryName.StartsWith('/') || entryName.Contains(':') ||
+                    entryName.Split('/').Any(p => p is "." or "..") ||
                     ((e.ExternalAttributes >> 16) & 0xF000) == 0xA000)
                     throw new InvalidDataException("Unsafe ZIP entry");
                 uncompressed += e.Length;
