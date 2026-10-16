@@ -23,6 +23,8 @@ public sealed class Settings
     public string NpmUpstreamUrl { get; set; } = "https://registry.npmjs.org/";
     public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-semver2/";
     public bool AnonymousRead { get; set; } = true;
+    // Explicit offline maintenance for controlled PostgreSQL/S3 quarantine operations.
+    public bool RecoveryMaintenance { get; set; }
     // Opt-in Docker authentication handshake even when generic anonymous reads are enabled.
     public bool OciAuthenticatedPing { get; set; }
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
@@ -92,6 +94,8 @@ public sealed class Settings
         }
         if (MetadataProvider is not ("sqlite" or "postgresql"))
             throw new InvalidOperationException("MetadataProvider must be sqlite or postgresql.");
+        if (RecoveryMaintenance && (MetadataProvider != "postgresql" || BlobProvider != "s3"))
+            throw new InvalidOperationException("Recovery maintenance requires PostgreSQL metadata and S3 blobs.");
         if (MetadataProvider == "postgresql" && string.IsNullOrWhiteSpace(PostgresConnectionString))
             throw new InvalidOperationException("PostgreSQL connection string is required.");
         if (!Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out var origin) ||
