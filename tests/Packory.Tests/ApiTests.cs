@@ -850,4 +850,24 @@ public sealed class ApiTests
             "/api/admin/audit"))).Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task OciAuthenticatedPingOptIn_RequiresWriterEvenWhenGenericReadsAreAnonymous()
+    {
+        using var host = new Host(configure: cfg =>
+        {
+            cfg.AnonymousRead = true;
+            cfg.OciAuthenticatedPing = true;
+        });
+        using var client = host.CreateClient();
+        using var anonymous = await client.GetAsync("/v2/");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Contains("Basic", anonymous.Headers.WwwAuthenticate.ToString());
+        using var reader = await client.SendAsync(WithToken(HttpMethod.Get, "/v2/", token: ReadToken));
+        Assert.Equal(HttpStatusCode.Forbidden, reader.StatusCode);
+        using var writer = await client.SendAsync(WithToken(HttpMethod.Get, "/v2/", token: WriteToken));
+        Assert.Equal(HttpStatusCode.OK, writer.StatusCode);
+        using var publicCatalog = await client.GetAsync("/api/packages");
+        Assert.Equal(HttpStatusCode.OK, publicCatalog.StatusCode);
+    }
+
 }
