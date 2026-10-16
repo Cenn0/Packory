@@ -1,0 +1,27 @@
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+.vs/
+.idea/
+*.user
+# Local runtime / credentials
+**/data/
+*.sqlite
+*.sqlite-*
+.env
+.env.*
+!.env.example
+.npmrc
+NuGet.Config
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+*.nupkg
+*.tgz
+*.zip
+# Editor and OS
+.DS_Store
+.vscode/
