@@ -52,7 +52,7 @@ public sealed class PostgresS3RecoveryTests
             var bytes = Encoding.UTF8.GetBytes("immutable orphan, preserve bytes");
             db.BeginPublication(key, "nuget", name, "1.0.0");
             Assert.True(await s3.PutAsync(key, new MemoryStream(bytes), 2048, CancellationToken.None));
-            var inspected = Assert.Single(manager.Inspect().Where(x => x.Key == key));
+            var inspected = Assert.Single(manager.Inspect(), x => x.Key == key);
             Assert.Equal("uncommitted-object", inspected.State);
             var resolved = await manager.ResolveAsync(key, inspected.StartedAt, CancellationToken.None);
             Assert.Equal("quarantined-recoverable", resolved.Outcome);
