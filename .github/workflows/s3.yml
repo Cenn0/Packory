@@ -47,6 +47,8 @@ jobs:
           done
           cat /tmp/packory-moto.log
           exit 1
+      - name: Test offline snapshot S3 object-version inventory against Moto (not real-provider evidence)
+        run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
       - name: Test real AWS S3 client requests
         run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~S3ProviderTests
       - name: Test PostgreSQL-S3 publication recovery and exclusive writer lease

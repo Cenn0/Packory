@@ -41,6 +41,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_offline_backup.py -v
       - name: Validate S3 real-provider probe failure detection (synthetic only)
         run: python3 -m unittest discover -s tests -p test_s3_provider_probe.py -v
+      - name: Validate PostgreSQL/S3 offline snapshot integrity logic (synthetic only)
+        run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot.py -v
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Verify dashboard ecosystem parity with implemented catalog
