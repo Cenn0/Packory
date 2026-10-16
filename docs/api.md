@@ -16,6 +16,10 @@ Token values must be **at least 32 characters**, distinct, and delivered via `Au
 
 `PACKORY_ANONYMOUS_READ=true` by default. Setting it to `false` blocks anonymous registry and catalog requests. Health endpoints and the dashboard HTML remain public. Browser clients must supply a Bearer token; some native clients need additional configuration. Authentication must be protected with HTTPS except for loopback testing.
 
+## Private namespace reservations
+
+Operators may set `PACKORY_RESERVED_NUGET_PREFIXES` (comma-separated ID prefixes, matched case-insensitively) and `PACKORY_RESERVED_NPM_SCOPES` (comma-separated lowercase scopes, each beginning with `@`). For matching package names, Packory returns only locally hosted/cached metadata and artifacts and **never calls a configured public upstream**. A missing privately reserved package returns 404. Prefixes apply to the complete NuGet ID string, so use a deliberate delimiter (for example `internal.`) to avoid unintentionally reserving additional IDs. Both settings are optional but recommended wherever internal package names could collide with public ones.
+
 ## NuGet v3
 
 - Service index: `GET /nuget/v3/index.json`
@@ -71,4 +75,4 @@ Skills follow the [Agent Skills specification](https://agentskills.io/specificat
 
 ## HTTP error codes
 
-Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient token permission, `404` absent package/skill, `409` version already exists, `413` artifact too large, `502` upstream/error data, `504` upstream timeout. Errors do not intentionally expose environment secrets, connection strings, or upstream credentials.
+Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient token permission, `404` absent package/skill, `409` version already exists, `413` artifact too large, `502` upstream/error data, `504` upstream timeout. Errors do not intentionally expose environment secrets, connection strings, or upstream credentials. Inconsistent unindexed/missing local immutable blobs fail closed (502) rather than silently serving or substituting bytes from another origin. Readiness is 503 if a hosted blob is missing at startup. npm proxy tarballs require an upstream `sha512-` integrity or SHA-1 `shasum` claim that matches the downloaded bytes.

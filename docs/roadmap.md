@@ -20,10 +20,19 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] Test and fix `dotnet restore`, `dotnet nuget push`, `npm install`, `npm publish` using real CLIs (including scoped npm, transitive dependencies, SemVer, edge cases)
 - [ ] NuGet complete registration semantics, search fallback, version normalization, package types, content digests, controlled redirects/retries and structured errors
 - [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
-- [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks
+- [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks (in progress; in-process key locks, atomic SQLite skill+catalog publication, quarantine of orphan blobs and missing-hosted detection implemented; full crash-injection verification and CAS publication outstanding)
 - [ ] Structured observability, audit events, rate limiting, quotas, cache expiry and eviction
 - [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow
 - [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
+
+### Milestone 1 delivery: consistency and namespace isolation
+
+- [x] Single-flight NuGet and npm artifact fetches and serialized hosted publishing by immutable artifact key (single process, bounded stripe pool).
+- [x] Reserved NuGet prefixes and npm scopes with explicit no-public-upstream-fallback behavior.
+- [x] One SQLite transaction for Agent Skill metadata and catalog entry; no mirrored overwrite of hosted catalog origin.
+- [x] Pre-start orphan quarantine and degraded readiness for missing hosted blobs; quarantine is non-destructive.
+- [x] Deterministic concurrency, unsigned npm payload, reserved namespace and crash-orphan regression tests.
+- [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
 
 ## Milestone 2 — Operational and governance features
 

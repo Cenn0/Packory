@@ -349,7 +349,7 @@ public sealed class ApiTests
     {
         var bytes = new byte[] { 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0 };
         var downloads = 0;
-        var metadata = """ 
+        var metadata = """
             {"name":"example-widget","versions":{"1.0.0":{"name":"example-widget","version":"1.0.0","dist":{"tarball":"https://registry.npmjs.org/example-widget/-/example-widget-1.0.0.tgz","integrity":"HASH"}}}}
             """.Replace("HASH", "sha512-" + Convert.ToBase64String(SHA512.HashData(bytes)));
         using var host = new Host(request =>
