@@ -110,6 +110,7 @@ public static class NpmEndpoints
             var name = Uri.UnescapeDataString(packageName ?? "");
             if (!Names.Npm(name)) return Results.BadRequest(new { error = "Invalid npm package name" });
             if (settings.DeniesNpm(name)) return Results.StatusCode(403);
+            if (Access.RequireNamespace(ctx, settings, "npm", name) is { } forbidden) return forbidden;
             var data = await BlobStore.ReadBoundedAsync(ctx.Request.Body, settings.MaxArtifactBytes * 2, ctx.RequestAborted);
             JsonObject? publish;
             try { publish = JsonNode.Parse(data) as JsonObject; }
