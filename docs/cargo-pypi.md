@@ -71,3 +71,9 @@ Primary specifications:
 - https://doc.rust-lang.org/cargo/reference/registry-web-api.html
 - https://packaging.python.org/en/latest/specifications/simple-repository-api/
 - https://docs.pypi.org/api/upload/
+
+## Native Cargo yank / unyank (hosted only)
+
+Packory now exposes Cargo's native DELETE `/cargo/api/v1/crates/{name}/{version}/yank` and PUT `.../unyank` APIs. Both require a publisher/admin token and the matching Cargo namespace grant. They update only the `yanked` flag within the sparse index and write a transactional audit entry; immutable `.crate` bytes remain available for locked dependencies, following Cargo's interpretation. The sparse index ETag changes and is marked `no-cache` for revalidation. Concurrent requests within one writer are serialized by artifact locks.
+
+The CI hosted smoke invokes the native `cargo yank` CLI in both directions. Exact multi-version Cargo client compatibility, crates.io proxying and distributed races are still **unverified**; this is not complete Cargo registry conformance.

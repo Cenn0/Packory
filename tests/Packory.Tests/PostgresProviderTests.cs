@@ -1,4 +1,5 @@
 using Packory;
+using System.Text.Json;
 using Xunit;
 
 namespace Packory.Tests;
@@ -43,6 +44,13 @@ public sealed class PostgresProviderTests
         var cargo = "pgcargo" + suffix;
         Assert.True(db.PublishCargo(cargo, "1.0.0", "{\"vers\":\"1.0.0\"}", "test", "integration-writer"));
         Assert.Single(db.CargoIndex(cargo));
+        Assert.True(db.SetCargoYanked(cargo, "1.0.0", true, "integration-writer"));
+        using (var versionRecord = JsonDocument.Parse(db.CargoIndex(cargo).Single()))
+            Assert.True(versionRecord.RootElement.GetProperty("yanked").GetBoolean());
+        Assert.True(db.SetCargoYanked(cargo, "1.0.0", false, "integration-writer"));
+        using (var versionRecord = JsonDocument.Parse(db.CargoIndex(cargo).Single()))
+            Assert.False(versionRecord.RootElement.GetProperty("yanked").GetBoolean());
+        Assert.False(db.SetCargoYanked(cargo, "9.0.0", true, "integration-writer"));
 
         var project = "py-" + suffix;
         Assert.True(db.PublishPyFile(new PyFileEntry(project, "1.0.0",

@@ -71,6 +71,20 @@ public static class CargoEndpoints
                 Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
 
+        // Cargo's native yank/unyank API modifies index visibility, not crate bytes.
+        // Audit and metadata change share one DB transaction; native Cargo still
+        // controls whether a locked yanked version may be used.
+        app.MapDelete("/cargo/api/v1/crates/{name}/{version}/yank",
+            async (string name, string version, Settings cfg, IPackageDatabase db,
+                ArtifactLocks locks, HttpContext ctx) =>
+            await ChangeYank(name, version, true, cfg, db, locks, ctx))
+            .RequireRateLimiting("publish");
+        app.MapPut("/cargo/api/v1/crates/{name}/{version}/unyank",
+            async (string name, string version, Settings cfg, IPackageDatabase db,
+                ArtifactLocks locks, HttpContext ctx) =>
+            await ChangeYank(name, version, false, cfg, db, locks, ctx))
+            .RequireRateLimiting("publish");
+
         app.MapPut("/cargo/api/v1/crates/new", async (Settings cfg, IPackageDatabase db, BlobStore blobs,
             ArtifactLocks locks, HttpContext ctx) =>
         {
@@ -147,5 +161,19 @@ public static class CargoEndpoints
             return Results.Json(new { warnings = new { invalid_categories = Array.Empty<string>(),
                 invalid_badges = Array.Empty<string>(), other = Array.Empty<string>() } });
         }).RequireRateLimiting("publish");
+    }
+
+    private static async Task<IResult> ChangeYank(string name, string version, bool yanked,
+        Settings cfg, IPackageDatabase db, ArtifactLocks locks, HttpContext ctx)
+    {
+        if (Access.Require(ctx, cfg, write: true) is { } denied) return denied;
+        if (!IsName(name) || !IsVersion(version))
+            return Results.BadRequest(new { error = "Invalid Cargo name or version" });
+        if (Access.RequireNamespace(ctx, cfg, "cargo", name) is { } forbidden) return forbidden;
+        using var lease = await locks.AcquireAsync("cargo", name, version, ctx.RequestAborted);
+        if (!db.SetCargoYanked(name, version, yanked, Access.Actor(ctx)))
+            return Results.NotFound(new { error = "Unknown Cargo crate version" });
+        ctx.Response.Headers.CacheControl = "no-store";
+        return Results.Json(new { ok = true });
     }
 }

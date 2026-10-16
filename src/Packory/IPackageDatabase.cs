@@ -31,6 +31,7 @@ public interface IPackageDatabase
     IReadOnlyList<string> OciAllBlobDigests();
     IReadOnlyList<string> OciAllManifestDigests();
     IReadOnlyList<string> CargoIndex(string name);
+    bool SetCargoYanked(string name, string version, bool yanked, string actor);
     bool PublishCargo(string name, string version, string json, string description, string actor);
     IReadOnlyList<string> PyProjects();
     IReadOnlyList<PyFileEntry> PyFiles(string? name = null);

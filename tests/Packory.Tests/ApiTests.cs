@@ -638,6 +638,31 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Conflict,
             (await client.SendAsync(WithToken(HttpMethod.Put, "/cargo/api/v1/crates/new",
                 new ByteArrayContent(payload.ToArray())))).StatusCode);
+
+        // Cargo yank modifies sparse-index visibility but must not erase bytes.
+        var yankUrl = "/cargo/api/v1/crates/packory-demo/1.0.0/yank";
+        using var noAuth = await client.DeleteAsync(yankUrl);
+        Assert.Equal(HttpStatusCode.Unauthorized, noAuth.StatusCode);
+        using var yank = await client.SendAsync(WithToken(HttpMethod.Delete, yankUrl));
+        Assert.Equal(HttpStatusCode.OK, yank.StatusCode);
+        using var yankedIndex = await client.SendAsync(WithToken(HttpMethod.Get, url));
+        Assert.Equal(HttpStatusCode.OK, yankedIndex.StatusCode);
+        Assert.NotEqual(index.Headers.ETag!.Tag, yankedIndex.Headers.ETag!.Tag);
+        using (var yankedRecord = JsonDocument.Parse((await yankedIndex.Content.ReadAsStringAsync()).Trim()))
+            Assert.True(yankedRecord.RootElement.GetProperty("yanked").GetBoolean());
+        using var stillAvailable = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/cargo/api/v1/crates/packory-demo/1.0.0/download"));
+        Assert.Equal(archive, await stillAvailable.Content.ReadAsByteArrayAsync());
+
+        using var unyank = await client.SendAsync(WithToken(HttpMethod.Put,
+            "/cargo/api/v1/crates/packory-demo/1.0.0/unyank"));
+        Assert.Equal(HttpStatusCode.OK, unyank.StatusCode);
+        using var activeIndex = await client.SendAsync(WithToken(HttpMethod.Get, url));
+        using (var activeRecord = JsonDocument.Parse((await activeIndex.Content.ReadAsStringAsync()).Trim()))
+            Assert.False(activeRecord.RootElement.GetProperty("yanked").GetBoolean());
+        using var unknownYank = await client.SendAsync(WithToken(HttpMethod.Delete,
+            "/cargo/api/v1/crates/packory-demo/9.0.0/yank"));
+        Assert.Equal(HttpStatusCode.NotFound, unknownYank.StatusCode);
     }
 
     [Fact]

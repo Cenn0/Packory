@@ -341,6 +341,32 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return result;
     }
 
+    /// <summary>Change only the yanked flag, never the immutable crate bytes.</summary>
+    public bool SetCargoYanked(string name, string version, bool yanked, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var find = db.CreateCommand();
+        find.Transaction = tx;
+        find.CommandText = "SELECT json FROM cargo_versions WHERE name=$name AND version=$version";
+        find.Parameters.AddWithValue("$name", name);
+        find.Parameters.AddWithValue("$version", version);
+        if (find.ExecuteScalar() is not string raw) return false;
+        var index = System.Text.Json.Nodes.JsonNode.Parse(raw) as System.Text.Json.Nodes.JsonObject
+            ?? throw new InvalidDataException("Invalid stored Cargo index metadata");
+        index["yanked"] = yanked;
+        using var update = db.CreateCommand();
+        update.Transaction = tx;
+        update.CommandText = "UPDATE cargo_versions SET json=$json WHERE name=$name AND version=$version";
+        update.Parameters.AddWithValue("$json", index.ToJsonString());
+        update.Parameters.AddWithValue("$name", name);
+        update.Parameters.AddWithValue("$version", version);
+        if (update.ExecuteNonQuery() != 1) throw new InvalidOperationException("Cargo index update lost its metadata row");
+        InsertAudit(db, tx, yanked ? "yank" : "unyank", "cargo", name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public bool PublishCargo(string name, string version, string json, string description, string actor)
     {
         using var db = Open();
