@@ -42,14 +42,14 @@ All defined tokens must be unique, at least 32 characters. **Unset tokens mean n
 2. Restrict egress from Packory to the HTTPS registry hosts, configure DNS/egress filtering, and ensure only trusted operators can change upstream URLs. npm metadata supplies tarball paths; the app enforces the configured upstream host, disables automatic redirects, and does not assess package reputation. Upstream endpoints that require cross-host redirects may not work in this MVP.
 3. Publish behind a reverse proxy with rate limiting, body-size limits, TLS, access logs that **redact Authorization, X-NuGet-ApiKey, URL credentials, and cookies**. Packory additionally applies an in-process publish rate limit, partitioned by known credential role so an unauthenticated flood cannot exhaust the admin/write bucket; this does not replace network-edge protections. Avoid proxy access logs that disclose sensitive query strings.
 4. Disable anonymous reads for private deployments (`PACKORY_ANONYMOUS_READ=false`). **Test client authentication** before relying on private-feed NuGet and npm workflows. Static shared tokens provide no individual accountability.
-5. Run as a non-root UID, pin container release digests for regulated environments, scan runtime dependencies and artifact uploads, and monitor disk usage. Back up SQLite *consistently* and the entire blob directory together.
+5. Run as a non-root UID, pin container release digests for regulated environments, scan runtime dependencies and artifact uploads, and monitor disk usage. Back up the configured metadata database *consistently* with the corresponding filesystem or S3 artifact store.
 6. Do not run archive contents or agent-skill scripts on the Packory server. An accepted package is **not** a security endorsement. Enforce dependency provenance, policy, and malware controls before using packages in production.
 
 ### Health, logs, backups
 
-`GET /health/live` is liveness; `GET /health/ready` opens SQLite. These endpoints are unauthenticated and intentionally show no identifiers/secrets. Logs use the standard ASP.NET Core logger.
+`GET /health/live` is liveness; `GET /health/ready` checks the selected metadata and artifact providers. These endpoints are unauthenticated and intentionally show no identifiers/secrets. Logs use the standard ASP.NET Core logger.
 
-Data layout:
+Default filesystem/SQLite data layout (PostgreSQL and S3 keep their authoritative data in their configured external services):
 
 ```text
 /data/
@@ -64,11 +64,11 @@ Data layout:
     skills/...
 ```
 
-Stop Packory before a simple file-level backup of `/data`. Online backups require SQLite's backup API plus a consistent artifact-store snapshot; copying only the `.sqlite` file with WAL active is **not** a consistent restore strategy. To restore, stop the service, replace the entire data set with a verified backup, then restart and query readiness and test artifact hashes.
+Stop Packory before a simple file-level backup of `/data` in the default SQLite/filesystem deployment. Online backups require SQLite's backup API plus a consistent artifact-store snapshot; copying only the `.sqlite` file with WAL active is **not** a consistent restore strategy. To restore the default deployment, stop the service, replace the entire data set with a verified backup, then restart and query readiness and test artifact hashes. PostgreSQL/S3 requires provider-specific consistent backups and an isolated restore drill; see the backend sections below.
 
 ### Real native-client smoke tests
 
-After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` to exercise hosted publishing and downloads with real .NET/npm clients. It starts a loopback-only server on port 18080 using a newly generated short-lived token and temporary data directory, then performs a hosted NuGet package publish/restore and a scoped npm package publish/install/`npm ci`. This test requires `dotnet` 10, Node.js/npm, Bash, curl and OpenSSL. It fails if port 18080 is already occupied. All temporary data and credentials are removed on exit. CI runs it on every PR; the separate scheduled `smoke-live.yml` checks public upstream mirroring and may need external connectivity. Passing the hosted smoke does not establish full NuGet/npm protocol conformance, especially multi-version publishing or transitive dependency resolution.
+After building the solution in Release mode, run `bash scripts/smoke-hosted.sh` to exercise hosted publishing and downloads with real .NET/npm clients. It starts a loopback-only server on port 18080 using a newly generated short-lived token and temporary data directory, then performs a hosted NuGet package publish/restore and a scoped npm package publish/install/`npm ci`. This test requires `dotnet` 10, Node.js/npm, Bash, curl and OpenSSL. It fails if port 18080 is already occupied. `bash scripts/smoke-ecosystems.sh` additionally checks a real hosted Cargo alternate-registry publish/consume and a transitive pip install on loopback port 18081; it requires Cargo, Python/pip and the same built server. All temporary data and credentials are removed on exit. CI runs it on every PR; the separate scheduled `smoke-live.yml` checks public upstream mirroring and may need external connectivity. Passing the hosted smoke does not establish full NuGet/npm protocol conformance, especially multi-version publishing or transitive dependency resolution.
 
 ### Known failure modes
 
