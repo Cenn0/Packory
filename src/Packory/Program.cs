@@ -134,6 +134,7 @@ builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.F
     });
 
 var app = builder.Build();
+var activeSettings = app.Services.GetRequiredService<Settings>();
 var startupLease = app.Services.GetRequiredService<PostgresSingleWriterLease>();
 startupLease.Acquire();
 app.Lifetime.ApplicationStopped.Register(startupLease.Dispose);
@@ -148,7 +149,7 @@ app.Use(async (ctx, next) =>
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
     }
-    if (settings.RecoveryMaintenance &&
+    if (activeSettings.RecoveryMaintenance &&
         !ctx.Request.Path.StartsWithSegments("/api/admin/publications") &&
         !ctx.Request.Path.StartsWithSegments("/health"))
     {
@@ -179,7 +180,7 @@ app.UseStaticFiles();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
-    if (settings.RecoveryMaintenance || !startupLease.IsHeld() || !db.IsHealthy())
+    if (activeSettings.RecoveryMaintenance || !startupLease.IsHeld() || !db.IsHealthy())
         return Results.Json(new { status = "maintenance-or-lease-lost" },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
