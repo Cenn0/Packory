@@ -89,6 +89,27 @@ deleted by this endpoint. Cache eviction requires the filesystem backend and
 network connectivity for subsequent upstream metadata requests. It is a
 **manual** operation, not time-based eviction or a distributed GC.
 
+### Crash-recovery publication journal (filesystem or S3)
+
+Every hosted NuGet, npm, Cargo, PyPI, Agent Skill, and OCI blob/manifest write
+now creates a **durable database publication-intent record before its immutable
+blob write**. On a successful metadata commit the corresponding journal entry
+is removed. After restart, reconciliation clears records that are fully committed
+or have no remaining object. An S3 object whose write succeeded but whose
+metadata commit did **not** succeed remains recorded for operator inspection via
+admin-only `GET /api/admin/publications/pending`. This endpoint exposes artifact
+keys, kind, package name/version and start time, **never credentials**. The S3
+test emulates an interrupted publish and verifies that the remote intent
+survives until the missing metadata is committed.
+
+**Not a distributed ACID transaction:** S3 and PostgreSQL cannot participate
+in a common atomic commit. Concurrent writers across instances are unsupported.
+There is no automatic remote S3 orphan deletion, catalog reconstruction, or
+transaction replay. Inspect and reconcile pending records before migrating,
+backing up, or enabling new writes. Do not treat an empty pending list as proof
+that independently restored database/object-store snapshots are consistent.
+Keep one writer and take coordinated offline snapshots of both stores.
+
 ### Known failure modes
 
 - Upstream request fails: if the artifact has been downloaded before, its blob can still be served; version discovery and metadata rely on a best-effort online request with local fallback. A first download while offline fails.
