@@ -28,9 +28,11 @@ jobs:
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
+      - name: Exercise real hosted Cargo and pip clients
+        run: bash scripts/smoke-ecosystems.sh
   container:
     name: Build Docker image
     runs-on: ubuntu-latest

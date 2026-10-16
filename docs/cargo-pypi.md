@@ -57,10 +57,13 @@ signature validation are not implemented.
 
 ## Evidence and limits
 
-API-level deterministic integration tests verify Cargo binary publishing, native
-sparse lines, SHA-256, ETag/304 and PyPI upload, HTML/JSON, integrity and
-download. These tests do **not** establish broad Cargo/pip/Twine client-version
-interoperability or release readiness. Running a trusted real-client E2E suite
+Deterministic API-level tests verify binary Cargo publishing, sparse-index lines,
+SHA-256, ETag/304 and PyPI upload, HTML/JSON, integrity and downloads. In addition,
+regular CI runs `scripts/smoke-ecosystems.sh` against one isolated local Packory
+instance: real `cargo publish` and consumption via Cargo's alternate registry,
+and real `pip install` resolving two locally hosted wheels including a transitive
+dependency. This establishes a concrete tested native-client workflow, **not**
+broad Cargo/pip/Twine version interoperability or release readiness. Running a trusted real-client E2E suite
 (including transitive dependencies and offline cache) remains required.
 
 Primary specifications:
