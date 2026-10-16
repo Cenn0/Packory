@@ -50,6 +50,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
     public void Initialize()
     {
         using var db = Open();
+        SchemaVersionGuard.Verify(db);
         using var cmd = Command(db, """
             CREATE TABLE IF NOT EXISTS packages (
                 kind TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
@@ -116,6 +117,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             CREATE INDEX IF NOT EXISTS audit_created ON audit_events(id DESC);
             """);
         cmd.ExecuteNonQuery();
+        SchemaVersionGuard.Stamp(db);
     }
 
     public void UpsertPackage(string kind, string name, string version, string description, string origin)
