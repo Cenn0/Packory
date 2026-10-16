@@ -48,12 +48,16 @@ public sealed class PostgresSingleWriterLease(Settings settings) : IDisposable
 
     public void Dispose()
     {
-        if (_connection is null) return;
+        // Lifetime callback and dependency-injection disposal can race or both
+        // call Dispose. Claim ownership only once; never dereference a field
+        // that another disposer can null while the first thread is using it.
+        var connection = Interlocked.Exchange(ref _connection, null);
+        if (connection is null) return;
         try
         {
-            if (_connection.State == System.Data.ConnectionState.Open)
+            if (connection.State == System.Data.ConnectionState.Open)
             {
-                using var command = new NpgsqlCommand("SELECT pg_advisory_unlock(@id)", _connection);
+                using var command = new NpgsqlCommand("SELECT pg_advisory_unlock(@id)", connection);
                 command.Parameters.AddWithValue("id", LockId);
                 command.ExecuteScalar();
             }
@@ -61,8 +65,7 @@ public sealed class PostgresSingleWriterLease(Settings settings) : IDisposable
         catch { /* Connection loss releases the session lock on PostgreSQL. */ }
         finally
         {
-            _connection.Dispose();
-            _connection = null;
+            connection.Dispose();
         }
     }
 }
