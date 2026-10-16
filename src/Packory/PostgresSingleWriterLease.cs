@@ -48,7 +48,21 @@ public sealed class PostgresSingleWriterLease(Settings settings) : IDisposable
 
     public void Dispose()
     {
-        _connection?.Dispose();
-        _connection = null;
+        if (_connection is null) return;
+        try
+        {
+            if (_connection.State == System.Data.ConnectionState.Open)
+            {
+                using var command = new NpgsqlCommand("SELECT pg_advisory_unlock(@id)", _connection);
+                command.Parameters.AddWithValue("id", LockId);
+                command.ExecuteScalar();
+            }
+        }
+        catch { /* Connection loss releases the session lock on PostgreSQL. */ }
+        finally
+        {
+            _connection.Dispose();
+            _connection = null;
+        }
     }
 }
