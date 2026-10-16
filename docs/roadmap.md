@@ -25,6 +25,12 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [ ] Artifact integrity verification, security scanning, package allow/deny policy, legal compliance workflow (strict upstream NuGet checksum enforcement and NuGet/npm namespace-deny policy implemented; full security scanning and license compliance require external scanners, policies and evidence)
 - [ ] Open-source compliance review, release automation, security CI (CodeQL/dependency review)
 
+### Native client acceptance additions
+
+- [x] Isolated hosted Cargo alternate registry publish and consumption via real Cargo CLI.
+- [x] Real pip install of a hosted wheel and its hosted transitive dependency via the PyPI Simple API, without a second package index.
+- [ ] Native OCI / Helm / ORAS client matrix, real public registry pull-through and a broad package-version matrix are still outstanding.
+
 ### Milestone 1 delivery: consistency and namespace isolation
 
 - [x] Single-flight NuGet and npm artifact fetches and serialized hosted publishing by immutable artifact key (single process, bounded stripe pool).
@@ -49,8 +55,8 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 
 ## Milestone 3 — More ecosystems
 
-- [ ] Cargo registry (hosted sparse index, checksumed crate downloads, native binary upload and API tests implemented; crates.io proxy, yanking and multi-version real client matrix still open)
-- [ ] PyPI simple API (hosted HTML/JSON simple API, basic legacy upload, SHA-256 links and API tests implemented; real pip/Twine matrix, metadata sidecars, requires-python and PyPI proxy still open)
+- [ ] Cargo registry (hosted sparse index, checksumed crate downloads, native binary upload and API tests implemented; crates.io proxy, yanking and cross-version real client matrix still open)
+- [ ] PyPI simple API (hosted HTML/JSON simple API, basic legacy upload, SHA-256 links and API tests implemented; additional real pip/Twine client versions, metadata sidecars, requires-python and PyPI proxy still open)
 - [ ] OCI artifacts (hosted v2 content-addressed blob upload/download, manifests, tags and referrers implemented; real Docker/ORAS/Helm tests, Bearer-token workflow, durable multipart uploads and full conformance remain open)
 - [ ] Artifact relationships, namespace conflict rules, federated search
 
