@@ -22,12 +22,12 @@ public static class McpRegistryEndpoints
         app.MapGet("/v0.1/servers/{name}/versions",(string name,HttpContext ctx,Settings s,V2Catalog db)=>
         {
             if(ScopedAccess.Require(ctx,s,db,null,"catalog.read") is { } denied)return denied;
-            var list=db.Mcp(name);return list.Count==0?Results.NotFound():Results.Json(new {servers=list.Select(RegistryResponse).ToArray()});
+            name=Uri.UnescapeDataString(name);var list=db.Mcp(name);return list.Count==0?Results.NotFound():Results.Json(new {servers=list.Select(RegistryResponse).ToArray()});
         });
         app.MapGet("/v0.1/servers/{name}/versions/{version}",(string name,string version,HttpContext ctx,Settings s,V2Catalog db)=>
         {
             if(ScopedAccess.Require(ctx,s,db,null,"catalog.read") is { } denied)return denied;
-            var list=db.Mcp(name);var item=version=="latest"?list.LastOrDefault():list.FirstOrDefault(x=>x.Version==version);
+            name=Uri.UnescapeDataString(name);var list=db.Mcp(name);var item=version=="latest"?list.LastOrDefault():list.FirstOrDefault(x=>x.Version==version);
             return item is null?Results.NotFound():Results.Json(RegistryResponse(item));
         });
         app.MapPost("/v0.1/publish",async (HttpContext ctx,Settings s,V2Catalog db)=>
@@ -48,9 +48,29 @@ public static class McpRegistryEndpoints
             db.Audit(ScopedAccess.Actor(ctx,s,db),"mcp.publish",name+"/"+version,"quarantined");
             return Results.Json(new {name,version,state="quarantined",requiresApproval=true},statusCode:201);
         });
-        app.MapPost("/api/v1/mcp/{name}/versions/{version}/approve",(string name,string version,HttpContext ctx,Settings s,V2Catalog db)=>
+        app.MapGet("/v0.1/servers/{**path}",(string? path,HttpContext ctx,Settings s,V2Catalog db)=>
+        {
+            if(ScopedAccess.Require(ctx,s,db,null,"catalog.read") is { } denied)return denied;
+            path=Uri.UnescapeDataString(path??"");
+            var index=path.LastIndexOf("/versions",StringComparison.Ordinal);
+            if(index<=0)return Results.NotFound();
+            var name=path[..index];var suffix=path[(index+9)..];
+            var list=db.Mcp(name);
+            if(list.Count==0)return Results.NotFound();
+            if(suffix.Length==0)return Results.Json(new {servers=list.Select(RegistryResponse).ToArray()});
+            if(!suffix.StartsWith('/'))return Results.NotFound();
+            var version=suffix[1..];
+            var item=version=="latest"?list.LastOrDefault():list.FirstOrDefault(x=>x.Version==version);
+            return item is null?Results.NotFound():Results.Json(RegistryResponse(item));
+        });
+        app.MapPost("/api/v1/mcp/{**path}",(string? path,HttpContext ctx,Settings s,V2Catalog db)=>
         {
             if(ScopedAccess.Require(ctx,s,db,null,"system.admin") is { } denied)return denied;
+            path=Uri.UnescapeDataString(path??"");
+            var index=path.LastIndexOf("/versions/",StringComparison.Ordinal);
+            if(index<=0||!path.EndsWith("/approve",StringComparison.Ordinal))return Results.NotFound();
+            var name=path[..index];var version=path[(index+10)..^8];
+            if(name.Length>250||!Names.Version(version))return Results.BadRequest();
             if(!db.ChangeMcpState(name,version,"approved"))return Results.NotFound();
             db.Audit(ScopedAccess.Actor(ctx,s,db),"mcp.approve",name+"/"+version);return Results.NoContent();
         });
