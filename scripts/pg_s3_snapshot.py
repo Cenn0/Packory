@@ -110,8 +110,9 @@ def versioning_enabled(s3, bucket):
 
 
 def inventory(s3, bucket, prefix):
-    if not isinstance(prefix, str) or not prefix or prefix.startswith("/") or ".." in prefix.split("/"):
-        raise SnapshotError("A safe, non-empty Packory S3 prefix is required")
+    if (not isinstance(prefix, str) or not prefix or not prefix.endswith("/") or
+            prefix.startswith("/") or ".." in prefix.split("/") or "//" in prefix):
+        raise SnapshotError("A safe, non-empty, slash-terminated Packory S3 prefix is required")
     paginator = s3.get_paginator("list_object_versions")
     versions, markers = [], []
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -181,6 +182,13 @@ def verify(folder):
         pg = manifest["postgres"]
         if pg["path"] != "metadata.dump" or not SHA.fullmatch(pg["sha256"]):
             raise SnapshotError("Invalid PostgreSQL manifest")
+        source = manifest["source"]
+        prefix = source["prefix"]
+        if (not isinstance(prefix, str) or not prefix.endswith("/") or
+                prefix.startswith("/") or ".." in prefix.split("/") or "//" in prefix or
+                not isinstance(source["bucket"], str) or not source["bucket"] or
+                not isinstance(source["database"], str) or not source["database"]):
+            raise SnapshotError("Unsafe or incomplete snapshot source identifiers")
         entries = manifest["objects"]
         if not isinstance(entries, list) or not isinstance(manifest["delete_markers"], list):
             raise SnapshotError("Invalid object inventory")
