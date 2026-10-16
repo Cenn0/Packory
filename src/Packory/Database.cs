@@ -8,6 +8,8 @@ public sealed record StoredArtifact(string Kind, string Name, string Version, st
 public sealed record AuditEntry(long Id, string Action, string Kind, string Name, string Version,
     string Actor, string CreatedAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
+public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
+public sealed record OciReferrerEntry(string Digest, string MediaType, long Size, string ArtifactType);
 
 public sealed class Database(Settings settings)
 {
@@ -61,6 +63,23 @@ public sealed class Database(Settings settings)
                 name TEXT NOT NULL, version TEXT NOT NULL, filename TEXT NOT NULL,
                 sha256 TEXT NOT NULL, size INTEGER NOT NULL,
                 PRIMARY KEY(name,filename)
+            );
+            CREATE TABLE IF NOT EXISTS oci_blobs (
+                repository TEXT NOT NULL, digest TEXT NOT NULL,
+                PRIMARY KEY(repository,digest)
+            );
+            CREATE TABLE IF NOT EXISTS oci_manifests (
+                repository TEXT NOT NULL, digest TEXT NOT NULL, media_type TEXT NOT NULL,
+                size INTEGER NOT NULL, PRIMARY KEY(repository,digest)
+            );
+            CREATE TABLE IF NOT EXISTS oci_tags (
+                repository TEXT NOT NULL, tag TEXT NOT NULL, digest TEXT NOT NULL,
+                PRIMARY KEY(repository,tag)
+            );
+            CREATE TABLE IF NOT EXISTS oci_referrers (
+                repository TEXT NOT NULL, subject TEXT NOT NULL, digest TEXT NOT NULL,
+                media_type TEXT NOT NULL, size INTEGER NOT NULL, artifact_type TEXT NOT NULL,
+                PRIMARY KEY(repository,subject,digest)
             );
             CREATE TABLE IF NOT EXISTS audit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +163,143 @@ public sealed class Database(Settings settings)
         var result = new List<CatalogEntry>();
         while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), reader.GetString(5)));
+        return result;
+    }
+
+    public bool OciHasBlob(string repository, string digest)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM oci_blobs WHERE repository=$repo AND digest=$digest";
+        cmd.Parameters.AddWithValue("$repo", repository);
+        cmd.Parameters.AddWithValue("$digest", digest);
+        return cmd.ExecuteScalar() is not null;
+    }
+
+    public void OciAddBlob(string repository, string digest)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "INSERT OR IGNORE INTO oci_blobs(repository,digest) VALUES($repo,$digest)";
+        cmd.Parameters.AddWithValue("$repo", repository);
+        cmd.Parameters.AddWithValue("$digest", digest);
+        cmd.ExecuteNonQuery();
+    }
+
+    public OciManifestEntry? OciManifest(string repository, string reference)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT m.digest,m.media_type,m.size FROM oci_manifests m
+            WHERE m.repository=$repo AND
+              (m.digest=$reference OR EXISTS (
+                SELECT 1 FROM oci_tags t WHERE t.repository=m.repository AND t.digest=m.digest AND t.tag=$reference))
+            LIMIT 1
+            """;
+        cmd.Parameters.AddWithValue("$repo", repository);
+        cmd.Parameters.AddWithValue("$reference", reference);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new OciManifestEntry(reader.GetString(0), reader.GetString(1), reader.GetInt64(2)) : null;
+    }
+
+    public bool OciPutManifest(string repository, string reference, OciManifestEntry manifest,
+        string? subject, string? artifactType, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO oci_manifests(repository,digest,media_type,size)
+            VALUES($repo,$digest,$media,$size)
+            """;
+        cmd.Parameters.AddWithValue("$repo", repository);
+        cmd.Parameters.AddWithValue("$digest", manifest.Digest);
+        cmd.Parameters.AddWithValue("$media", manifest.MediaType);
+        cmd.Parameters.AddWithValue("$size", manifest.Size);
+        cmd.ExecuteNonQuery();
+        if (!reference.StartsWith("sha256:", StringComparison.Ordinal))
+        {
+            cmd.CommandText = """
+                INSERT INTO oci_tags(repository,tag,digest) VALUES($repo,$tag,$digest)
+                ON CONFLICT(repository,tag) DO UPDATE SET digest=excluded.digest
+                """;
+            cmd.Parameters.AddWithValue("$tag", reference);
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = """
+                INSERT INTO packages(kind,name,version,description,origin,updated_at)
+                VALUES('oci',$repo,$tag,$media,'hosted',$updated)
+                ON CONFLICT(kind,name,version) DO UPDATE SET description=excluded.description,updated_at=excluded.updated_at
+                """;
+            cmd.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
+        }
+        if (subject is not null)
+        {
+            cmd.CommandText = """
+                INSERT OR IGNORE INTO oci_referrers(repository,subject,digest,media_type,size,artifact_type)
+                VALUES($repo,$subject,$digest,$media,$size,$artifact)
+                """;
+            cmd.Parameters.AddWithValue("$subject", subject);
+            cmd.Parameters.AddWithValue("$artifact", artifactType ?? "");
+            cmd.ExecuteNonQuery();
+        }
+        InsertAudit(db, tx, "publish", "oci", repository,
+            reference, actor);
+        tx.Commit();
+        return true;
+    }
+
+    public IReadOnlyList<string> OciTags(string repository)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT tag FROM oci_tags WHERE repository=$repo ORDER BY tag";
+        cmd.Parameters.AddWithValue("$repo", repository);
+        using var reader = cmd.ExecuteReader();
+        var tags = new List<string>();
+        while (reader.Read()) tags.Add(reader.GetString(0));
+        return tags;
+    }
+
+    public IReadOnlyList<OciReferrerEntry> OciReferrers(string repository, string subject)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT digest,media_type,size,artifact_type FROM oci_referrers
+            WHERE repository=$repo AND subject=$subject ORDER BY digest
+            """;
+        cmd.Parameters.AddWithValue("$repo", repository);
+        cmd.Parameters.AddWithValue("$subject", subject);
+        using var reader = cmd.ExecuteReader();
+        var refs = new List<OciReferrerEntry>();
+        while (reader.Read())
+            refs.Add(new OciReferrerEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetInt64(2), reader.GetString(3)));
+        return refs;
+    }
+
+    public IReadOnlyList<string> OciAllBlobDigests()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT digest FROM oci_blobs";
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public IReadOnlyList<string> OciAllManifestDigests()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT digest FROM oci_manifests";
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
         return result;
     }
 
