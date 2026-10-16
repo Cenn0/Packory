@@ -12,14 +12,14 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Direkt zu:** [Schnellstart](#schnellstart) · [Funktionen](#funktionen-des-mvp) · [Architektur](#architektur-im-überblick) · [Dokumentation](docs/README.md) · [Roadmap](docs/roadmap.md)
+**Direkt zu:** [Schnellstart](#schnellstart) · [Funktionen](#umgesetzte-funktionen) · [Architektur](#architektur-im-überblick) · [Dokumentation](docs/README.md) · [Roadmap](docs/roadmap.md)
 
-**Eine selbst gehostete Zentrale für NuGet-, npm-Pakete und versionierte KI-Agent-Skills.**
+**Eine selbst gehostete Distributionszentrale für Entwicklerpakete und KI-Agent-Skills.**
 
 
-Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatalog und ein einfaches Webdashboard. Das aktuelle **MVP** ist ein modularer Monolith mit **ASP.NET Core / .NET 10**, SQLite und lokalem Dateispeicher. Eine externe Datenbank, ein Message-Broker oder Kubernetes sind nicht erforderlich. Erste Härtungen umfassen Artefakt-Sperren innerhalb eines Prozesses, reservierte private Namensräume, einen Abgleich des Dateispeichers beim Start, **transaktionale Audit-Einträge erfolgreicher Veröffentlichungen** und nach Tokenrolle getrennte Ratenbegrenzung für Schreibvorgänge.
+Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatalog und ein einfaches Webdashboard. Die aktuelle Implementierung ist ein modularer Monolith mit **ASP.NET Core / .NET 10**. SQLite und lokaler Dateispeicher sind der Standard; PostgreSQL als Metadatenspeicher und S3-kompatibler Objektspeicher sind optional. Ein Message-Broker oder Kubernetes sind nicht erforderlich. Erste Härtungen umfassen Artefakt-Sperren innerhalb eines Prozesses, reservierte private Namensräume, einen Abgleich des Dateispeichers beim Start, **transaktionale Audit-Einträge erfolgreicher Veröffentlichungen** und nach Tokenrolle getrennte Ratenbegrenzung für Schreibvorgänge.
 
-> **Status: MVP, nicht produktionsgehärtet.** Die Protokollabdeckung und Kompatibilität mit echten Clients sind noch unvollständig. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries.
+> **Status: experimentelle Plattform, nicht produktionsgehärtet.** Implementierte Adapter und optionale Backends sind nur begrenzt qualifiziert; Protokoll-, Migrations- und Mehrinstanzgarantien sind unvollständig. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries.
 
 ## Schnellstart
 
@@ -44,7 +44,7 @@ dotnet run --project src/Packory --urls http://localhost:8080
 
 Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichnisses die [Betriebsanleitung](docs/operations.md) lesen.
 
-## Funktionen des MVP
+## Umgesetzte Funktionen
 
 | Bereich | Umgesetzter Umfang |
 | --- | --- |
@@ -54,7 +54,8 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Cargo & PyPI (experimentell)** | Cargo als gehostete Alternate Registry (Sparse Index und Upload), PyPI Simple API (HTML/JSON) und grundlegender Upload; keine vollständige Unterstützung |
 | **Agent Skills** | Import, Auflistung und Download versionierter ZIP-Dateien mit einfacher `SKILL.md`-Beschreibung |
 | **Dashboard/API** | Durchsuchbarer Katalog gecachter/gehosteter Artefakte sowie Liveness-/Readiness-Endpunkte |
-| **Zugriff** | Statische Read-/Write-/Admin-Tokens; anonyme Lesezugriffe standardmäßig erlaubt; Admin-Audit erfolgreicher Veröffentlichungen |
+| **Zugriff** | Statische Read-/Write-/Admin-Tokens sowie optionale OIDC-JWT-Prüfung mit expliziten `packory.read`-, `packory.write`- und `packory.admin`-Scopes; noch kein Browser-SSO/BFF |
+| **Speicher** | SQLite und Dateisystem standardmäßig; optional PostgreSQL-Metadaten und S3-kompatible Blobs für neue Einzelinstanz-Installationen |
 
 ### Packory als Paketquelle nutzen
 
@@ -75,15 +76,16 @@ Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Be
 
 ```mermaid
 flowchart LR
-  C[NuGet- und npm-Clients] --> A[Packory ASP.NET Core]
+  C[NuGet-, npm-, Cargo-, PyPI- und OCI-Clients] --> A[Packory ASP.NET Core]
   K[Skill-ZIP-Import] --> A
-  A --> N[Protokolladapter]
-  A --> S[Skills und Katalog-API]
-  N --> D[(SQLite-Metadaten)]
-  S --> D
-  N --> B[(Lokale Artefaktdateien)]
-  S --> B
-  N -.->|Optionales Upstream-HTTPS| U[nuget.org und npmjs.org]
+  O[Optionaler OIDC-Issuer] -.-> A
+  A --> N[Native Protokolladapter]
+  A --> M[Katalog und Verwaltungs-API]
+  N --> D[(SQLite oder PostgreSQL)]
+  M --> D
+  N --> B[(Dateisystem oder S3)]
+  M --> B
+  N -.->|Konfigurierte HTTPS-Origins| U[nuget.org und npmjs.org]
 ```
 
 NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architektur](docs/architecture.md).
@@ -92,11 +94,11 @@ NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und
 
 - NuGet und npm unterstützen wesentliche Registry-Abläufe, aber **nicht alle Protokollfunktionen**. Die konkret verwendeten Clients und Versionen müssen getestet werden.
 - Die Suche umfasst nur lokal indexierte Artefakte. Aktuelle Upstream-Metadaten und noch nicht gecachte Downloads können Netzwerkzugriff benötigen.
-- Statische Tokens sind keine individuellen Benutzerkonten. **OIDC/SSO, paketbezogene Rechte, persönliche Akteurszuordnung, vollständige/unveränderbare Audit-Protokolle und Hochverfügbarkeit fehlen noch.** Das vorhandene Admin-Audit erfasst **erfolgreiche Veröffentlichungen**, aber weder alle Aktionen noch verweigerte Versuche.
+- Statische Tokens sind keine individuellen Benutzerkonten. **OIDC-JWT-Prüfung ist implementiert; Browser-SSO/BFF, paketbezogene Rechte, persönliche Akteurszuordnung, vollständige/unveränderbare Audit-Protokolle und Hochverfügbarkeit fehlen noch.** Das vorhandene Admin-Audit erfasst **erfolgreiche Veröffentlichungen**, aber weder alle Aktionen noch verweigerte Versuche.
 - Konfigurierbare private NuGet-ID-Präfixe und npm-Scopes können einen Rückgriff auf öffentliche Registries für reservierte Namensräume verhindern. Das ist **keine vollständige Paket- oder Malware-Sicherheitsrichtlinie**. Signaturdurchsetzung, Cache-Eviction und automatische Lizenzkonformitätsprüfung fehlen weiterhin.
-- **Cargo, PyPI, OCI, PostgreSQL, S3 und verteilte Dienste stehen auf der Roadmap und sind noch nicht umgesetzt.**
+- **Cargo, PyPI und OCI sind als experimentelle Hosted-Adapter implementiert.** PostgreSQL und S3 sind auswählbare Backends; eine automatische Datenmigration, verteilte DB-/Blob-Transaktionen und Mehrinstanzbetrieb sind **nicht** implementiert.
 
-Nach Tokenrolle begrenzte Schreibzugriffe ergänzen die Schutzmaßnahmen, **ersetzen aber keine Ratenbegrenzung am Reverse-Proxy**. Sperren innerhalb eines Prozesses garantieren **keine Konsistenz über mehrere Instanzen**. Der Speicherabgleich beim Start kann ausgewählte inkonsistente Artefakte erkennen oder isolieren, ersetzt aber keine geprüften Backups. Der Standard-Docker-Port ist nur über Loopback erreichbar. Für gemeinsame Installationen sind HTTPS und explizite Zugriffskontrollen erforderlich. Tokens sicher verwahren, Logging und Upstream-Netzwerkzugriff prüfen sowie **SQLite und Artefaktdateien zusammen** sichern. Nicht vertrauenswürdige Skills oder Pakete dürfen nicht auf dem Server ausgeführt werden. Siehe [Sicherheit und Betrieb](docs/operations.md).
+Nach Tokenrolle begrenzte Schreibzugriffe ergänzen die Schutzmaßnahmen, **ersetzen aber keine Ratenbegrenzung am Reverse-Proxy**. Sperren innerhalb eines Prozesses garantieren **keine Konsistenz über mehrere Instanzen**. Der Speicherabgleich beim Start kann ausgewählte inkonsistente Artefakte erkennen oder isolieren, ersetzt aber keine geprüften Backups. Der Standard-Docker-Port ist nur über Loopback erreichbar. Für gemeinsame Installationen sind HTTPS und explizite Zugriffskontrollen erforderlich. Tokens sicher verwahren, Logging und Upstream-Netzwerkzugriff prüfen sowie **Metadatenbank und Artefaktspeicher konsistent** sichern. Nicht vertrauenswürdige Skills oder Pakete dürfen nicht auf dem Server ausgeführt werden. Siehe [Sicherheit und Betrieb](docs/operations.md).
 
 ## Build und Tests
 
