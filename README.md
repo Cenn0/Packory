@@ -120,9 +120,11 @@ dotnet restore Packory.slnx
 dotnet build Packory.slnx -c Release --no-restore
 dotnet test Packory.slnx -c Release --no-build
 node --check src/Packory/wwwroot/app.js
+# Requires dotnet CLI, npm/Node.js, curl and openssl:
+bash scripts/smoke-hosted.sh
 ```
 
-Integration tests use in-process ASP.NET hosting and a deterministic **stub registry**, covering authorization, NuGet caching/checksums/publish, npm scoped mirroring/publish, ZIP validation, and catalog operations. GitHub Actions is configured to run tests and a container build; a separate manual/scheduled workflow is configured to exercise **real nuget.org and npmjs.org installs** through the Packory proxy. See [CI](.github/workflows/ci.yml) and [live smoke test](.github/workflows/smoke-live.yml).
+Integration tests use in-process ASP.NET hosting and a deterministic **stub registry**, covering authorization, NuGet caching/checksums/publish, npm scoped mirroring/publish, ZIP validation, and catalog operations. In addition, regular GitHub Actions CI starts an isolated Packory instance and uses real CLIs to **publish a hosted NuGet package and a scoped npm package, then restore/install them through Packory alone**. Credentials are generated locally for the job and deleted afterwards. A separate manual/scheduled workflow exercises live **nuget.org/npmjs.org** mirror installs. See [CI](.github/workflows/ci.yml), [hosted client smoke](scripts/smoke-hosted.sh) and [live mirror smoke](.github/workflows/smoke-live.yml).
 
 ## Limitations
 
