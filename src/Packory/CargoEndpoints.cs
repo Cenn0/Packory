@@ -39,7 +39,7 @@ public static class CargoEndpoints
             return Results.Json(new Dictionary<string, object>
             {
                 ["dl"] = cfg.Base + "/cargo/api/v1/crates",
-                ["api"] = cfg.Base + "/cargo/api",
+                ["api"] = cfg.Base + "/cargo",
                 ["auth-required"] = !cfg.AnonymousRead
             });
         });
