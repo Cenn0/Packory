@@ -1,0 +1,70 @@
+# Cargo and PyPI hosted adapters (experimental)
+
+The new adapters are **hosted-only**, not public upstream mirrors. They retain native-client
+wire formats and feed into the existing catalog, static-token authorization, audit stream,
+per-artifact locks and recovery process. These are not a production-complete implementation
+of either ecosystem.
+
+## Cargo alternate registry
+
+Registry sparse index: `<base>/cargo/index/`
+
+```toml
+# .cargo/config.toml for a loopback evaluation
+[registries.packory]
+index = "sparse+http://localhost:8080/cargo/index/"
+```
+
+With a write token configured as an environment variable, `cargo publish --registry packory`
+can target the Cargo publish binary protocol. Cargo sends an **unprefixed** `Authorization`
+token, accepted only on the `/cargo` route family. Other routes retain Bearer or Basic
+authentication. For authenticated read access set `PACKORY_ANONYMOUS_READ=false`;
+the index `config.json` then advertises `auth-required: true`.
+
+The hosted index is deterministic, uses the mandated sparse path layout, emits
+ETag/304 and records a SHA-256 checksum of each immutable `.crate` file.
+This registry is **not suitable as an interchangeable crates.io source-replacement**
+without a separately implemented, byte-exact crates.io mirror. Only lowercase ASCII
+crate names are currently accepted; this is an explicit subset of Cargo's name grammar.
+Yank/unyank, ownership, reverse dependencies, provenance, index consistency under
+multiple nodes and crates.io mirroring are not implemented.
+
+## PyPI / pip
+
+Simple API root: `<base>/pypi/simple/`. Both PEP 503 HTML and PEP 691 JSON
+representations are supported. Project names follow PEP 503 normalization.
+Every uploaded file carries a SHA-256 digest in HTML fragment/JSON metadata;
+the byte stream can be downloaded from `/pypi/files/<name>/<filename>`.
+
+Upload endpoint: `POST <base>/pypi/legacy/` accepts one multipart file and
+the traditional `name`, `version`, `content` and optional `sha256_digest`
+fields (compatible with Twine's basic form of upload).
+
+Example local-only pip use:
+
+```bash
+python -m pip install --index-url http://localhost:8080/pypi/simple/ your-package
+```
+
+There is no implicit upstream fallback or PyPI mirror. To prevent dependency
+confusion, configure pip sources deliberately and use HTTPS for authenticated
+operations outside localhost.
+
+Multiple wheel/sdist filenames may belong to one version. Filename checks are
+currently deliberately restrictive; full PEP 427/625 archive metadata validation,
+Requires-Python markers, metadata sidecars, yanked semantics, provenance and
+signature validation are not implemented.
+
+## Evidence and limits
+
+API-level deterministic integration tests verify Cargo binary publishing, native
+sparse lines, SHA-256, ETag/304 and PyPI upload, HTML/JSON, integrity and
+download. These tests do **not** establish broad Cargo/pip/Twine client-version
+interoperability or release readiness. Running a trusted real-client E2E suite
+(including transitive dependencies and offline cache) remains required.
+
+Primary specifications:
+- https://doc.rust-lang.org/cargo/reference/registry-index.html
+- https://doc.rust-lang.org/cargo/reference/registry-web-api.html
+- https://packaging.python.org/en/latest/specifications/simple-repository-api/
+- https://docs.pypi.org/api/upload/

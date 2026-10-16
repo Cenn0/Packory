@@ -49,8 +49,8 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 
 ## Milestone 3 — More ecosystems
 
-- [ ] Cargo registry (index protocol + crate downloads + checksum and client tests)
-- [ ] PyPI simple API (PEP 503/691, upload semantics)
+- [ ] Cargo registry (hosted sparse index, checksumed crate downloads, native binary upload and API tests implemented; crates.io proxy, yanking and multi-version real client matrix still open)
+- [ ] PyPI simple API (hosted HTML/JSON simple API, basic legacy upload, SHA-256 links and API tests implemented; real pip/Twine matrix, metadata sidecars, requires-python and PyPI proxy still open)
 - [ ] OCI artifacts (container layers, Helm, agent bundles), optional other package formats
 - [ ] Artifact relationships, namespace conflict rules, federated search
 
