@@ -15,6 +15,10 @@ public sealed class Settings
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
     public int PublishRequestsPerMinute { get; set; } = 60;
     public int MaxMetadataBytes { get; set; } = 16 * 1024 * 1024;
+    // Optional OIDC resource-server authentication; configure both fields or neither.
+    public string? OidcAuthority { get; set; }
+    public string? OidcAudience { get; set; }
+    public bool OidcEnabled => !string.IsNullOrWhiteSpace(OidcAuthority);
     public string? AdminToken { get; set; }
     public string? ReadToken { get; set; }
     public string? WriteToken { get; set; }
@@ -48,6 +52,13 @@ public sealed class Settings
                 !string.IsNullOrEmpty(upstream.UserInfo) || !string.IsNullOrEmpty(upstream.Query) || !string.IsNullOrEmpty(upstream.Fragment))
                 throw new InvalidOperationException("Upstream registry URL must use HTTPS and contain no credentials, query, or fragment.");
         }
+        if (OidcEnabled != !string.IsNullOrWhiteSpace(OidcAudience))
+            throw new InvalidOperationException("OIDC authority and audience must be configured together.");
+        if (OidcEnabled && (!Uri.TryCreate(OidcAuthority, UriKind.Absolute, out var oidc) ||
+            oidc.Scheme != "https" || !string.IsNullOrEmpty(oidc.UserInfo) ||
+            !string.IsNullOrEmpty(oidc.Query) || !string.IsNullOrEmpty(oidc.Fragment) ||
+            string.IsNullOrWhiteSpace(OidcAudience) || OidcAudience.Length > 256))
+            throw new InvalidOperationException("OIDC requires an HTTPS authority and nonempty audience.");
         if (PublishRequestsPerMinute is < 1 or > 10000)
             throw new InvalidOperationException("PublishRequestsPerMinute must be between 1 and 10000.");
         if (MaxArtifactBytes is < 1024 or > 536870912 || MaxMetadataBytes is < 1024 or > 67108864)

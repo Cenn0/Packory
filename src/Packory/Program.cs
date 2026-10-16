@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
@@ -12,6 +14,8 @@ static string? TokenFromEnv(string name)
     var value = Environment.GetEnvironmentVariable(name);
     return string.IsNullOrWhiteSpace(value) ? null : value;
 }
+settings.OidcAuthority = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUTHORITY") ?? settings.OidcAuthority;
+settings.OidcAudience = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUDIENCE") ?? settings.OidcAudience;
 settings.AdminToken = TokenFromEnv("PACKORY_ADMIN_TOKEN") ?? settings.AdminToken;
 settings.ReadToken = TokenFromEnv("PACKORY_READ_TOKEN") ?? settings.ReadToken;
 settings.WriteToken = TokenFromEnv("PACKORY_WRITE_TOKEN") ?? settings.WriteToken;
@@ -40,6 +44,27 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = settings.MaxArtifactBytes;
     options.ValueLengthLimit = settings.MaxMetadataBytes;
 });
+if (settings.OidcEnabled)
+{
+    // The JWT middleware validates signature, issuer, audience and lifetime using
+    // the HTTPS OpenID Connect discovery document and signing keys.
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.Authority = settings.OidcAuthority;
+            options.Audience = settings.OidcAudience;
+            options.RequireHttpsMetadata = true;
+            options.MapInboundClaims = false;
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                RequireSignedTokens = true,
+                ClockSkew = TimeSpan.FromMinutes(2)
+            };
+        });
+}
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<BlobStore>();
@@ -77,6 +102,7 @@ var app = builder.Build();
 app.Services.GetRequiredService<Database>().Initialize();
 app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 app.UseRouting();
+if (settings.OidcEnabled) app.UseAuthentication();
 app.UseRateLimiter();
 app.Use(async (ctx, next) =>
 {
