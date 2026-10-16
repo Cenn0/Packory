@@ -76,9 +76,11 @@ dotnet restore Packory.slnx
 dotnet build Packory.slnx -c Release --no-restore
 dotnet test Packory.slnx -c Release --no-build
 node --check src/Packory/wwwroot/app.js
+# Requires the .NET 10 SDK, npm/Node.js, curl and OpenSSL:
+bash scripts/smoke-hosted.sh
 ```
 
-[CI](.github/workflows/ci.yml) runs builds and automated tests. A [separate live smoke workflow](.github/workflows/smoke-live.yml) is available for external registry checks; workflow existence alone is not a passing acceptance result.
+[CI](.github/workflows/ci.yml) runs builds, deterministic integration tests and a [native-client hosted smoke test](scripts/smoke-hosted.sh): a real `dotnet nuget push` followed by an isolated `dotnet restore/build`, plus a scoped `npm publish` followed by `npm install` and fresh-cache `npm ci`. Test credentials are generated temporarily and never committed. A [separate live mirror workflow](.github/workflows/smoke-live.yml) checks upstream registry behavior; passing one native hosted scenario does not imply comprehensive protocol support.
 
 ## Documentation and contributions
 

@@ -17,7 +17,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 
 ## Milestone 1 — Hardening and client compatibility
 
-- [ ] Test and fix `dotnet restore`, `dotnet nuget push`, `npm install`, `npm publish` using real CLIs (including scoped npm, transitive dependencies, SemVer, edge cases)
+- [ ] Test and fix `dotnet restore`, `dotnet nuget push`, `npm install`, `npm publish` using real CLIs (deterministic hosted publish/restore for one NuGet package and one scoped npm package, including `npm ci`, now in pull-request CI; broader native client versions, transitive dependencies, SemVer/edge cases and live upstream acceptance are still open)
 - [ ] NuGet complete registration semantics, search fallback, version normalization, package types, content digests, controlled redirects/retries and structured errors
 - [ ] npm packument/attachments/metadata fidelity; local dist-tags and scoped auth; no unauthenticated upstream bypass
 - [ ] Atomic metadata/artifact publication with startup reconciliation and per-artifact concurrency locks (in progress; in-process key locks, atomic SQLite skill+catalog publication, quarantine of orphan blobs and missing-hosted detection implemented; full crash-injection verification and CAS publication outstanding)
@@ -34,6 +34,7 @@ The objective is **one self-hosted registry platform for heterogeneous developer
 - [x] Deterministic concurrency, unsigned npm payload, reserved namespace and crash-orphan regression tests.
 - [x] SQLite audit records committed atomically with hosted NuGet/npm/Skill metadata; read access restricted to the admin token.
 - [x] Configurable per-role publish rate limiter (429 on exhaustion, no unbounded partitions created from user-supplied credentials).
+- [x] Real CLI hosted acceptance: `dotnet pack` → `dotnet nuget push` → isolated `dotnet restore/build`; `npm publish` → isolated `npm install` and fresh-cache `npm ci`, including scoped package names, without public upstream fallback.
 - [ ] Per-token identity, lifecycle, immutable full action audit, storage quotas and cache eviction remain pending.
 - [ ] Multi-process transactional publication, content-addressed asset references and full crash-point testing; **not yet supported**.
 
