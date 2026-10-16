@@ -582,4 +582,110 @@ public sealed class ApiTests
         Assert.Contains("missingHostedArtifacts", await ready.Content.ReadAsStringAsync());
     }
 
+
+    [Fact]
+    public async Task Cargo_AlternateRegistry_PublishesSparseIndexAndImmutableCrate()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var metadata = new JsonObject
+        {
+            ["name"] = "packory-demo",
+            ["vers"] = "1.0.0",
+            ["description"] = "Hosted Cargo test",
+            ["features"] = new JsonObject(),
+            ["deps"] = new JsonArray()
+        };
+        var json = Encoding.UTF8.GetBytes(metadata.ToJsonString());
+        var archive = new byte[] { 0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00 };
+        using var payload = new MemoryStream();
+        using (var writer = new BinaryWriter(payload, Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write((uint)json.Length);
+            writer.Write(json);
+            writer.Write((uint)archive.Length);
+            writer.Write(archive);
+        }
+        var request = new HttpRequestMessage(HttpMethod.Put, "/cargo/api/v1/crates/new")
+        {
+            Content = new ByteArrayContent(payload.ToArray())
+        };
+        request.Headers.TryAddWithoutValidation("Authorization", AdminToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(request)).StatusCode);
+        using var config = await client.SendAsync(WithToken(HttpMethod.Get, "/cargo/index/config.json"));
+        var configJson = await config.Content.ReadAsStringAsync();
+        Assert.Contains("/cargo/api/v1/crates", configJson);
+        Assert.DoesNotContain("crates.io", configJson);
+        var url = "/cargo/index/pa/ck/packory-demo";
+        using var index = await client.SendAsync(WithToken(HttpMethod.Get, url));
+        Assert.Equal(HttpStatusCode.OK, index.StatusCode);
+        Assert.True(index.Headers.ETag is not null);
+        var indexText = await index.Content.ReadAsStringAsync();
+        using var indexEntry = JsonDocument.Parse(indexText.Trim());
+        Assert.Equal("packory-demo", indexEntry.RootElement.GetProperty("name").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(archive)),
+            indexEntry.RootElement.GetProperty("cksum").GetString());
+        var condition = WithToken(HttpMethod.Get, url);
+        condition.Headers.IfNoneMatch.Add(index.Headers.ETag!);
+        Assert.Equal(HttpStatusCode.NotModified, (await client.SendAsync(condition)).StatusCode);
+        using var crate = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/cargo/api/v1/crates/packory-demo/1.0.0/download"));
+        Assert.Equal(archive, await crate.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await client.SendAsync(WithToken(HttpMethod.Put, "/cargo/api/v1/crates/new",
+                new ByteArrayContent(payload.ToArray())))).StatusCode);
+    }
+
+    [Fact]
+    public async Task PyPi_HostedWheel_ProvidesSimpleHtmlJsonAndImmutableDownloads()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var bytes = new byte[] { 0x50, 0x4b, 3, 4, 0, 0, 0 };
+        const string filename = "demo_pkg-1.2.3-py3-none-any.whl";
+        static MultipartFormDataContent Upload(byte[] bytes)
+        {
+            var form = new MultipartFormDataContent();
+            form.Add(new StringContent("demo_pkg"), "name");
+            form.Add(new StringContent("1.2.3"), "version");
+            form.Add(new StringContent(Convert.ToHexStringLower(SHA256.HashData(bytes))), "sha256_digest");
+            form.Add(new ByteArrayContent(bytes), "content", filename);
+            return form;
+        }
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(HttpMethod.Post,
+            "/pypi/legacy/", Upload(bytes)))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(HttpMethod.Post,
+            "/pypi/legacy/", Upload(bytes)))).StatusCode);
+        using var root = await client.SendAsync(WithToken(HttpMethod.Get, "/pypi/simple/"));
+        Assert.Contains("demo-pkg/", await root.Content.ReadAsStringAsync());
+        using var html = await client.SendAsync(WithToken(HttpMethod.Get, "/pypi/simple/demo_pkg/"));
+        var content = await html.Content.ReadAsStringAsync();
+        Assert.Contains("#sha256=" + Convert.ToHexStringLower(SHA256.HashData(bytes)), content);
+        using var request = WithToken(HttpMethod.Get, "/pypi/simple/demo-pkg/");
+        request.Headers.Accept.ParseAdd("application/vnd.pypi.simple.v1+json");
+        using var jsonResponse = await client.SendAsync(request);
+        Assert.Equal("application/vnd.pypi.simple.v1+json", jsonResponse.Content.Headers.ContentType?.MediaType);
+        using var doc = JsonDocument.Parse(await jsonResponse.Content.ReadAsStringAsync());
+        Assert.Equal(filename, doc.RootElement.GetProperty("files")[0].GetProperty("filename").GetString());
+        var actual = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/pypi/files/demo-pkg/" + filename));
+        Assert.Equal(bytes, await actual.Content.ReadAsByteArrayAsync());
+        Assert.Contains("demo-pkg", await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/packages?kind=pypi"))).Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task PyPi_RejectsPathTraversalAndInvalidArtifactHash()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var form = new MultipartFormDataContent();
+        form.Add(new StringContent("demo"), "name");
+        form.Add(new StringContent("1.0.0"), "version");
+        form.Add(new StringContent(new string('0', 64)), "sha256_digest");
+        form.Add(new ByteArrayContent(new byte[] { 0, 1, 2 }), "content", "demo-1.0.0-py3-none-any.whl");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(WithToken(HttpMethod.Post,
+            "/pypi/legacy/", form))).StatusCode);
+    }
+
 }
