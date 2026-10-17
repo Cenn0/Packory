@@ -7,6 +7,8 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       PACKORY_DATA_DIRECTORY: /data
+      PACKORY_SKILL_SECURITY_ENFORCED: "true"
+      PACKORY_MCP_ENABLED: "true"
       PACKORY_PUBLIC_BASE_URL: ${PACKORY_PUBLIC_BASE_URL:-http://localhost:8080}
       PACKORY_ANONYMOUS_READ: ${PACKORY_ANONYMOUS_READ:-true}
       PACKORY_ADMIN_TOKEN: ${PACKORY_ADMIN_TOKEN:-}
@@ -14,9 +16,31 @@ services:
       PACKORY_WRITE_TOKEN: ${PACKORY_WRITE_TOKEN:-}
     volumes:
       - packory-data:/data
+      - skill-scans-in:/data/skill-scans/in
+      - skill-scans-out:/data/skill-scans/out
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+  skillspector:
+    build: ./workers/skillspector
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    user: "15001:15001"
+    volumes:
+      - skill-scans-in:/work/in:ro
+      - skill-scans-out:/work/out
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
 volumes:
   packory-data:
+  skill-scans-in:
+  skill-scans-out:
