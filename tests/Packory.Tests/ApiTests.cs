@@ -448,6 +448,49 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task Skills_LegacyBackfillIsExplicitQuarantinedIdempotentAndAdminOnly()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var database = host.Services.GetRequiredService<IPackageDatabase>();
+        var blobs = host.Services.GetRequiredService<BlobStore>();
+        using var stream = new MemoryStream();
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("legacy-smoke/SKILL.md").Open());
+            writer.Write("---\nname: legacy-smoke\ndescription: Inert legacy fixture\n---\n# Test\n");
+        }
+        var data = stream.ToArray();
+        Assert.True(await blobs.PutAsync(SkillEndpoints.SkillKey("legacy-smoke", "1.0.0"),
+            new MemoryStream(data, writable: false), data.Length + 1, CancellationToken.None));
+        Assert.True(database.AddSkill("legacy-smoke", "1.0.0", "Inert legacy fixture", "synthetic-actor"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/legacy-smoke/1.0.0/download"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/backfill", token: ReadToken))).StatusCode);
+
+        var response = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/backfill?limit=25"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(1, body.RootElement.GetProperty("queued").GetInt32());
+        Assert.Equal(0, body.RootElement.GetProperty("remaining").GetInt32());
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        var revision = security.Get("legacy-smoke", "1.0.0");
+        Assert.NotNull(revision);
+        Assert.Equal("QUEUED", revision.State);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(data)), revision.Sha256);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/legacy-smoke/1.0.0/skill.md"))).StatusCode);
+
+        response = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/backfill?limit=25"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var duplicate = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, duplicate.RootElement.GetProperty("queued").GetInt32());
+    }
+
+    [Fact]
     public async Task Mcp_AuthenticatedClientNegotiatesAndDiscoversReadOnlyTools()
     {
         using var host = new Host();
