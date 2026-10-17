@@ -1,4 +1,5 @@
 using Packory;
+using Npgsql;
 using System.Text.Json;
 using Xunit;
 
@@ -7,6 +8,49 @@ namespace Packory.Tests;
 /// <summary>Runs against a disposable PostgreSQL service container in the dedicated CI job.</summary>
 public sealed class PostgresProviderTests
 {
+    [Fact]
+    public void ReadReplicaHealthRejectsUninitializedFutureAndIncompleteSchema()
+    {
+        var shared = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(shared)) return;
+        var schema = "packory_health_" + Guid.NewGuid().ToString("N")[..16];
+        using var administrator = new NpgsqlConnection(shared);
+        administrator.Open();
+        using (var create = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            create.ExecuteNonQuery();
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(shared) { SearchPath = schema };
+            var settings = new Settings
+            {
+                MetadataProvider = "postgresql",
+                PostgresConnectionString = builder.ConnectionString
+            };
+            var database = new PostgresDatabase(settings);
+            Assert.False(database.IsHealthy()); // Connection works, no application schema.
+            database.Initialize();
+            Assert.True(database.IsHealthy());
+            using var isolated = new NpgsqlConnection(builder.ConnectionString);
+            isolated.Open();
+            using (var version = new NpgsqlCommand(
+                "UPDATE packory_schema_version SET version=99 WHERE slot=1", isolated))
+                Assert.Equal(1, version.ExecuteNonQuery());
+            Assert.False(database.IsHealthy()); // Fail closed on future writer schema.
+            using (var version = new NpgsqlCommand(
+                "UPDATE packory_schema_version SET version=2 WHERE slot=1", isolated))
+                Assert.Equal(1, version.ExecuteNonQuery());
+            Assert.True(database.IsHealthy());
+            using (var drop = new NpgsqlCommand("DROP TABLE feeds CASCADE", isolated))
+                drop.ExecuteNonQuery();
+            Assert.False(database.IsHealthy()); // Marker alone cannot prove a valid migration.
+        }
+        finally
+        {
+            using var drop = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator);
+            drop.ExecuteNonQuery();
+        }
+    }
+
     [Fact]
     public void PersistsAllRegistryKindsAndTransactionalAudit()
     {

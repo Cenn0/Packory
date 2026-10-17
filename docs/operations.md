@@ -51,7 +51,12 @@ PostgreSQL and S3. Each additional node sets
 bucket/prefix, but a **different local data/cache directory**.
 
 Reader nodes never initialize schemas, reconcile local/remote publication
-intents, acquire a writer lease, or accept HTTP mutation methods. They permit
+intents, acquire a writer lease, or accept HTTP mutation methods. Startup
+and `/health/ready` require the **exact current metadata schema version and
+all core/feed tables**; an uninitialized, partial or future-version database
+fails closed. Upgrade the writer and complete the schema migration before
+starting version-matched readers. A healthy metadata schema does **not**
+validate S3 object integrity or confer production certification. They permit
 read-only catalog, skill, Cargo, hosted PyPI and OCI blob/manifest/tag endpoints.
 They reject **all** `/nuget/` and `/npm/` traffic, because those adapters
 currently write remote metadata or cache bytes even during GET operations.
