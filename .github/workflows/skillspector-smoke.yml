@@ -72,6 +72,16 @@ jobs:
               "SAFE", "CAUTION", "DO_NOT_INSTALL")
           print("Pinned SkillSpector completed offline static analysis of inert fixture")
           PY
+      - name: Test complete Compose import, scan, approval, MCP distribution and revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_READ_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_WRITE_TOKEN="$(openssl rand -hex 32)"
+          trap 'docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true' EXIT
+          docker compose up -d --build
+          python3 scripts/smoke-skillspector-compose.py
 
       - name: Integration smoke - compose staging, offline scan, approval and revoke
         shell: bash
