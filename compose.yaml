@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     network_mode: none
     read_only: true
-    user: "15001:15001"
+    user: "1654:1654"
     volumes:
       - skill-scans-in:/work/in:ro
       - skill-scans-out:/work/out
