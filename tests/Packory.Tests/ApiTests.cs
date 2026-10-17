@@ -484,6 +484,7 @@ public sealed class ApiTests
         using var request = WithToken(HttpMethod.Post, "/mcp",
             new StringContent(body, Encoding.UTF8, "application/json"), ReadToken);
         request.Headers.TryAddWithoutValidation("Mcp-Protocol-Version", "2026-07-28");
+        request.Headers.TryAddWithoutValidation("Mcp-Method", "skills/list");
         request.Headers.Accept.ParseAdd("application/json");
         request.Headers.Accept.ParseAdd("text/event-stream");
         using var response = await http.SendAsync(request);
