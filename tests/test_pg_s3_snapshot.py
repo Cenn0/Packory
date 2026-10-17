@@ -130,7 +130,8 @@ class SnapshotTests(unittest.TestCase):
                 "postgres": {"path": "metadata.dump", "size": 9,
                              "sha256": hashlib.sha256(b"synthetic").hexdigest(),
                              "table_counts": {name: 0 for name in fingerprints},
-                             "table_fingerprints": fingerprints},
+                             "table_fingerprints": fingerprints,
+                             "database_schema_version": 2},
                 "objects": [], "delete_markers": []
             }
             (root / "manifest.json").write_text(json.dumps(manifest))

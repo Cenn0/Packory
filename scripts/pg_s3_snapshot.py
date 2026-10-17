@@ -228,17 +228,22 @@ def verify(folder):
         if manifest["schema"] == SCHEMA:
             fingerprints = pg["table_fingerprints"]
             table_counts = pg["table_counts"]
+            db_version = pg["database_schema_version"]
+            required = set(CORE_TABLES)
+            if db_version in (1, 2):
+                required.add("packory_schema_version")
+            if db_version == 2:
+                required.update(FEED_TABLES)
             if (not isinstance(fingerprints, dict) or not isinstance(table_counts, dict) or
-                    not set(CORE_TABLES) <= fingerprints.keys() or
-                    not set(fingerprints) <= ALLOWED_TABLES or
+                    type(db_version) is not int or db_version not in (0, 1, 2) or
+                    set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not isinstance(entry.get("count"), int) or
                         isinstance(entry["count"], bool) or entry["count"] < 0 or
                         not isinstance(entry.get("sha256"), str) or
                         not SHA.fullmatch(entry["sha256"]) or
                         table_counts[name] != entry["count"]
-                        for name, entry in fingerprints.items()) or
-                    ("feeds" in fingerprints) != all(name in fingerprints for name in FEED_TABLES)):
+                        for name, entry in fingerprints.items())):
                 raise SnapshotError("Invalid or incomplete PostgreSQL row fingerprints")
         source = manifest["source"]
         prefix = source["prefix"]
@@ -304,7 +309,9 @@ def backup(directory, s3, bucket, prefix, max_bytes):
                 "postgres": {"path": "metadata.dump", "size": (staged / "metadata.dump").stat().st_size,
                              "sha256": checksum(staged / "metadata.dump"),
                              "table_counts": {name: value["count"] for name, value in final.items()},
-                             "table_fingerprints": final},
+                             "table_fingerprints": final,
+                             "database_schema_version": (2 if "feeds" in tables else
+                                                         1 if "packory_schema_version" in tables else 0)},
                 "objects": entries, "delete_markers": markers,
                 "snapshot_bytes": total,
                 "historical_versions_retained_in_backup": True,
