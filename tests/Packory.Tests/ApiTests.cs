@@ -134,6 +134,83 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task DraftFeeds_AreAdminOnlyDisabledAuditedAndRemovableWithoutChangingLegacyRoutes()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string create = "/api/v1/admin/feeds/drafts";
+        const string id = "sandbox-nuget-feed";
+        const string body = """
+            {"id":"sandbox-nuget-feed","kind":"nuget","mode":"hosted","displayName":"Sandbox packages"}
+            """;
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PostAsync(create, new StringContent(body))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
+            WithToken(HttpMethod.Post, create, new StringContent(body), WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
+            WithToken(HttpMethod.Post, create, new StringContent(body), ReadToken))).StatusCode);
+        using var accepted = await client.SendAsync(WithToken(HttpMethod.Post,
+            create, new StringContent(body, Encoding.UTF8, "application/json")));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        using var created = JsonDocument.Parse(await accepted.Content.ReadAsStringAsync());
+        Assert.False(created.RootElement.GetProperty("operational").GetBoolean());
+        Assert.False(created.RootElement.GetProperty("isolationSupported").GetBoolean());
+        var feed = created.RootElement.GetProperty("feed");
+        Assert.False(feed.GetProperty("enabled").GetBoolean());
+        Assert.Equal("private", feed.GetProperty("visibility").GetString());
+        Assert.Equal("hosted", feed.GetProperty("mode").GetString());
+
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Post, create, new StringContent(body)))).StatusCode);
+        using var detail = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/v1/admin/feeds/" + id));
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        Assert.Contains(id, await detail.Content.ReadAsStringAsync());
+
+        // The global NuGet endpoint has no new per-feed route; legacy clients are unaffected.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/nuget/v3/index.json"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Delete, "/api/v1/admin/feeds/drafts/default-nuget"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Delete, "/api/v1/admin/feeds/drafts/" + id, token: WriteToken))).StatusCode);
+
+        using var deleted = await client.SendAsync(WithToken(HttpMethod.Delete,
+            "/api/v1/admin/feeds/drafts/" + id));
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/v1/admin/feeds/" + id))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Delete, "/api/v1/admin/feeds/drafts/" + id))).StatusCode);
+        using var audit = await client.SendAsync(WithToken(HttpMethod.Get, "/api/admin/audit"));
+        var log = await audit.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
+        Assert.Contains("feed-draft-create", log);
+        Assert.Contains("feed-draft-delete", log);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("{invalid")]
+    [InlineData("""{"id":"default-extra","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
+    [InlineData("""{"id":"upper-CASE","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
+    [InlineData("""{"id":"abc","kind":"raw","mode":"hosted","displayName":"Bad"}""")]
+    [InlineData("""{"id":"abc","kind":"nuget","mode":"group","displayName":"Bad"}""")]
+    [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad","enabled":true}""")]
+    [InlineData("""{"id":"abc","id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
+    [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":" Bad "}""")]
+    [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad\\nname"}""")]
+    public async Task DraftFeeds_RejectAmbiguousOrUnsupportedSpecifications(string json)
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        using var response = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/v1/admin/feeds/drafts", new StringContent(json, Encoding.UTF8, "application/json")));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Authentication_AppliesToReadsAndWrites()
     {
         using var host = new Host();
