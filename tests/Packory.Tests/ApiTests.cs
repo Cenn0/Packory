@@ -470,6 +470,30 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task Mcp_SkillsExtensionListsOnlyApprovedRevisions()
+    {
+        using var host = new Host();
+        using var http = host.CreateClient();
+        const string body = """
+            {"jsonrpc":"2.0","id":2,"method":"skills/list","params":{"_meta":{
+              "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+              "io.modelcontextprotocol/clientInfo":{"name":"test-client","version":"1.0"},
+              "io.modelcontextprotocol/clientCapabilities":{}
+            }}}
+            """;
+        using var request = WithToken(HttpMethod.Post, "/mcp",
+            new StringContent(body, Encoding.UTF8, "application/json"), ReadToken);
+        request.Headers.TryAddWithoutValidation("Mcp-Protocol-Version", "2026-07-28");
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        using var response = await http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("skills", text, StringComparison.Ordinal);
+        Assert.Contains("resultType", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SkillSpectorContract_FailsClosedWhenIncompleteOrMalformed()
     {
         const string digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
