@@ -16,7 +16,7 @@ jobs:
       PACKORY_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=packory;Username=packory;Password=test
     services:
       postgres:
-        image: postgres:17
+        image: postgres:16
         env:
           POSTGRES_USER: packory
           POSTGRES_PASSWORD: test
@@ -51,13 +51,10 @@ jobs:
           exit 1
       - name: Test offline snapshot S3 object-version inventory against Moto (not real-provider evidence)
         run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
-      - name: Install PostgreSQL 17 backup clients and offline integration dependencies
+      - name: Install offline integration dependencies (PostgreSQL 16 client/server)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y postgresql-client-17
-          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
-          /usr/lib/postgresql/17/bin/pg_dump --version
-          /usr/lib/postgresql/17/bin/pg_restore --version
+          pg_dump --version
+          pg_restore --version
           python3 -m pip install 'boto3>=1.35,<2' 'psycopg[binary]>=3,<4'
       - name: Test coordinated PostgreSQL and versioned Moto S3 snapshot and isolated restore (emulator only)
         env:
