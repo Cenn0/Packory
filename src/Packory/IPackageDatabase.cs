@@ -9,6 +9,8 @@ public interface IPackageDatabase
     void Initialize();
     IReadOnlyList<FeedDefinition> Feeds(string? after, int limit);
     FeedDefinition? Feed(string id);
+    bool TryCreateDraftFeed(FeedDefinition feed, string actor);
+    bool TryDeleteDraftFeed(string id, string actor);
     void BeginPublication(string key, string kind, string name, string version);
     void CompletePublication(string key);
     IReadOnlyList<PendingPublication> PendingPublications();

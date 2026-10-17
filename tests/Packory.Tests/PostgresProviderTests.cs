@@ -66,6 +66,20 @@ public sealed class PostgresProviderTests
         db.Initialize();
         Assert.True(db.IsHealthy());
         var suffix = Guid.NewGuid().ToString("N")[..12];
+        var draftId = "test-feed-" + suffix;
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        var draft = new FeedDefinition(draftId, "nuget", "hosted", "private",
+            "Isolated test draft", false, now, now);
+        Assert.True(db.TryCreateDraftFeed(draft, "integration-admin"));
+        Assert.False(db.TryCreateDraftFeed(draft, "integration-admin"));
+        Assert.NotNull(db.Feed(draftId));
+        Assert.False(db.Feed(draftId)!.Enabled);
+        Assert.Equal("private", db.Feed(draftId)!.Visibility);
+        Assert.False(db.TryDeleteDraftFeed("default-nuget", "integration-admin"));
+        Assert.True(db.TryDeleteDraftFeed(draftId, "integration-admin"));
+        Assert.Null(db.Feed(draftId));
+        Assert.False(db.TryDeleteDraftFeed(draftId, "integration-admin"));
+
         var nuget = "pgtest." + suffix;
         Assert.True(db.PublishNuget(nuget, "1.0.0", "test", "integration-writer"));
         Assert.False(db.PublishNuget(nuget, "1.0.0", "test", "integration-writer"));
@@ -131,6 +145,8 @@ public sealed class PostgresProviderTests
         Assert.DoesNotContain(db.PendingPublications(), x => x.Key == publicationKey);
 
         var audits = db.AuditEvents(null, 100);
+        Assert.Contains(audits, x => x.Kind == "feed" && x.Name == draftId && x.Action == "feed-draft-create");
+        Assert.Contains(audits, x => x.Kind == "feed" && x.Name == draftId && x.Action == "feed-draft-delete");
         Assert.Contains(audits, x => x.Kind == "nuget" && x.Name == nuget);
         Assert.Contains(audits, x => x.Kind == "npm" && x.Name == npm);
         Assert.Contains(audits, x => x.Kind == "oci" && x.Name == repo);

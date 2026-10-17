@@ -1,8 +1,10 @@
+using System.Text.Json;
+
 namespace Packory;
 
 /// <summary>
-/// V3 read-only feed metadata inventory. Route naming deliberately avoids
-/// implying operational multi-feed isolation or write support.
+/// V3 feed metadata inventory and disabled-only draft lifecycle.
+/// Drafts do not route native clients or confer any isolation/authorization.
 /// </summary>
 public static class FeedEndpoints
 {
@@ -25,6 +27,65 @@ public static class FeedEndpoints
             return Results.Json(new { apiVersion = "v1", items = results,
                 nextCursor, isolationSupported = false });
         });
+
+        app.MapPost("/api/v1/admin/feeds/drafts", async (Settings cfg, IPackageDatabase db,
+            HttpContext ctx) =>
+        {
+            if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+            ctx.Response.Headers.CacheControl = "no-store";
+            if (ctx.Request.ContentLength is > 4096)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            byte[] bytes;
+            try { bytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body, 4096, ctx.RequestAborted); }
+            catch (PayloadTooLargeException)
+            { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+            FeedDefinition? feed;
+            try
+            {
+                using var document = JsonDocument.Parse(bytes,
+                    new JsonDocumentOptions { MaxDepth = 8, AllowTrailingCommas = false });
+                var obj = document.RootElement;
+                if (obj.ValueKind != JsonValueKind.Object) return Results.BadRequest(new { error = "Expected object" });
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in obj.EnumerateObject())
+                    if (!names.Add(property.Name) ||
+                        property.Name is not ("id" or "kind" or "mode" or "displayName") ||
+                        property.Value.ValueKind != JsonValueKind.String)
+                        return Results.BadRequest(new { error = "Invalid or duplicate field" });
+                if (names.Count != 4) return Results.BadRequest(new { error = "Missing required fields" });
+                var id = obj.GetProperty("id").GetString();
+                var kind = obj.GetProperty("kind").GetString();
+                var mode = obj.GetProperty("mode").GetString();
+                var displayName = obj.GetProperty("displayName").GetString();
+                if (!FeedDefinition.ValidId(id) || id!.StartsWith("default-", StringComparison.Ordinal) ||
+                    kind is not ("nuget" or "npm" or "cargo" or "pypi" or "oci" or "skill") ||
+                    mode is not ("hosted" or "proxy") || string.IsNullOrWhiteSpace(displayName) ||
+                    displayName.Length > 120 ||
+                    !string.Equals(displayName, displayName.Trim(), StringComparison.Ordinal) ||
+                    displayName.Any(c => char.IsControl(c) || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format))
+                    return Results.BadRequest(new { error = "Invalid draft feed specification" });
+                var at = DateTimeOffset.UtcNow.ToString("O");
+                feed = new FeedDefinition(id, kind, mode, "private", displayName, false, at, at);
+            }
+            catch (JsonException) { return Results.BadRequest(new { error = "Invalid JSON" }); }
+            if (!db.TryCreateDraftFeed(feed, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Feed ID already exists" });
+            return Results.Json(new { apiVersion = "v1", feed,
+                isolationSupported = false, operational = false }, statusCode: StatusCodes.Status201Created);
+        }).RequireRateLimiting("publish");
+
+        app.MapDelete("/api/v1/admin/feeds/drafts/{id}", (string id, Settings cfg,
+            IPackageDatabase db, HttpContext ctx) =>
+        {
+            if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+            ctx.Response.Headers.CacheControl = "no-store";
+            if (!FeedDefinition.ValidId(id)) return Results.BadRequest(new { error = "Invalid feed ID" });
+            // Preserve existing default feeds and every draft referenced by policy,
+            // upstream or namespace metadata. A no-op is a conflict, not success.
+            if (!db.TryDeleteDraftFeed(id, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Feed is not a removable unused draft" });
+            return Results.NoContent();
+        }).RequireRateLimiting("publish");
 
         app.MapGet("/api/v1/admin/feeds/{id}", (string id, Settings cfg,
             IPackageDatabase db, HttpContext ctx) =>

@@ -208,6 +208,50 @@ public sealed class Database(Settings settings) : IPackageDatabase
             reader.GetInt32(5) == 1, reader.GetString(6), reader.GetString(7)) : null;
     }
 
+    public bool TryCreateDraftFeed(FeedDefinition feed, string actor)
+    {
+        if (feed.Enabled || feed.Visibility != "private" || feed.Mode is not ("hosted" or "proxy"))
+            throw new ArgumentException("Only disabled private draft feeds may be created.", nameof(feed));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var insert = db.CreateCommand();
+        insert.Transaction = tx;
+        insert.CommandText = """
+            INSERT OR IGNORE INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
+            VALUES($id,$kind,$mode,'private',$name,0,$at,$at)
+            """;
+        insert.Parameters.AddWithValue("$id", feed.Id);
+        insert.Parameters.AddWithValue("$kind", feed.Kind);
+        insert.Parameters.AddWithValue("$mode", feed.Mode);
+        insert.Parameters.AddWithValue("$name", feed.DisplayName);
+        insert.Parameters.AddWithValue("$at", feed.CreatedAt);
+        if (insert.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "feed-draft-create", "feed", feed.Id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public bool TryDeleteDraftFeed(string id, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var delete = db.CreateCommand();
+        delete.Transaction = tx;
+        delete.CommandText = """
+            DELETE FROM feeds
+            WHERE id=$id AND mode IN ('hosted','proxy') AND enabled=0
+                AND visibility='private'
+                AND NOT EXISTS (SELECT 1 FROM feed_namespaces WHERE feed_id=$id)
+                AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=$id)
+                AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=$id)
+            """;
+        delete.Parameters.AddWithValue("$id", id);
+        if (delete.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "feed-draft-delete", "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
     public IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit)
     {
         using var db = Open();
