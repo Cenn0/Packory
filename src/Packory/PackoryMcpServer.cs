@@ -188,7 +188,10 @@ public sealed class PackoryMcpOptionsConfigurator(
     {
         options.Capabilities ??= new ServerCapabilities();
         options.Capabilities.Extensions ??= new Dictionary<string, object>();
-        options.Capabilities.Extensions["io.modelcontextprotocol/skills"] = new { directoryRead = false };
+        // The SDK's source-generated protocol serializer cannot serialize arbitrary anonymous objects.
+        // A JsonElement is a supported DOM value and produces the exact advertised extension shape.
+        options.Capabilities.Extensions["io.modelcontextprotocol/skills"] =
+            JsonSerializer.SerializeToElement(new Dictionary<string, bool> { ["directoryRead"] = false });
         options.RequestHandlers ??= new List<McpServerRequestHandler>();
         options.RequestHandlers.Add(new McpServerRequestHandler
         {
