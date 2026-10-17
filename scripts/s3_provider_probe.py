@@ -159,6 +159,91 @@ def run_probe(client, bucket, prefix, concurrency=8):
     }
 
 
+
+def run_versioning_probe(client, bucket, prefix):
+    """Prove two immutable object generations survive a conditional delete marker.
+
+    This is a NON-CERTIFYING disposable-bucket test. It deliberately retains
+    both versions and a delete marker for operator inspection.
+    """
+    if not isinstance(bucket, str) or not bucket.strip():
+        raise ValueError("A disposable test bucket is required")
+    if not prefix.startswith(PROBE_ROOT) or len(prefix) <= len(PROBE_ROOT):
+        raise ValueError("Probe requires a unique reserved namespace")
+    try:
+        state = client.get_bucket_versioning(Bucket=bucket).get("Status")
+    except Exception as error:
+        raise ProbeFailure(f"Cannot read bucket versioning: {type(error).__name__}") from None
+    if state != "Enabled":
+        raise ProbeFailure("Object versioning is not enabled for the selected test bucket")
+
+    key = prefix + "/version-history"
+    before, after = secrets.token_bytes(56), secrets.token_bytes(56)
+    first = _put(client, bucket, key, before)
+    first_id = first.get("VersionId")
+    if not isinstance(first_id, str) or not first_id or first_id == "null":
+        raise ProbeFailure("First immutable object version ID is unavailable")
+
+    second = _put(client, bucket, key, after, exclusive=False)
+    second_id = second.get("VersionId")
+    if not isinstance(second_id, str) or second_id in ("", "null", first_id):
+        raise ProbeFailure("Overwrite did not produce a distinct durable version")
+
+    for version_id, expected in ((first_id, before), (second_id, after)):
+        try:
+            response = client.get_object(Bucket=bucket, Key=key, VersionId=version_id)
+            with response["Body"] as body:
+                actual = body.read()
+        except Exception as error:
+            raise ProbeFailure(f"Versioned GET failed: {type(error).__name__}") from None
+        if actual != expected:
+            raise ProbeFailure("Historical object version bytes changed")
+
+    etag = _head(client, bucket, key)
+    tombstone = client.delete_object(Bucket=bucket, Key=key, IfMatch=etag)
+    tombstone_id = tombstone.get("VersionId")
+    if (tombstone.get("DeleteMarker") is not True or
+            not isinstance(tombstone_id, str) or
+            tombstone_id in ("", "null", first_id, second_id)):
+        raise ProbeFailure("Conditional DELETE did not return a distinct delete marker")
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+    except Exception as error:
+        if status_of(error) != 404:
+            raise ProbeFailure("Deleted key HEAD did not report absence") from None
+    else:
+        raise ProbeFailure("Delete marker did not hide the latest object")
+
+    history = client.list_object_versions(Bucket=bucket, Prefix=key, MaxKeys=1000)
+    if history.get("IsTruncated"):
+        raise ProbeFailure("Version history listing is truncated")
+    versions = {(item.get("Key"), item.get("VersionId"))
+                for item in history.get("Versions", ())}
+    markers = {(item.get("Key"), item.get("VersionId"))
+               for item in history.get("DeleteMarkers", ())}
+    if ((key, first_id) not in versions or
+            (key, second_id) not in versions or
+            (key, tombstone_id) not in markers):
+        raise ProbeFailure("Object version listing lost a generation or delete marker")
+
+    # Retrieval must remain possible AFTER the delete marker, too.
+    for version_id, expected in ((first_id, before), (second_id, after)):
+        response = client.get_object(Bucket=bucket, Key=key, VersionId=version_id)
+        with response["Body"] as body:
+            if body.read() != expected:
+                raise ProbeFailure("Versioned bytes lost after delete marker")
+
+    return {
+        "versioning_and_history": "pass",
+        "durable_original_and_replacement": "pass",
+        "conditional_delete_marker": "pass",
+        "left_version_generations": 2,
+        "left_delete_markers": 1,
+        "retention_lifecycle_object_lock": "not-tested",
+        "full_m1_4_provider_certified": False,
+    }
+
+
 def check_endpoint(endpoint):
     if endpoint is None or endpoint == "":
         return None  # boto3 standard AWS endpoints
@@ -176,6 +261,8 @@ def main():
     parser.add_argument("--region", default=os.getenv("PACKORY_S3_REGION", "us-east-1"))
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--verify-version-history", action="store_true",
+                        help="Exercise historical object versions and delete markers on the disposable bucket")
     parser.add_argument("--disposable-test-bucket", action="store_true",
                         help="I verified the bucket is a dedicated disposable test bucket")
     args = parser.parse_args()
@@ -193,6 +280,8 @@ def main():
     client = boto3.client("s3", region_name=args.region, endpoint_url=endpoint)
     unique_prefix = PROBE_ROOT + secrets.token_hex(16)
     report = run_probe(client, args.bucket, unique_prefix, args.concurrency)
+    if args.verify_version_history:
+        report["history"] = run_versioning_probe(client, args.bucket, unique_prefix)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
