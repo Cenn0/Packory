@@ -7,31 +7,39 @@ public static class SkillEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/skills", (IPackageDatabase db, Settings settings, HttpContext ctx) =>
-            Access.Require(ctx, settings) is { } denied ? denied : Results.Json(new { items = db.Skills() }));
+        app.MapGet("/api/skills", (IPackageDatabase db, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
+            Access.Require(ctx, settings) is { } denied ? denied :
+            Results.Json(new { items = db.Skills().Where(x => !settings.SkillSecurityEnforced ||
+                security.IsApproved(x.Name, x.Version)).ToList() }));
 
-        app.MapGet("/api/skills/{name}/{version}", (string name, string version, IPackageDatabase db, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}", (string name, string version, IPackageDatabase db, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
+            if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
+            ctx.Response.Headers.CacheControl = "no-store";
             var skill = db.Skills(name).FirstOrDefault(x => x.Version == version);
             return skill is null ? Results.NotFound() : Results.Json(skill);
         });
 
-        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, IPackageDatabase db, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/download", (string name, string version, IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
+            if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
+            ctx.Response.Headers.CacheControl = "no-store";
             var file = blobs.Existing(SkillKey(name, version));
             return file is null ? Results.NotFound() : Results.File(file, "application/zip", fileDownloadName: name + "-" + version + ".zip");
         });
 
-        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, IPackageDatabase db, BlobStore blobs, Settings settings, HttpContext ctx) =>
+        app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings) is { } denied) return denied;
             if (!Names.Skill(name) || !Names.Version(version)) return Results.BadRequest();
+            if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
+            ctx.Response.Headers.CacheControl = "no-store";
             var path = blobs.Existing(SkillKey(name, version));
             if (path is null) return Results.NotFound();
             using var archive = ZipFile.OpenRead(path);
@@ -40,7 +48,8 @@ public static class SkillEndpoints
             return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
         });
 
-        app.MapPost("/api/skills", async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
+        app.MapPost("/api/skills", async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks,
+            SkillSecurityStore security, HttpContext ctx) =>
         {
             if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart form-data" });
@@ -57,8 +66,28 @@ public static class SkillEndpoints
             if (Access.RequireNamespace(ctx, settings, "skill", manifest.Name) is { } forbidden) return forbidden;
             var key = SkillKey(manifest.Name, version);
             using var gate = await locks.AcquireAsync("skill", manifest.Name, version, ctx.RequestAborted);
-            if (db.Skills(manifest.Name).Any(x => x.Version == version) || blobs.Existing(key) is not null)
+            if (db.Skills(manifest.Name).Any(x => x.Version == version) ||
+                security.Get(manifest.Name, version) is not null || blobs.Existing(key) is not null)
                 return Results.Conflict(new { error = "Skill version already exists" });
+
+            if (settings.SkillSecurityEnforced)
+            {
+                var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+                var stagingKey = $"skill-staging/{digest}.zip";
+                var staged = blobs.Existing(stagingKey);
+                if (staged is not null &&
+                    SkillScanCoordinator.HashFile(staged) != digest)
+                    return Results.StatusCode(503);
+                if (staged is null && !await blobs.PutAsync(stagingKey, new MemoryStream(bytes, false),
+                    settings.MaxArtifactBytes, ctx.RequestAborted))
+                    return Results.Conflict();
+                if (!security.TryStage(manifest.Name, version, manifest.Description, digest, stagingKey))
+                    return Results.Conflict();
+                ctx.Response.Headers.CacheControl = "no-store";
+                return Results.Json(new { name = manifest.Name, version,
+                    sha256 = digest, status = "QUEUED", approvalRequired = true },
+                    statusCode: StatusCodes.Status202Accepted);
+            }
             db.BeginPublication(key, "skill", manifest.Name, version);
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), settings.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.Conflict();
