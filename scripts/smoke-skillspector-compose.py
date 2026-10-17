@@ -18,14 +18,14 @@ NAME = "compose-e2e-skill"
 VERSION = "1.0.0"
 
 
-def http(method, path, data=None, mime=None, *, mcp=False):
+def http(method, path, data=None, mime=None, *, mcp_method=None):
     headers = {"Authorization": "Bearer " + os.environ["PACKORY_ADMIN_TOKEN"]}
     if mime:
         headers["Content-Type"] = mime
-    if mcp:
+    if mcp_method:
         headers.update({
             "Mcp-Protocol-Version": "2026-07-28",
-            "Mcp-Method": "skills/list",
+            "Mcp-Method": mcp_method,
             "Accept": "application/json, text/event-stream",
         })
     request = urllib.request.Request(BASE + path, method=method, data=data, headers=headers)
@@ -100,6 +100,23 @@ def decision(action, digest, reason):
                 data, "application/json")
 
 
+def jsonrpc_payload(response):
+    """The Streamable HTTP transport can return JSON or an SSE event stream."""
+    text = response.decode("utf-8")
+    if text.lstrip().startswith("{"):
+        return json.loads(text)
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        payload = json.loads(data)
+        if isinstance(payload, dict) and payload.get("id") in (3, 4):
+            return payload
+    raise ValueError("MCP returned no JSON-RPC response event")
+
+
 def check_mcp():
     request = {
         "jsonrpc": "2.0", "id": 3, "method": "skills/list",
@@ -109,15 +126,40 @@ def check_mcp():
             "io.modelcontextprotocol/clientCapabilities": {},
         }},
     }
-    code, response = http("POST", "/mcp", json.dumps(request).encode(), "application/json", mcp=True)
+    code, response = http("POST", "/mcp", json.dumps(request).encode(), "application/json", mcp_method="skills/list")
     require(code == 200, "MCP skills/list failed")
-    payload = json.loads(response)
+    payload = jsonrpc_payload(response)
     skills = payload.get("result", {}).get("skills", [])
     entry = next((x for x in skills if x.get("frontmatter", {}).get("name") == NAME), None)
     require(entry is not None, "Approved Skill missing from MCP discovery")
     manifest = next((x for x in entry["resources"] if x["uri"] == entry["uri"]), None)
     require(manifest is not None and manifest["digest"].startswith("sha256:"),
             "Skill manifest missing SHA-256")
+
+    read_request = {
+        "jsonrpc": "2.0", "id": 4, "method": "resources/read",
+        "params": {
+            "uri": entry["uri"],
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name": "SyntheticCheck", "version": "1.0"},
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    code, result_bytes = http(
+        "POST", "/mcp", json.dumps(read_request).encode(),
+        "application/json", mcp_method="resources/read"
+    )
+    require(code == 200, "MCP resources/read did not return HTTP 200")
+    result = jsonrpc_payload(result_bytes)
+    contents = result.get("result", {}).get("contents", [])
+    item = next((x for x in contents if x.get("uri") == entry["uri"]), None)
+    require(item is not None and isinstance(item.get("text"), str),
+            "MCP manifest resource could not be read as text")
+    read_digest = "sha256:" + hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
+    require(read_digest == manifest["digest"],
+            "MCP resources/read bytes do not match Skill manifest digest")
 
 
 def main():
