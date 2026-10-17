@@ -2,6 +2,25 @@
 
 This probe checks **only** conditional immutable PUT, concurrent create-if-absent, and ETag-conditional DELETE with the current S3 API client. It is **not full provider certification**. Testing with Moto proves the test harness, not provider semantics.
 
+## Optional version-history probe
+
+For a dedicated **versioned, disposable** test bucket, add
+`--verify-version-history`. The probe uses its own randomly named object
+to write two distinct versions, verifies both historical bodies by VersionId,
+performs an ETag-conditional DELETE of the latest revision, checks that the
+delete marker hides the live object, lists the two retained generations and
+the marker, and reads both generations again after deletion. It requires
+bucket versioning status `Enabled`; suspended/disabled versioning fails
+closed. All versions and the marker are left for the operator's review.
+The report contains `history.versioning_and_history: pass` only if these
+checks succeed.
+
+**This still does not test** legal/object-lock retention, lifecycle rules,
+delete-marker expiry, quarantine protections, inaccessible versions after
+a lifecycle transition, multipart upload, network partitions, application
+restore, provider SLA or measured RPO/RTO. Never treat it as full M1.4
+or M1.2 acceptance.
+
 ## Safe invocation
 
 Use a dedicated disposable test bucket with **versioning enabled**, a separate IAM role, TLS and a retention configuration that permits the expected temporary test objects. The probe creates objects only under a unique randomly generated `packory-provider-conformance/<id>/` prefix. It conditionally deletes exactly **one** object it owns, and intentionally leaves two immutable evidence objects for an operator to inspect and clean up under the approved policy. Never run with a production Packory bucket.
@@ -14,7 +33,7 @@ export PACKORY_S3_BUCKET='disposable-test-bucket'
 export PACKORY_S3_REGION='eu-central-1'
 # Optionally set PACKORY_S3_ENDPOINT for a third-party HTTPS S3 implementation.
 # Use the standard AWS workload credentials chain; never paste secrets into flags.
-python3 scripts/s3_provider_probe.py --disposable-test-bucket --report provider-report.json
+python3 scripts/s3_provider_probe.py --disposable-test-bucket --verify-version-history --report provider-report.json
 ```
 
 **Keep `provider-report.json` outside the public repository** until reviewed/sanitized: even non-secret bucket key prefixes may disclose deployment configuration. The script itself does not print credentials or service URL.

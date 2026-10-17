@@ -72,6 +72,79 @@ class BrokenDelete(FakeS3):
             self.objects.pop(Key, None)
 
 
+
+class FakeVersionedS3(FakeS3):
+    def __init__(self):
+        super().__init__()
+        self.history = {}
+        self.sequence = 0
+
+    def put_object(self, Bucket, Key, Body, IfNoneMatch=None, **kwargs):
+        with self.lock:
+            if IfNoneMatch == "*" and Key in self.objects:
+                raise S3Error(412)
+            if hasattr(Body, "read"):
+                Body = Body.read()
+            data = bytes(Body)
+            self.sequence += 1
+            version = f"revision-{self.sequence}"
+            self.objects[Key] = data
+            self.history.setdefault(Key, []).append((version, data, False))
+            return {"VersionId": version}
+
+    def get_object(self, Bucket, Key, VersionId=None):
+        with self.lock:
+            if VersionId is None:
+                if Key not in self.objects:
+                    raise S3Error(404)
+                return {"Body": DummyBody(self.objects[Key])}
+            for identifier, content, marker in self.history.get(Key, ()):
+                if identifier == VersionId and not marker:
+                    return {"Body": DummyBody(content)}
+            raise S3Error(404)
+
+    def delete_object(self, Bucket, Key, IfMatch):
+        with self.lock:
+            if Key not in self.objects:
+                raise S3Error(404)
+            if probe.sha(self.objects[Key]) != IfMatch:
+                raise S3Error(412)
+            del self.objects[Key]
+            self.sequence += 1
+            version = f"revision-{self.sequence}"
+            self.history[Key].append((version, None, True))
+            return {"DeleteMarker": True, "VersionId": version}
+
+    def list_object_versions(self, Bucket, Prefix, MaxKeys):
+        versions, markers = [], []
+        with self.lock:
+            for key, history in self.history.items():
+                if not key.startswith(Prefix):
+                    continue
+                for version, _, marker in history:
+                    entry = {"Key": key, "VersionId": version}
+                    (markers if marker else versions).append(entry)
+        return {"Versions": versions, "DeleteMarkers": markers,
+                "IsTruncated": False}
+
+
+class BrokenHistory(FakeVersionedS3):
+    def get_object(self, Bucket, Key, VersionId=None):
+        # Regression: provider ignored the requested version and read latest.
+        return super().get_object(Bucket, Key, VersionId=None)
+
+
+class DisabledVersioning(FakeVersionedS3):
+    def get_bucket_versioning(self, **kwargs):
+        return {"Status": "Suspended"}
+
+
+class BrokenDeleteMarker(FakeVersionedS3):
+    def delete_object(self, Bucket, Key, IfMatch):
+        super().delete_object(Bucket, Key, IfMatch)
+        return {"DeleteMarker": False}
+
+
 class ProviderProbeTests(unittest.TestCase):
     def test_all_conditional_scenarios(self):
         result = probe.run_probe(FakeS3(), "test-only", probe.PROBE_ROOT + "unit", 8)
@@ -87,6 +160,34 @@ class ProviderProbeTests(unittest.TestCase):
     def test_provider_ignoring_delete_etag_fails_closed(self):
         with self.assertRaises(probe.ProbeFailure):
             probe.run_probe(BrokenDelete(), "test-only", probe.PROBE_ROOT + "unit")
+
+    def test_versioned_generations_remain_accessible_across_delete_marker(self):
+        result = probe.run_versioning_probe(
+            FakeVersionedS3(), "disposable", probe.PROBE_ROOT + "unit")
+        self.assertEqual("pass", result["versioning_and_history"])
+        self.assertEqual(2, result["left_version_generations"])
+        self.assertEqual(1, result["left_delete_markers"])
+        self.assertFalse(result["full_m1_4_provider_certified"])
+
+    def test_versioning_suspended_fails_closed(self):
+        with self.assertRaises(probe.ProbeFailure):
+            probe.run_versioning_probe(
+                DisabledVersioning(), "disposable", probe.PROBE_ROOT + "unit")
+
+    def test_ignored_historical_version_fails_closed(self):
+        with self.assertRaises(probe.ProbeFailure):
+            probe.run_versioning_probe(
+                BrokenHistory(), "disposable", probe.PROBE_ROOT + "unit")
+
+    def test_delete_without_tombstone_fails_closed(self):
+        with self.assertRaises(probe.ProbeFailure):
+            probe.run_versioning_probe(
+                BrokenDeleteMarker(), "disposable", probe.PROBE_ROOT + "unit")
+
+    def test_versioning_namespace_guardrails(self):
+        for prefix in ("../bad", probe.PROBE_ROOT, ""):
+            with self.assertRaises(ValueError):
+                probe.run_versioning_probe(FakeVersionedS3(), "disposable", prefix)
 
     def test_guardrails(self):
         with self.assertRaises(ValueError):
