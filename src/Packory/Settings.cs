@@ -77,13 +77,13 @@ public sealed class Settings
         if (BlobProvider == "s3")
         {
             if (string.IsNullOrWhiteSpace(S3Bucket) || S3Bucket.Length is < 3 or > 63 ||
-                !Regex.IsMatch(S3Bucket, "^[a-z0-9][a-z0-9.-]*[a-z0-9]$", RegexOptions.CultureInvariant) ||
+                !Regex.IsMatch(S3Bucket, "\\A[a-z0-9][a-z0-9.-]*[a-z0-9]\\z", RegexOptions.CultureInvariant) ||
                 S3Bucket.Contains("..", StringComparison.Ordinal))
                 throw new InvalidOperationException("S3 requires a valid bucket name.");
             if (string.IsNullOrWhiteSpace(S3Region) || S3Region.Length > 64 ||
-                !Regex.IsMatch(S3Region, "^[a-z0-9-]+$", RegexOptions.CultureInvariant) ||
-                S3KeyPrefix.Length is < 1 or > 100 ||
-                !Regex.IsMatch(S3KeyPrefix, "^[a-z0-9][a-z0-9/_-]*$", RegexOptions.CultureInvariant) ||
+                !Regex.IsMatch(S3Region, "\\A[a-z0-9-]+\\z", RegexOptions.CultureInvariant) ||
+                string.IsNullOrEmpty(S3KeyPrefix) || S3KeyPrefix.Length > 100 ||
+                !Regex.IsMatch(S3KeyPrefix, "\\A[a-z0-9][a-z0-9/_-]*\\z", RegexOptions.CultureInvariant) ||
                 S3KeyPrefix.Split('/').Any(x => x.Length == 0))
                 throw new InvalidOperationException("S3 region or key prefix is invalid.");
             if (string.IsNullOrWhiteSpace(S3AccessKey) != string.IsNullOrWhiteSpace(S3SecretKey))
@@ -174,19 +174,21 @@ public sealed class Settings
 
 public static partial class Names
 {
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$", RegexOptions.CultureInvariant)]
+    // Full-string anchors reject the final newline accepted by the dollar anchor.
+    // Never trim invalid identifiers: doing so aliases different native requests.
+    [GeneratedRegex("\\A[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex NugetRegex();
-    [GeneratedRegex("^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\A[0-9A-Za-z][0-9A-Za-z.+-]{0,127}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex VersionRegex();
-    [GeneratedRegex("^(?:@[a-z0-9][a-z0-9._-]{0,100}/)?[a-z0-9][a-z0-9._-]{0,100}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\A(?:@[a-z0-9][a-z0-9._-]{0,100}/)?[a-z0-9][a-z0-9._-]{0,100}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex NpmRegex();
-    [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\A[a-z0-9]+(?:-[a-z0-9]+)*\\z", RegexOptions.CultureInvariant)]
     private static partial Regex SkillRegex();
 
-    public static bool Nuget(string id) => NugetRegex().IsMatch(id);
-    public static bool Version(string version) => VersionRegex().IsMatch(version);
-    public static bool Npm(string name) => NpmRegex().IsMatch(name) && name.Length <= 214;
-    public static bool Skill(string name) => name.Length <= 64 && SkillRegex().IsMatch(name);
+    public static bool Nuget(string? id) => id is not null && NugetRegex().IsMatch(id);
+    public static bool Version(string? version) => version is not null && VersionRegex().IsMatch(version);
+    public static bool Npm(string? name) => name is not null && name.Length <= 214 && NpmRegex().IsMatch(name);
+    public static bool Skill(string? name) => name is not null && name.Length <= 64 && SkillRegex().IsMatch(name);
     public static string EscapedNpm(string name) => Uri.EscapeDataString(name);
     public static string HashName(string name) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(name)));
 }
