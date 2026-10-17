@@ -118,6 +118,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             """);
         cmd.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
+        SchemaVersionGuard.Upgrade(db);
     }
 
     public void UpsertPackage(string kind, string name, string version, string description, string origin)
@@ -159,6 +160,38 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         var versions = new List<string>();
         while (reader.Read()) versions.Add(reader.GetString(0));
         return versions;
+    }
+
+    public IReadOnlyList<FeedDefinition> Feeds(string? after, int limit)
+    {
+        using var db = Open();
+        var sql = """
+            SELECT id,kind,mode,visibility,display_name,enabled,created_at,updated_at
+            FROM feeds WHERE (@after IS NULL OR id > @after)
+            ORDER BY id LIMIT @limit
+            """;
+        using var cmd = Command(db, sql, null, ("after", (object?)after ?? DBNull.Value),
+            ("limit", Math.Clamp(limit, 1, 101)));
+        var feeds = new List<FeedDefinition>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            feeds.Add(new FeedDefinition(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                reader.GetInt32(5) == 1, reader.GetString(6), reader.GetString(7)));
+        return feeds;
+    }
+
+    public FeedDefinition? Feed(string id)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT id,kind,mode,visibility,display_name,enabled,created_at,updated_at
+            FROM feeds WHERE id=@id
+            """, null, ("id", id));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new FeedDefinition(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetString(4),
+            reader.GetInt32(5) == 1, reader.GetString(6), reader.GetString(7)) : null;
     }
 
     public IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit)

@@ -95,6 +95,45 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task FeedMetadataIsAdminOnlyPaginatedAndExplicitlyNotIsolated()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string url = "/api/v1/admin/feeds";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(url)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, url, token: ReadToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, url, token: WriteToken))).StatusCode);
+        using var first = await client.SendAsync(WithToken(HttpMethod.Get, url + "?limit=2"));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal("no-store", first.Headers.CacheControl?.ToString());
+        using var json = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        Assert.Equal("v1", json.RootElement.GetProperty("apiVersion").GetString());
+        Assert.False(json.RootElement.GetProperty("isolationSupported").GetBoolean());
+        var entries = json.RootElement.GetProperty("items");
+        Assert.Equal(2, entries.GetArrayLength());
+        var cursor = json.RootElement.GetProperty("nextCursor").GetString();
+        Assert.False(string.IsNullOrEmpty(cursor));
+        var firstId = entries[0].GetProperty("id").GetString()!;
+        Assert.Equal("legacy", entries[0].GetProperty("mode").GetString());
+        using var details = await client.SendAsync(WithToken(HttpMethod.Get, url + "/" + firstId));
+        Assert.Equal(HttpStatusCode.OK, details.StatusCode);
+        using var next = await client.SendAsync(WithToken(HttpMethod.Get,
+            url + "?limit=2&after=" + cursor));
+        using var nextDoc = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        Assert.Equal(2, nextDoc.RootElement.GetProperty("items").GetArrayLength());
+        Assert.NotEqual(firstId,
+            nextDoc.RootElement.GetProperty("items")[0].GetProperty("id").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Get, url + "?after=%2E%2E"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Get, url + "?limit=101"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get, url + "/unknown-feed"))).StatusCode);
+    }
+
+    [Fact]
     public async Task Authentication_AppliesToReadsAndWrites()
     {
         using var host = new Host();

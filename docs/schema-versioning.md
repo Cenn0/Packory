@@ -1,7 +1,11 @@
-# Database schema versioning — V3 baseline
+# Database schema versioning — V3 feed metadata baseline
 
-Packory now stamps SQLite and PostgreSQL metadata with a singleton `packory_schema_version` row at **version 1**. It marks the historical pre-feed schema. Older installations without a marker receive the marker during ordinary idempotent initialization; hosted data is preserved. Unknown/newer versions are rejected **before** existing schema initialization.
+Packory uses a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. **Version 1** is the historical global registry. **Version 2** adds feed inventory tables, all inside a transactional, forward-only upgrade: `feeds`, `feed_namespaces`, `feed_policies`, `feed_upstreams`. All existing artifact/package tables and physical blob keys are unchanged.
 
-This is a safety foundation, **not** a schema migration framework, not an online PostgreSQL/S3 migration, and not a reversible downgrade. No automatic version-2 feed migration or old-key cleanup is available.
+On upgrade from v1 or an unmarked historical installation, six deterministic `default-*` feeds are seeded (`nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`) with `mode=legacy` and `visibility=runtime`. **These are administrative descriptors only.** The native routes, client permissions, upstream selection, package storage and collision behavior are still global; **none of these feeds yet isolate artifacts**. A `mode=legacy` feed does not claim support for independent hosted/proxy routing.
 
-Before any future version bump, require versioned SQLite/PostgreSQL upgrade scripts, rollback decision, metadata and object-store backup, interrupted-upgrade tests, native-client compatibility and an isolated real-provider restore rehearsal. Do not reinterpret the marker as evidence for MS0.4, MS1.5 or MS2 completion. See [Roadmap V3](roadmap.md) and [release gates](release-gates.md).
+Migrations reject unknown future versions before initialization and atomically stamp v2 after creating tables and defaults. A failed transaction leaves the previous version for explicit diagnosis and retry. Downgrading to an earlier Packory executable is **not supported**: old binaries reject future schemas. The rollback path is a verified **offline restoration of the pre-upgrade database and blob snapshot**, not an automatic DOWN script.
+
+Security: the read-only `GET /api/v1/admin/feeds` and `GET /api/v1/admin/feeds/{id}` inventory require full admin authorization, even if anonymous registry reads are enabled. Cursor pagination is bounded and inputs validated. Feed mutation, namespace enforcement, provisioning, per-feed quota/audit and multiple namesake packages are *not* implemented by this PR.
+
+This is an increment toward MS0.4 / M2.1 and M2.6, **not** completion of MS2 or a supported production migration. Full rollback and PostgreSQL/S3 real-provider restore drills must precede upgrades of production data. See [release gates](release-gates.md) and [roadmap](roadmap.md).
