@@ -97,6 +97,51 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(mod.SnapshotError):
                 mod.verify(root)
 
+    def test_metadata_fingerprints_catch_same_count_value_corruption(self):
+        class Rows:
+            def __init__(self, data):
+                self.data = data
+
+            def execute(self, sql):
+                self.last_sql = sql
+                return [(text,) for text in sorted(self.data)]
+
+        data = Rows(['{"id":1,"name":"alpha"}', '{"id":2,"name":"beta"}'])
+        original = mod.metadata_fingerprints(data, ("packages",))
+        self.assertEqual(2, original["packages"]["count"])
+        self.assertEqual(64, len(original["packages"]["sha256"]))
+        self.assertIn('COLLATE "C"', data.last_sql)
+        data.data = ['{"id":1,"name":"alpha"}', '{"id":2,"name":"changed"}']
+        changed = mod.metadata_fingerprints(data, ("packages",))
+        self.assertEqual(original["packages"]["count"], changed["packages"]["count"])
+        self.assertNotEqual(original["packages"]["sha256"], changed["packages"]["sha256"])
+
+    def test_version_two_snapshot_must_include_feed_metadata_fingerprints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "metadata.dump").write_bytes(b"synthetic")
+            fingerprints = {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                            for name in mod.CORE_TABLES}
+            fingerprints.update({name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                                 for name in ("packory_schema_version", *mod.FEED_TABLES)})
+            manifest = {
+                "schema": 2, "profile": "postgresql-s3-offline",
+                "source": {"bucket": "test-bucket", "prefix": "test/", "database": "source"},
+                "postgres": {"path": "metadata.dump", "size": 9,
+                             "sha256": hashlib.sha256(b"synthetic").hexdigest(),
+                             "table_counts": {name: 0 for name in fingerprints},
+                             "table_fingerprints": fingerprints,
+                             "database_schema_version": 2},
+                "objects": [], "delete_markers": []
+            }
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            self.assertEqual(2, mod.verify(root)["schema"])
+            del fingerprints["feeds"]
+            manifest["postgres"]["table_counts"].pop("feeds")
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify(root)
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")

@@ -21,11 +21,13 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 
-SCHEMA = 1
+SCHEMA = 2
 LOCK = 0x5041434B4F525931  # PostgresSingleWriterLease.LockId
-TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_files",
-          "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers",
-          "publication_intents", "recovery_quarantines", "audit_events", "managed_tokens")
+CORE_TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_files",
+               "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers",
+               "publication_intents", "recovery_quarantines", "audit_events", "managed_tokens")
+FEED_TABLES = ("feeds", "feed_namespaces", "feed_policies", "feed_upstreams")
+ALLOWED_TABLES = frozenset((*CORE_TABLES, "packory_schema_version", *FEED_TABLES))
 SHA = re.compile(r"^[0-9a-f]{64}$")
 PAYLOAD = re.compile(r"^objects/[0-9a-f]{64}\.bin$")
 
@@ -80,12 +82,53 @@ def postgres():
     return con
 
 
+def metadata_tables(connection):
+    """Select all authoritative tables for the on-disk Packory schema version.
+
+    V1 and older unmarked databases can be backed up before upgrading. A V2
+    database MUST include feed and policy tables; missing tables fail closed.
+    """
+    marker = connection.execute(
+        "SELECT to_regclass('packory_schema_version')").fetchone()[0]
+    if marker is None:
+        return CORE_TABLES
+    row = connection.execute(
+        "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
+    if not row or row[0] not in (1, 2):
+        raise SnapshotError("Unknown Packory database schema version")
+    return (CORE_TABLES + ("packory_schema_version",) +
+            (FEED_TABLES if row[0] == 2 else ()))
+
+
 def counts(connection):
-    result = {}
-    for name in TABLES:
-        # Fixed identifiers, not user input. A missing table is a hard error.
-        result[name] = connection.execute("SELECT COUNT(*) FROM " + name).fetchone()[0]
-    return result
+    return {name: connection.execute(
+        "SELECT COUNT(*) FROM " + name).fetchone()[0]
+        for name in metadata_tables(connection)}
+
+
+def metadata_fingerprints(connection, table_names=None):
+    """Hash every canonical row in a deterministic, collated order.
+
+    Comparing SHA-256 per table detects changed data with unchanged row counts.
+    No original row values or identities are persisted in public evidence.
+    PostgreSQL source and destination must have compatible JSON rendering.
+    """
+    tables = metadata_tables(connection) if table_names is None else tuple(table_names)
+    if not tables or len(set(tables)) != len(tables) or not set(tables) <= ALLOWED_TABLES:
+        raise SnapshotError("Unexpected metadata table in fingerprint request")
+    fingerprints = {}
+    for name in tables:
+        digest = hashlib.sha256()
+        count = 0
+        # Name is from a hardcoded allowlist; no untrusted identifier interpolation.
+        sql = 'SELECT row_to_json(r)::text COLLATE "C" FROM ' + name + ' AS r ORDER BY 1'
+        for row in connection.execute(sql):
+            payload = row[0].encode("utf-8")
+            digest.update(len(payload).to_bytes(8, "big"))
+            digest.update(payload)
+            count += 1
+        fingerprints[name] = {"count": count, "sha256": digest.hexdigest()}
+    return fingerprints
 
 
 def pg_command(operation, filename):
@@ -177,11 +220,31 @@ def safe_files(folder):
 def verify(folder):
     try:
         manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-        if manifest.get("schema") != SCHEMA or manifest.get("profile") != "postgresql-s3-offline":
+        if manifest.get("schema") not in (1, SCHEMA) or manifest.get("profile") != "postgresql-s3-offline":
             raise SnapshotError("Unknown snapshot format")
         pg = manifest["postgres"]
         if pg["path"] != "metadata.dump" or not SHA.fullmatch(pg["sha256"]):
             raise SnapshotError("Invalid PostgreSQL manifest")
+        if manifest["schema"] == SCHEMA:
+            fingerprints = pg["table_fingerprints"]
+            table_counts = pg["table_counts"]
+            db_version = pg["database_schema_version"]
+            required = set(CORE_TABLES)
+            if db_version in (1, 2):
+                required.add("packory_schema_version")
+            if db_version == 2:
+                required.update(FEED_TABLES)
+            if (not isinstance(fingerprints, dict) or not isinstance(table_counts, dict) or
+                    type(db_version) is not int or db_version not in (0, 1, 2) or
+                    set(fingerprints) != required or
+                    set(fingerprints) != set(table_counts) or
+                    any(not isinstance(entry, dict) or not isinstance(entry.get("count"), int) or
+                        isinstance(entry["count"], bool) or entry["count"] < 0 or
+                        not isinstance(entry.get("sha256"), str) or
+                        not SHA.fullmatch(entry["sha256"]) or
+                        table_counts[name] != entry["count"]
+                        for name, entry in fingerprints.items())):
+                raise SnapshotError("Invalid or incomplete PostgreSQL row fingerprints")
         source = manifest["source"]
         prefix = source["prefix"]
         if (not isinstance(prefix, str) or not prefix.endswith("/") or
@@ -229,22 +292,26 @@ def backup(directory, s3, bucket, prefix, max_bytes):
     # Acquiring the Packory writer advisory lock prevents a cooperating writer
     # from starting throughout the snapshot. It does NOT fence uncooperative writes.
     with postgres() as pg:
-        initial = counts(pg)
+        tables = metadata_tables(pg)
+        initial = metadata_fingerprints(pg, tables)
         database = os.environ["PGDATABASE"]
         directory.parent.mkdir(parents=True, exist_ok=True)
         staged = Path(tempfile.mkdtemp(prefix=".packory-pgs3-", dir=directory.parent))
         try:
             pg_command("backup", staged / "metadata.dump")
             entries, markers, total = capture_object_versions(s3, bucket, prefix, staged, max_bytes)
-            final = counts(pg)
-            if final != initial:
+            final = metadata_fingerprints(pg, tables)
+            if final != initial or metadata_tables(pg) != tables:
                 raise SnapshotError("Metadata changed during supposedly offline snapshot")
             manifest = {
                 "schema": SCHEMA, "profile": "postgresql-s3-offline", "created_utc": now(),
                 "source": {"bucket": bucket, "prefix": prefix, "database": database},
                 "postgres": {"path": "metadata.dump", "size": (staged / "metadata.dump").stat().st_size,
                              "sha256": checksum(staged / "metadata.dump"),
-                             "table_counts": final},
+                             "table_counts": {name: value["count"] for name, value in final.items()},
+                             "table_fingerprints": final,
+                             "database_schema_version": (2 if "feeds" in tables else
+                                                         1 if "packory_schema_version" in tables else 0)},
                 "objects": entries, "delete_markers": markers,
                 "snapshot_bytes": total,
                 "historical_versions_retained_in_backup": True,
@@ -307,8 +374,13 @@ def restore(directory, s3, target_bucket):
                 raise SnapshotError("Restore PostgreSQL database must be empty")
         restored = restore_current_objects(s3, target_bucket, manifest, Path(directory))
         pg_command("restore", Path(directory) / "metadata.dump")
-        if counts(pg) != manifest["postgres"]["table_counts"]:
+        expected = manifest["postgres"]["table_counts"]
+        actual = counts(pg)
+        if {name: actual.get(name) for name in expected} != expected:
             raise SnapshotError("Restored PostgreSQL row counts disagree with snapshot")
+        if manifest["schema"] == SCHEMA:
+            if metadata_fingerprints(pg) != manifest["postgres"]["table_fingerprints"]:
+                raise SnapshotError("Restored PostgreSQL row values disagree with snapshot")
         return restored
 
 
@@ -346,7 +418,9 @@ def main():
             if not args.isolated_restore_confirmed or not args.target_bucket:
                 raise SnapshotError("Restore requires isolated-target confirmation and destination bucket")
             number = restore(args.snapshot, s3, args.target_bucket)
-            print(f"Isolated restore verified: {number} current S3 objects copied; database row counts checked.")
+            print(f"Isolated restore checked: {number} current S3 objects copied; database " +
+                  ("rows and SHA-256 fingerprints checked." if verify(args.snapshot)["schema"] == SCHEMA
+                   else "row counts only (legacy snapshot; NOT full metadata-integrity evidence)."))
         return 0
     except (SnapshotError, subprocess.SubprocessError, OSError) as error:
         # Avoid reflecting operator connection URLs, passwords or S3 key names.
