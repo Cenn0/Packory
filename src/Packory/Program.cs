@@ -118,11 +118,12 @@ builder.Services.AddSingleton<PublicationRecoveryService>();
 builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddSingleton<SkillSecurityStore>();
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
 if (settings.McpEnabled)
 {
-    builder.Services.AddMcpServer(options => PackoryMcp.Configure(options))
+    builder.Services.AddMcpServer()
         .WithHttpTransport(options =>
         {
             options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
