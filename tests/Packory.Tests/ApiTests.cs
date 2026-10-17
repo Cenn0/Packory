@@ -466,7 +466,7 @@ public sealed class ApiTests
         var tools = await mcp.ListToolsAsync(cancellationToken: timeout.Token);
         Assert.Contains(tools, tool => tool.Name == "search_artifacts");
         Assert.Contains(tools, tool => tool.Name == "list_approved_skills");
-        Assert.DoesNotContain(tools, tool => tool.Name.Contains("approve", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(tools, tool => tool.Name.StartsWith("approve_", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
