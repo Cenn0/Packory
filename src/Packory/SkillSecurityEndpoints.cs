@@ -32,7 +32,7 @@ public static class SkillSecurityEndpoints
             return Results.Ok(new
             {
                 skill = Summary(item),
-                report = item.ReportJson is null ? null : JsonSerializer.Deserialize<JsonElement>(item.ReportJson),
+                report = item.ReportJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(item.ReportJson),
                 history = security.History(name, version)
             });
         });
