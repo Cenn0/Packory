@@ -14,6 +14,7 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Production blockers and real-provider recovery | [Release gates](release-gates.md) |
 | Deployment, TLS, tokens and backups | [Operations](operations.md) |
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
+| Agent Skill scanning and Security UI implementation backlog | [Skill Security Roadmap (NVIDIA SkillSpector)](skill-security-roadmap.md) |
 | Cargo and PyPI specifics | [Cargo / PyPI](cargo-pypi.md) |
 | OCI capabilities | [OCI](oci.md) |
 | S3 single-writer recovery limitations | [S3](s3.md) |

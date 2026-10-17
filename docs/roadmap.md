@@ -111,6 +111,8 @@ Priority P0 = data-loss/security/release blocking; P1 = core platform; P2 = exte
 
 ### MS5 — AI distribution, Skills and MCP (P1/P2)
 
+The detailed, implementation-ready AI-agent backlog for NVIDIA SkillSpector scanning, quarantine, release gates and web UI is maintained in [Skill Security Roadmap](skill-security-roadmap.md). Its SS-001–SS-017 tasks refine M5.1/M5.6 and depend on the browser identity gates in M4.1/M4.2 for privileged UI actions.
+
 | ID | Work and acceptance | Evidence |
 | --- | --- | --- |
 | M5.1 | Agent Skill spec/archive validation, pinned Git origin, review/quarantine/approval and download profiles | Hostile ZIP, provenance, approval tests |
