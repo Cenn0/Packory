@@ -29,6 +29,14 @@
       <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
     </section>
     <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
+    <section class="panel scanner-panel" aria-labelledby="scanner-title">
+      <div class="section-head"><div><p class="eyebrow">SECURITY CENTER</p><h2 id="scanner-title">Agent Skill Security</h2><p class="muted">NVIDIA SkillSpector · Offline static analysis · Manual administrator approval</p></div><button id="security-refresh" type="button">Refresh scans</button></div>
+      <p id="security-status" role="status" aria-live="polite">Enter an administrator token above to review scans. Credentials stay in memory only.</p>
+      <div class="security-metrics" aria-label="Skill approval overview"><div><strong id="security-pending">—</strong><span>Queued</span></div><div><strong id="security-review">—</strong><span>Review</span></div><div><strong id="security-quarantine">—</strong><span>Quarantine</span></div><div><strong id="security-approved">—</strong><span>Approved</span></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Skill version</th><th>State</th><th>Risk / 100</th><th>Last updated</th><th>Review</th></tr></thead><tbody id="security-table"></tbody></table></div>
+      <div id="security-detail" class="security-detail" hidden aria-live="polite"></div>
+      <p class="muted">An approved scan is a policy decision, not a guarantee that a Skill is harmless. Scanner errors and incomplete results block publication. Privileged actions require an administrator credential.</p>
+    </section>
     <footer>Packory experimental · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · <a href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" rel="noopener noreferrer">Support matrix</a> · Apache-2.0</footer>
   </main>
 </body>
