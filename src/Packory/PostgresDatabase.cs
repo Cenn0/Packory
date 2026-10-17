@@ -226,6 +226,42 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             reader.GetInt32(5) == 1, reader.GetString(6), reader.GetString(7)) : null;
     }
 
+    public bool TryCreateDraftFeed(FeedDefinition feed, string actor)
+    {
+        if (feed.Enabled || feed.Visibility != "private" || feed.Mode is not ("hosted" or "proxy"))
+            throw new ArgumentException("Only disabled private draft feeds may be created.", nameof(feed));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var insert = Command(db, """
+            INSERT INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
+            VALUES(@id,@kind,@mode,'private',@name,0,@at,@at)
+            ON CONFLICT(id) DO NOTHING
+            """, tx, ("id", feed.Id), ("kind", feed.Kind), ("mode", feed.Mode),
+                ("name", feed.DisplayName), ("at", feed.CreatedAt));
+        if (insert.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, "feed-draft-create", "feed", feed.Id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public bool TryDeleteDraftFeed(string id, string actor)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var delete = Command(db, """
+            DELETE FROM feeds
+            WHERE id=@id AND mode IN ('hosted','proxy') AND enabled=0
+                AND visibility='private'
+                AND NOT EXISTS (SELECT 1 FROM feed_namespaces WHERE feed_id=@id)
+                AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=@id)
+                AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=@id)
+            """, tx, ("id", id));
+        if (delete.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, "feed-draft-delete", "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
     public IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit)
     {
         using var db = Open();
