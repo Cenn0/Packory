@@ -1,24 +1,20 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Packory;
 
-/// <summary>
-/// Hosted OCI Distribution endpoints. Implements bounded blob sessions, digest-verified
-/// immutable content, manifests, tags and OCI 1.1 referrers for one-node deployments.
-/// </summary>
+/// <summary>Bounded single-writer OCI Distribution adapter; see the tested support matrix.</summary>
 public static class OciEndpoints
 {
     private const string ManifestMedia = "application/vnd.oci.image.manifest.v1+json";
     private const string IndexMedia = "application/vnd.oci.image.index.v1+json";
     private static readonly Regex RepositoryRegex = new(
-        "^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$",
+        "\\A[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex DigestRegex = new("^sha256:[0-9a-f]{64}$",
+    private static readonly Regex DigestRegex = new("\\Asha256:[0-9a-f]{64}\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex TagRegex = new("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+    private static readonly Regex TagRegex = new("\\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly HashSet<string> AllowedMedia = new(StringComparer.Ordinal)
     {
@@ -39,11 +35,7 @@ public static class OciEndpoints
         app.MapGet("/v2/", (Settings cfg, HttpContext ctx) =>
         {
             ctx.Response.Headers["Docker-Distribution-API-Version"] = "registry/2.0";
-            // Docker learns its Basic challenge at /v2/. With anonymous reads,
-            // some clients otherwise do not retry credentials on a later write 401.
-            // This opt-in requires authenticated writers for the handshake.
-            if (cfg.OciAuthenticatedPing &&
-                Access.Require(ctx, cfg, write: true) is { } pingDenied)
+            if (cfg.OciAuthenticatedPing && Access.Require(ctx, cfg, write: true) is { } pingDenied)
             {
                 ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";
                 return pingDenied;
@@ -71,18 +63,15 @@ public static class OciEndpoints
             if (value.Length > 512 || value.Contains('\\') || value.Contains('%') ||
                 value.Split('/').Any(part => part is "." or ".."))
                 return Error(400, "NAME_INVALID", "Invalid OCI registry path");
-
-            // Apply namespace policy to all OCI mutation routes, including cross-repo mounts.
             if (write)
             {
                 var boundaries = new[] { "/blobs/uploads/", "/blobs/", "/manifests/", "/tags/list", "/referrers/" };
-                var cut = boundaries.Select(boundary => value.IndexOf(boundary, StringComparison.Ordinal)).Where(i => i > 0).DefaultIfEmpty(-1).Min();
+                var cut = boundaries.Select(boundary => value.IndexOf(boundary, StringComparison.Ordinal))
+                    .Where(i => i > 0).DefaultIfEmpty(-1).Min();
                 if (cut <= 0 || !ValidRepository(value[..cut]))
                     return Error(400, "NAME_INVALID", "Invalid OCI mutation repository");
-                if (Access.RequireNamespace(ctx, cfg, "oci", value[..cut]) is { } forbidden)
-                    return forbidden;
+                if (Access.RequireNamespace(ctx, cfg, "oci", value[..cut]) is { } forbidden) return forbidden;
             }
-
             var uploadsAt = value.IndexOf("/blobs/uploads/", StringComparison.Ordinal);
             if (uploadsAt > 0)
             {
@@ -102,6 +91,8 @@ public static class OciEndpoints
                 if (!db.OciHasBlob(repository, digest)) return Error(404, "BLOB_UNKNOWN", "Blob not found");
                 var path = blobs.Existing(BlobKey(digest));
                 if (path is null) return Error(404, "BLOB_UNKNOWN", "Blob unavailable");
+                if (!await DigestMatches(path, digest, ctx.RequestAborted))
+                    return Error(503, "DIGEST_INVALID", "Stored blob requires integrity recovery");
                 ctx.Response.Headers["Docker-Content-Digest"] = digest;
                 return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
             }
@@ -118,6 +109,9 @@ public static class OciEndpoints
                     if (manifest is null) return Error(404, "MANIFEST_UNKNOWN", "Manifest not found");
                     var path = blobs.Existing(ManifestKey(manifest.Digest));
                     if (path is null) return Error(404, "MANIFEST_UNKNOWN", "Manifest unavailable");
+                    if (new FileInfo(path).Length != manifest.Size ||
+                        !await DigestMatches(path, manifest.Digest, ctx.RequestAborted))
+                        return Error(503, "DIGEST_INVALID", "Stored manifest requires integrity recovery");
                     ctx.Response.Headers["Docker-Content-Digest"] = manifest.Digest;
                     return Results.File(path, manifest.MediaType, enableRangeProcessing: false);
                 }
@@ -131,7 +125,11 @@ public static class OciEndpoints
                 if (ctx.Request.Method != "GET") return Error(405, "UNSUPPORTED", "Method unsupported");
                 var tags = db.OciTags(repository);
                 var last = ctx.Request.Query["last"].ToString();
-                var n = int.TryParse(ctx.Request.Query["n"], out var count) ? Math.Clamp(count, 1, 1000) : 1000;
+                var n = 1000;
+                if (ctx.Request.Query.ContainsKey("n") &&
+                    (!int.TryParse(ctx.Request.Query["n"], out n) || n < 0))
+                    return Error(400, "UNSUPPORTED", "Invalid tag page size");
+                n = Math.Min(n, 1000);
                 var filtered = tags.Where(tag => string.CompareOrdinal(tag, last) > 0).ToArray();
                 var page = filtered.Take(n).ToArray();
                 if (filtered.Length > page.Length && page.Length != 0)
@@ -150,8 +148,13 @@ public static class OciEndpoints
                 if (!ValidRepository(repository) || !ValidDigest(digest))
                     return Error(400, "DIGEST_INVALID", "Invalid repository or digest");
                 if (ctx.Request.Method != "GET") return Error(405, "UNSUPPORTED", "Method unsupported");
-                var refs = db.OciReferrers(repository, digest);
-                ctx.Response.Headers["OCI-Filters-Applied"] = "artifactType";
+                IEnumerable<OciReferrerEntry> refs = db.OciReferrers(repository, digest);
+                if (ctx.Request.Query.ContainsKey("artifactType"))
+                {
+                    var filter = ctx.Request.Query["artifactType"].ToString();
+                    refs = refs.Where(entry => entry.ArtifactType == filter);
+                    ctx.Response.Headers["OCI-Filters-Applied"] = "artifactType";
+                }
                 return Results.Json(new
                 {
                     schemaVersion = 2,
@@ -173,56 +176,78 @@ public static class OciEndpoints
         var method = ctx.Request.Method;
         if (id.Length == 0 && method == "POST")
         {
+            var suppliedDigest = ctx.Request.Query["digest"].ToString();
+            if (ctx.Request.Query.ContainsKey("digest") && !ValidDigest(suppliedDigest))
+                return Error(400, "DIGEST_INVALID", "Invalid SHA256 digest");
             var mount = ctx.Request.Query["mount"].ToString();
             var from = ctx.Request.Query["from"].ToString();
             if (ValidDigest(mount) && ValidRepository(from) && db.OciHasBlob(from, mount) &&
-                blobs.Existing(BlobKey(mount)) is not null)
+                blobs.Existing(BlobKey(mount)) is { } mounted)
             {
+                if (!await DigestMatches(mounted, mount, ctx.RequestAborted))
+                    return Error(503, "DIGEST_INVALID", "Stored mount source requires integrity recovery");
                 db.OciAddBlob(repository, mount);
                 ctx.Response.Headers.Location = cfg.Base + "/v2/" + repository + "/blobs/" + mount;
                 ctx.Response.Headers["Docker-Content-Digest"] = mount;
                 return Results.StatusCode(201);
             }
-            var uuid = sessions.Begin(repository);
-            if (ValidDigest(ctx.Request.Query["digest"].ToString()))
+            string uuid;
+            try { uuid = sessions.Begin(repository); }
+            catch (OciUploadCapacityException)
+            {
+                ctx.Response.Headers.RetryAfter = "60";
+                return Error(429, "TOOMANYREQUESTS", "OCI upload session capacity reached");
+            }
+            if (ValidDigest(suppliedDigest))
             {
                 if (!sessions.TryGet(repository, uuid, out var started) || started is null)
                     return Error(500, "BLOB_UPLOAD_INVALID", "Upload initialization failed");
-                return await Complete(ctx, cfg, db, blobs, sessions, started, uuid, repository,
-                    ctx.Request.Query["digest"].ToString());
+                return await Complete(ctx, cfg, db, blobs, sessions, started, uuid, repository, suppliedDigest);
             }
             SetUploadHeaders(ctx, cfg, repository, uuid, 0);
             return Results.StatusCode(202);
         }
         if (!sessions.TryGet(repository, id, out var session) || session is null)
             return Error(404, "BLOB_UPLOAD_UNKNOWN", "Upload session not found");
-        if (method == "DELETE")
-        {
-            sessions.End(id);
-            return Results.StatusCode(204);
-        }
-        if (method == "GET")
-        {
-            SetUploadHeaders(ctx, cfg, repository, id, new FileInfo(session.Path).Length);
-            return Results.StatusCode(204);
-        }
-        if (method is not ("PATCH" or "PUT")) return Error(405, "UNSUPPORTED", "Method unsupported");
         if (method == "PUT")
         {
             var digest = ctx.Request.Query["digest"].ToString();
             if (!ValidDigest(digest)) return Error(400, "DIGEST_INVALID", "Missing SHA256 digest");
             return await Complete(ctx, cfg, db, blobs, sessions, session, id, repository, digest);
         }
+        if (method is not ("PATCH" or "GET" or "DELETE")) return Error(405, "UNSUPPORTED", "Method unsupported");
         await session.Gate.WaitAsync(ctx.RequestAborted);
         try
         {
-            var count = await Append(session, ctx.Request.Body, cfg.MaxArtifactBytes, ctx.RequestAborted);
-            sessions.Touch(session);
+            if (!sessions.IsCurrent(repository, id, session))
+                return Error(404, "BLOB_UPLOAD_UNKNOWN", "Upload session is no longer active");
+            if (method == "DELETE")
+            {
+                sessions.EndLocked(id, session);
+                return Results.StatusCode(204);
+            }
+            if (method == "GET")
+            {
+                SetUploadHeaders(ctx, cfg, repository, id, session.CommittedLength);
+                return Results.StatusCode(204);
+            }
+            var count = await Append(ctx, cfg, sessions, session);
             SetUploadHeaders(ctx, cfg, repository, id, count);
             return Results.StatusCode(202);
         }
+        catch (OciChunkRangeException)
+        {
+            SetUploadHeaders(ctx, cfg, repository, id, session.CommittedLength);
+            return Error(416, "BLOB_UPLOAD_INVALID", "Chunk range or length does not match committed upload offset");
+        }
         finally { session.Gate.Release(); }
     }
+
+    private static Task<long> Append(HttpContext ctx, Settings cfg, OciUploadStore sessions,
+        OciUploadStore.Ticket session) => OciChunkWriter.AppendAsync(sessions, session,
+        ctx.Request.Body, cfg.MaxArtifactBytes,
+        ctx.Request.Headers.ContainsKey("Content-Range") ? ctx.Request.Headers.ContentRange.ToString() : null,
+        ctx.Request.ContentLength, ctx.RequestAborted);
 
     private static async Task<IResult> Complete(HttpContext ctx, Settings cfg, IPackageDatabase db, BlobStore blobs,
         OciUploadStore sessions, OciUploadStore.Ticket session, string id, string repository, string digest)
@@ -230,44 +255,44 @@ public static class OciEndpoints
         await session.Gate.WaitAsync(ctx.RequestAborted);
         try
         {
-            await Append(session, ctx.Request.Body, cfg.MaxArtifactBytes, ctx.RequestAborted);
-            await using var source = File.OpenRead(session.Path);
-            var actual = "sha256:" + Convert.ToHexStringLower(await SHA256.HashDataAsync(source, ctx.RequestAborted));
-            if (actual != digest) return Error(400, "DIGEST_INVALID", "SHA256 does not match");
-            source.Position = 0;
+            if (!sessions.IsCurrent(repository, id, session))
+                return Error(404, "BLOB_UPLOAD_UNKNOWN", "Upload session is no longer active");
+            await Append(ctx, cfg, sessions, session);
             var key = BlobKey(digest);
-            db.BeginPublication(key, "oci-blob", repository, digest);
-            if (!await blobs.PutAsync(key, source, cfg.MaxArtifactBytes, ctx.RequestAborted))
+            // Close the source before deleting staging files (also required on Windows).
+            await using (var source = File.OpenRead(session.Path))
             {
-                var existing = blobs.Existing(key);
-                if (existing is null) return Error(500, "BLOB_UPLOAD_INVALID", "Blob publication failed");
-                await using var file = File.OpenRead(existing);
-                var existingHash = "sha256:" +
-                    Convert.ToHexStringLower(await SHA256.HashDataAsync(file, ctx.RequestAborted));
-                if (existingHash != digest) return Error(500, "DIGEST_INVALID", "Existing CAS blob corrupted");
+                var actual = "sha256:" + Convert.ToHexStringLower(await SHA256.HashDataAsync(source, ctx.RequestAborted));
+                if (actual != digest) return Error(400, "DIGEST_INVALID", "SHA256 does not match");
+                source.Position = 0;
+                db.BeginPublication(key, "oci-blob", repository, digest);
+                if (!await blobs.PutAsync(key, source, cfg.MaxArtifactBytes, ctx.RequestAborted))
+                {
+                    var existing = blobs.Existing(key);
+                    if (existing is null) return Error(500, "BLOB_UPLOAD_INVALID", "Blob publication failed");
+                    if (!await DigestMatches(existing, digest, ctx.RequestAborted))
+                        return Error(503, "DIGEST_INVALID", "Existing CAS blob corrupted");
+                }
             }
             db.OciAddBlob(repository, digest);
             db.CompletePublication(key);
-            sessions.End(id);
+            sessions.EndLocked(id, session);
             ctx.Response.Headers.Location = cfg.Base + "/v2/" + repository + "/blobs/" + digest;
             ctx.Response.Headers["Docker-Content-Digest"] = digest;
             return Results.StatusCode(201);
         }
+        catch (OciChunkRangeException)
+        {
+            SetUploadHeaders(ctx, cfg, repository, id, session.CommittedLength);
+            return Error(416, "BLOB_UPLOAD_INVALID", "Chunk range or length does not match committed upload offset");
+        }
         finally { session.Gate.Release(); }
     }
 
-    private static async Task<long> Append(OciUploadStore.Ticket session, Stream input, long maxBytes, CancellationToken ct)
+    private static async Task<bool> DigestMatches(string path, string digest, CancellationToken ct)
     {
-        await using var output = new FileStream(session.Path, FileMode.Append, FileAccess.Write, FileShare.None, 81920, true);
-        var buffer = new byte[81920];
-        int n;
-        while ((n = await input.ReadAsync(buffer, ct)) != 0)
-        {
-            if (output.Length + n > maxBytes) throw new PayloadTooLargeException();
-            await output.WriteAsync(buffer.AsMemory(0, n), ct);
-        }
-        await output.FlushAsync(ct);
-        return output.Length;
+        await using var input = File.OpenRead(path);
+        return "sha256:" + Convert.ToHexStringLower(await SHA256.HashDataAsync(input, ct)) == digest;
     }
 
     private static void SetUploadHeaders(HttpContext ctx, Settings cfg, string repository, string id, long offset)
@@ -290,21 +315,29 @@ public static class OciEndpoints
         {
             var root = manifest.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("schemaVersion", out var schema) || schema.GetInt32() != 2 ||
+                !root.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number ||
+                !schema.TryGetInt32(out var schemaVersion) || schemaVersion != 2 ||
                 (root.TryGetProperty("mediaType", out var declared) &&
                  (declared.ValueKind != JsonValueKind.String || declared.GetString() != media)))
                 return Error(400, "MANIFEST_INVALID", "Unsupported OCI schema or media type");
             if (!ValidateDescriptors(root, repository, db))
-                return Error(400, "MANIFEST_BLOB_UNKNOWN", "Manifest references unknown content");
-            var subject = root.TryGetProperty("subject", out var subjectNode) &&
-                          subjectNode.ValueKind == JsonValueKind.Object &&
-                          subjectNode.TryGetProperty("digest", out var subjectDigest)
-                ? subjectDigest.GetString() : null;
-            if (subject is not null && !ValidDigest(subject))
-                return Error(400, "DIGEST_INVALID", "Invalid subject digest");
-            var artifactType = root.TryGetProperty("artifactType", out var artifact) &&
-                               artifact.ValueKind == JsonValueKind.String
-                ? artifact.GetString() : null;
+                return Error(400, "MANIFEST_BLOB_UNKNOWN", "Manifest references invalid or unknown content");
+            string? subject = null;
+            if (root.TryGetProperty("subject", out var subjectNode))
+            {
+                if (subjectNode.ValueKind != JsonValueKind.Object ||
+                    !subjectNode.TryGetProperty("digest", out var subjectDigest) ||
+                    subjectDigest.ValueKind != JsonValueKind.String ||
+                    !ValidDigest(subjectDigest.GetString() ?? ""))
+                    return Error(400, "DIGEST_INVALID", "Invalid subject digest");
+                subject = subjectDigest.GetString();
+            }
+            if (root.TryGetProperty("artifactType", out var artifact) && artifact.ValueKind != JsonValueKind.String)
+                return Error(400, "MANIFEST_INVALID", "Invalid artifact type");
+            var artifactType = artifact.ValueKind == JsonValueKind.String ? artifact.GetString() : null;
+            if (artifactType is null && root.TryGetProperty("config", out var config) &&
+                config.ValueKind == JsonValueKind.Object && config.TryGetProperty("mediaType", out var configMedia) &&
+                configMedia.ValueKind == JsonValueKind.String) artifactType = configMedia.GetString();
             var digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (reference.StartsWith("sha256:", StringComparison.Ordinal) && reference != digest)
                 return Error(400, "DIGEST_INVALID", "Manifest reference digest mismatch");
@@ -314,11 +347,8 @@ public static class OciEndpoints
             if (!await blobs.PutAsync(key, new MemoryStream(bytes, false), cfg.MaxMetadataBytes, ctx.RequestAborted))
             {
                 var existing = blobs.Existing(key);
-                if (existing is null)
-                    return Error(500, "MANIFEST_INVALID", "Content-addressed manifest collision");
-                var existingBytes = await File.ReadAllBytesAsync(existing, ctx.RequestAborted);
-                if (!bytes.AsSpan().SequenceEqual(existingBytes))
-                    return Error(500, "MANIFEST_INVALID", "Content-addressed manifest collision");
+                if (existing is null || !await DigestMatches(existing, digest, ctx.RequestAborted))
+                    return Error(503, "MANIFEST_INVALID", "Content-addressed manifest collision");
             }
             if (!db.OciPutManifest(repository, reference,
                     new OciManifestEntry(digest, media, bytes.Length), subject, artifactType, Access.Actor(ctx)))
@@ -326,6 +356,7 @@ public static class OciEndpoints
             db.CompletePublication(key);
             ctx.Response.Headers.Location = cfg.Base + "/v2/" + repository + "/manifests/" + digest;
             ctx.Response.Headers["Docker-Content-Digest"] = digest;
+            if (subject is not null) ctx.Response.Headers["OCI-Subject"] = subject;
             return Results.StatusCode(201);
         }
     }
@@ -335,9 +366,8 @@ public static class OciEndpoints
         foreach (var property in new[] { "config", "layers", "blobs", "manifests" })
         {
             if (!root.TryGetProperty(property, out var element)) continue;
-            var descriptors = property == "config"
-                ? new[] { element }
-                : element.ValueKind == JsonValueKind.Array ? element.EnumerateArray().ToArray() : [];
+            if (property != "config" && element.ValueKind != JsonValueKind.Array) return false;
+            var descriptors = property == "config" ? new[] { element } : element.EnumerateArray().ToArray();
             foreach (var descriptor in descriptors)
             {
                 if (descriptor.ValueKind != JsonValueKind.Object ||

@@ -1,70 +1,85 @@
 # OCI Distribution (experimental hosted registry)
 
-Packory exposes a hosted OCI Distribution API on `/v2/`. This is an initial
-single-node implementation, **not** full distribution-spec certification.
+Packory exposes a hosted OCI Distribution API on `/v2/`. This is a bounded
+single-writer implementation, **not** full distribution-spec certification.
 
 ## Implemented
 
 - `GET /v2/`: registry negotiation.
-- `GET/HEAD /v2/<repo>/blobs/<sha256:digest>`: repository-authorized,
-  content-addressed blob downloads; digest and byte count are preserved.
+- `GET/HEAD /v2/<repo>/blobs/<sha256:digest>`: repository-bound references,
+  content-addressed downloads and digest verification before returning bytes.
 - `POST /v2/<repo>/blobs/uploads/`, `PATCH` and final `PUT ?digest=`:
-  short-lived disk-backed chunk upload sessions; upload digest is computed
-  and checked before immutable storage is referenced.
-- `POST .../uploads/?mount=<digest>&from=<repo>`: cross-repository mount
-  only when the source repository already references the verified blob.
+  disk-backed upload sessions with a persisted committed offset. Supplied
+  `Content-Range` must match the offset, Content-Length and actual body length.
+  Invalid/replayed chunks return 416 with Range and Location.
+- `GET/DELETE <upload-location>`: query the committed offset or cancel a session.
+- `POST .../uploads/?mount=<digest>&from=<repo>`: mount only when the source
+  repository references the blob and the stored SHA-256 matches.
 - `GET/HEAD/PUT /v2/<repo>/manifests/<tag|digest>`: OCI image/indices,
-  OCI artifact manifests and Docker v2 media types; all blob/manifest
-  descriptors must resolve within the repository before publishing.
-- `GET /v2/<repo>/tags/list`: sorted tags and paginated Link header.
-- `GET /v2/<repo>/referrers/<digest>`: OCI 1.1 style subject index.
-- Single-writer locally persisted upload sessions (restart resume on the same data directory), startup orphan quarantine, read/write
-  credentials, published-manifest audit, and container-independent tests.
+  OCI artifact manifests and Docker v2 media types; checked content references
+  must resolve within the repository before publishing. Descriptor validation
+  and media-type/client combinations remain a tested subset.
+- `GET /v2/<repo>/tags/list`: sorted tags and paginated Link header; n=0 returns
+  an empty page without a next link.
+- `GET /v2/<repo>/referrers/<digest>`: subject index with actual artifactType
+  filtering. Accepted manifest subjects are acknowledged with OCI-Subject.
+- Single-writer session restart recovery on the same data directory,
+  startup orphan quarantine, credentials and published-manifest audit.
 
 ### Authentication
 
-By default reads are anonymous. Writes require an existing Packory admin/write
-token via `Authorization: Bearer <token>` or `Authorization: Basic` where
-the password contains the token. This is intended for ORAS and other clients
-that can configure Basic credentials; TLS is mandatory outside loopback.
+Reads are anonymous by default. Writes require an existing Packory admin/write
+token via `Authorization: Bearer <token>` or HTTP Basic with the token as the
+password. The existing global read policy and write namespace grants still
+apply; independent private-feed read isolation is not established by these routes.
+TLS is mandatory outside loopback.
 
-Packory does **not** currently expose the Docker Bearer-token challenge/grant
-endpoint or per-repository token scopes. A native Docker CLI smoke test now exercises a local scratch image build, Basic-authenticated login, push, tag discovery and pull. This is **one tested Docker flow**, not a Docker/Helm/ORAS compatibility matrix or production certification.
+Packory does **not** expose the Docker Bearer-token challenge/grant endpoint or
+per-repository OAuth token scopes. Native Docker smoke tests exercise Basic-auth
+login, push, tag discovery and pull. These are specific tested Docker flows,
+not a Docker/Helm/ORAS matrix or production certification.
 
-### Native client acceptance\n\nAfter a Release build, run `bash scripts/smoke-oci-docker.sh` with Docker Engine, Bash, .NET 10, Python 3, curl and OpenSSL. The script uses loopback port 18082, a temporary Docker credential directory and a `FROM scratch` image; it does not pull a public base image. It verifies a real `docker push`, the Packory tag-list API and a subsequent `docker pull`. On CI this shares the Linux job with the other hosted registry smoke tests. The test sets `PACKORY_ANONYMOUS_READ=false` so Docker receives a Basic challenge during registry negotiation. With anonymous reads enabled, the Docker push path has not passed this native-client test (Docker did not retry the later 401). Do not claim anonymous-read/native-Docker-push interoperability until that flow has separate passing evidence. A successful run also does not establish offline layer-cache independence, multi-architecture support, signature compatibility, resumable uploads or comprehensive OCI conformance.\n\n### Docker authentication negotiation with anonymous generic reads
+### Native client acceptance
 
-Opt-in `PACKORY_OCI_AUTHENTICATED_PING=true` makes `GET /v2/` require a
-writer/admin credential **even if** `PACKORY_ANONYMOUS_READ=true`. This causes
-Docker to receive a Basic challenge during registry negotiation and proactively
-authenticate future push requests. Native CI runs a second real Docker push/pull
-scenario with that combination. **Tradeoff:** anonymous Docker clients cannot
-complete the registry ping; other Packory APIs still honor anonymous reads.
-Leave this flag disabled if public anonymous Docker pull must work, and configure
-a private Docker registry instead until a separate, compliant Bearer-token
-service supports different pull/push scopes. No OCI Bearer token service,
-repository-scoped OAuth grant exchange or vendor conformance is claimed.
+After a Release build, run `bash scripts/smoke-oci-docker.sh` with Docker Engine,
+Bash, .NET 10, Python 3, curl and OpenSSL. The script uses loopback port 18082,
+temporary Docker credentials and a `FROM scratch` image. It does not pull a
+public base image. It verifies `docker push`, the tag API and `docker pull`.
+The baseline test disables anonymous reads so Docker receives a Basic challenge
+at registry negotiation. Passing does not establish layer-cache independence,
+multi-architecture support, signature compatibility or complete conformance.
 
-### Operational limits
+### Docker authentication negotiation with anonymous generic reads
 
-Blob upload sessions are bounded to `PACKORY_MAX_ARTIFACT_BYTES` (default
-100 MiB); an active upload expires after 30 minutes and is removed when
-the process restarts. **No resumable upload survives restart**.
-The active session map is single-process only. OCI registries commonly need
-much larger blob sizes; S3 streaming / multipart uploads and scalable,
-durable upload sessions are future work.
+`PACKORY_OCI_AUTHENTICATED_PING=true` makes `GET /v2/` require a writer/admin
+credential even when `PACKORY_ANONYMOUS_READ=true`. This provides the initial
+Basic challenge. CI exercises this combination separately. The tradeoff is that
+anonymous Docker clients cannot complete the registry ping; other APIs continue
+to honor their existing anonymous-read policy. This is not a substitute for a
+standard Bearer grant service with separate pull/push scopes.
 
-The implementation supports a restrictive lowercase ASCII repository-name
-grammar and SHA-256 digests. It does not expose deletion, garbage collection,
-automatic image signature verification, remote OCI proxying or complete
-distribution-spec conformance testing. OCI tags are mutable; bytes are immutable
-by digest.
+### Operational limits and upgrade
+
+Each upload is bounded by `Packory:MaxArtifactBytes`. Sessions expire after 30
+idle minutes; at most 1024 sessions can be active in one store. Cleanup does not
+delete a ticket while its chunk gate is held. Filesystem volume quotas and
+reverse-proxy resource limits remain necessary; no staging-capacity SLA is claimed.
+
+Session format 2 persists a committed length after the payload flush. On a
+single-writer process restart, only bytes up to that offset are resumed and an
+uncommitted tail is truncated. Missing committed bytes fail closed and are never
+reconstructed with zeros. Old session descriptors without an acknowledged offset
+are preserved but not resumed: finish uploads before upgrading or restart them.
+Published artifacts and database schemas are unaffected by this session-format
+change. Preserve staging before rollback and do not run old code against active
+format-2 sessions. See [chunk recovery and upgrade contract](oci-upload-recovery.md).
+
+No shared-session transfer, multi-writer fencing, S3 multipart streaming,
+power-loss durability certification, image signature verification, upstream OCI
+proxy, deletion or garbage collection is provided by this change. OCI tags are
+mutable; blob and manifest bytes are immutable by digest. Remaining release
+requirements are tracked in [release gates](release-gates.md).
 
 Example endpoint: `http://localhost:8080/v2/` for loopback evaluation.
 
-Primary specification: https://github.com/opencontainers/distribution-spec/blob/main/spec.md
-
-## Single-writer session restart semantics
-
-Upload bytes and a bounded repository-bound session descriptor are persisted under `data/oci-staging/`. After a process restart on the **same host/data directory**, eligible 30-minute sessions can resume. Corrupt metadata, oversized bytes or an unknown/reused UUID fail closed; old unbound `.tmp` files remain for operator retention handling. The descriptor is atomically replaced after successful PATCH. 
-
-This is **not** multi-node session transfer, distributed locking, multipart S3, process-failover fencing or power-failure durability certification. Do not use it to claim general OCI upload-resume or active-active support; test the exact native client/version and fault boundary for each support claim.
+Reference: [OCI Distribution specification v1.1.1](https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md).
