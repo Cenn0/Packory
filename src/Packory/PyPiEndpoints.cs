@@ -12,18 +12,19 @@ namespace Packory;
 public static class PyPiEndpoints
 {
     private static readonly Regex ProjectName = new(
-        "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,198}[A-Za-z0-9])?$",
+        "\\A[A-Za-z0-9](?:[A-Za-z0-9._-]{0,198}[A-Za-z0-9])?\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex Filename = new(
-        "^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}\\.(?:whl|zip|tar\\.gz)$",
+        "\\A[A-Za-z0-9][A-Za-z0-9._+-]{0,254}\\.(?:whl|zip|tar\\.gz)\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    public static string? Normalize(string name)
+    public static string? Normalize(string? name)
     {
-        if (name.Length is < 1 or > 200 || !ProjectName.IsMatch(name)) return null;
+        if (name is null || name.Length is < 1 or > 200 || !ProjectName.IsMatch(name)) return null;
         return Regex.Replace(name.ToLowerInvariant(), "[-_.]+", "-");
     }
 
+    public static bool IsFilename(string? filename) => filename is { Length: <= 255 } && Filename.IsMatch(filename);
     public static string Key(string normalizedName, string filename) => "pypi/" + normalizedName + "/" + filename;
 
     public static void Map(WebApplication app)
@@ -72,16 +73,18 @@ public static class PyPiEndpoints
             return Results.Text(html, "application/vnd.pypi.simple.v1+html");
         });
 
-        app.MapGet("/pypi/files/{name}/{filename}", (string name, string filename,
+        app.MapGet("/pypi/files/{name}/{filename}", async (string name, string filename,
             Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             var normalized = Normalize(name);
-            if (normalized != name || !Filename.IsMatch(filename)) return Results.NotFound();
+            if (normalized != name || !IsFilename(filename)) return Results.NotFound();
             var entry = db.PyFiles(name).FirstOrDefault(x => x.Filename == filename);
             if (entry is null) return Results.NotFound();
             var path = blobs.Existing(Key(name, filename));
             if (path is null) return Results.NotFound();
+            if (!await ArtifactDigests.MatchesSha256Async(path, entry.Sha256, entry.Size, ctx.RequestAborted))
+                return Results.Json(new { error = "Stored distribution requires integrity recovery" }, statusCode: 503);
             ctx.Response.Headers.ETag = "\"" + entry.Sha256 + "\"";
             return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
@@ -98,7 +101,7 @@ public static class PyPiEndpoints
                 return Results.BadRequest(new { error = "Missing or invalid name, version, or distribution file" });
             var file = form.Files[0];
             var filename = file.FileName;
-            if (!Filename.IsMatch(filename) ||
+            if (!IsFilename(filename) ||
                 !(filename.StartsWith(name + "-", StringComparison.OrdinalIgnoreCase) ||
                   filename.StartsWith(name.Replace('-', '_') + "-", StringComparison.OrdinalIgnoreCase)))
                 return Results.BadRequest(new { error = "Invalid or mismatched distribution filename" });
