@@ -42,9 +42,41 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
 
     public bool IsHealthy()
     {
-        using var connection = Open();
-        using var cmd = Command(connection, "SELECT 1");
-        return Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+        // Readers must not initialize or migrate a shared schema themselves.
+        // A successful SELECT 1 alone is insufficient: it would advertise a
+        // fresh, incomplete or incompatible database as a ready read replica.
+        try
+        {
+            using var connection = Open();
+            using var cmd = Command(connection, """
+                SELECT (SELECT version FROM packory_schema_version WHERE slot=1) = @current
+                    AND to_regclass('packages') IS NOT NULL
+                    AND to_regclass('npm_versions') IS NOT NULL
+                    AND to_regclass('npm_tags') IS NOT NULL
+                    AND to_regclass('skills') IS NOT NULL
+                    AND to_regclass('cargo_versions') IS NOT NULL
+                    AND to_regclass('pypi_files') IS NOT NULL
+                    AND to_regclass('oci_blobs') IS NOT NULL
+                    AND to_regclass('oci_manifests') IS NOT NULL
+                    AND to_regclass('oci_tags') IS NOT NULL
+                    AND to_regclass('oci_referrers') IS NOT NULL
+                    AND to_regclass('recovery_quarantines') IS NOT NULL
+                    AND to_regclass('publication_intents') IS NOT NULL
+                    AND to_regclass('managed_tokens') IS NOT NULL
+                    AND to_regclass('audit_events') IS NOT NULL
+                    AND to_regclass('feeds') IS NOT NULL
+                    AND to_regclass('feed_namespaces') IS NOT NULL
+                    AND to_regclass('feed_policies') IS NOT NULL
+                    AND to_regclass('feed_upstreams') IS NOT NULL
+                """, null, ("current", SchemaVersionGuard.Current));
+            return cmd.ExecuteScalar() is true;
+        }
+        catch (NpgsqlException)
+        {
+            // Connection failure, absent version table, removed tables and
+            // incompatible metadata all fail readiness rather than serving data.
+            return false;
+        }
     }
 
     public void Initialize()
