@@ -176,6 +176,8 @@ else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
     throw new InvalidOperationException("Read-only replica requires an initialized shared metadata database.");
 }
 app.UseRouting();
+// Authenticate before applying the MCP token/OIDC scope gate.
+if (settings.OidcEnabled) app.UseAuthentication();
 app.Use(async (ctx, next) =>
 {
     if (ctx.Request.Path.StartsWithSegments("/mcp"))
@@ -236,7 +238,6 @@ app.Use(async (ctx, next) =>
     }
     await next(ctx);
 });
-if (settings.OidcEnabled) app.UseAuthentication();
 app.UseRateLimiter();
 app.Use(async (ctx, next) =>
 {
