@@ -1,6 +1,6 @@
 # Experimental Packory MCP and SkillSpector integration
 
-**Status:** implementation on a feature branch. Production readiness and full interoperability are not claimed before CI, live scanner and deployment testing.
+**Status:** experimental integration. Build and tests are tracked by PR/commit in GitHub Actions. Production readiness and full interoperability are not implied by green CI.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ This is a distribution server, not a remote tool-execution gateway. It does not 
 
 New ZIP imports are staged under a content-derived SHA-256 key and enter a persistent QUEUED state. They cannot be publicly listed, downloaded or used as MCP resources before approval. A background coordinator writes an immutable scan snapshot to the sidecar's input volume and waits for machine-readable JSON results on a separate output volume.
 
-The NVIDIA SkillSpector sidecar runs in static mode with --no-llm, no network, read-only filesystem, no ambient production credentials, CPU/memory/PID limits and no privileges. It does not execute skills. A completed scan becomes NEEDS_REVIEW if it is reviewable, QUARANTINED on a high/critical verdict, or SCAN_FAILED for incomplete/malformed/failed runs. A low numerical score never automatically approves a skill.
+The NVIDIA SkillSpector sidecar runs in static mode with --no-llm, no network, read-only filesystem, no ambient production credentials, CPU/memory/PID limits and no privileges. It does not execute skills. A completed scan becomes NEEDS_REVIEW if it is reviewable, QUARANTINED for HIGH/CRITICAL aggregate severity, severe individual findings or unknown suppressed findings, or SCAN_FAILED for incomplete/malformed/failed runs. A low numerical score never automatically approves a skill.
 
 Only a privileged administrator can approve a NEEDS_REVIEW result, with an explicit reason; approval also checks that the exact staged bytes match the expected SHA-256 before making them available. Revocation or rescan immediately blocks subsequent REST/MCP reads and is recorded in an audit table. Scan state is stored in SQLite or PostgreSQL; staging uses filesystem or S3, according to existing backend selection.
 
@@ -30,9 +30,22 @@ The MCP endpoint requires an authenticated bearer token even when anonymous REST
 
 Imported skills return 202 QUEUED. Review the scanner report before approving; only APPROVED revisions become discoverable. Blocking or failed results do not become automatically available. The MCP endpoint supports the modern 2026-07-28 protocol and older initialize-era clients through hybrid session handling in the official SDK.
 
+## Upgrade: explicitly backfill previously published Skills
+
+Existing pre-scanner Skill versions have no approval record; they must **not** be silently grandfathered. After a tested backup, enable scanning and start the two services. The existing Skills will be temporarily unavailable for public download and MCP distribution until approved.
+
+An administrator may POST to /api/security/skills/backfill?limit=25 with their API bearer credential. This checks existing ZIP content, verifies the manifest, copies it to immutable staging, and queues the matching SHA-256 for scanning. The response contains queued, skipped, inspected and remaining counts. Repeat until remaining is zero. Entries with malformed, missing or oversized ZIPs are skipped and never implicitly approved; examine them separately without disabling the security gate. Every completed scan still needs an explicit review decision before distribution.
+
+Example using a runtime-only administrator token:
+
+    curl -fsS -X POST -H "Authorization: Bearer $PACKORY_ADMIN_TOKEN" \
+      "http://127.0.0.1:8080/api/security/skills/backfill?limit=25"
+
+Backfill is idempotent for previously queued revisions and does not rewrite the existing immutable published ZIP. Do not rely on this administrative API as a full automatic upgrade or disaster-recovery system.
+
 ## Current limitations / remaining release gates
 
-- Existing published Skills remain unscanned and become unavailable under default enforcement. A documented legacy backfill and cutover is still required.
+- Existing published Skills remain unavailable under default enforcement until explicitly scanned and approved. Administrators can enqueue legacy revisions using the documented backfill API below; unscannable/missing revisions remain unavailable and need operator investigation.
 - A worker crash, missing output volume or a scan contract change can leave a revision blocked. This is preferable to accidental publication but needs operational recovery/runbooks and retry limits.
 - No full PostgreSQL/S3 restore certification, multi-writer guarantees, BFF-based administration, live MCP compatibility matrix, signed scanner image, locked transitive Python dependency tree or complete license/SBOM review yet.
 - NVIDIA SkillSpector source is pinned to v2.13.0 / Git commit 091a509b3d6ba8ff5be528966e1f43c2e68cf214, but its transitive dependencies must be verified against the project's preferred permissive-license policy. Its static-only offline mode uses fallback vulnerability data rather than live OSV requests.
