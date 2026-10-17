@@ -52,6 +52,12 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_pg_s3_snapshot.py -v
           python3 -m unittest discover -s tests -p test_pg_s3_snapshot_safety.py -v
+      - name: Validate offline NVIDIA SkillSpector scan bridge
+        run: |
+          python3 -m py_compile workers/skillspector/worker.py
+          python3 -m unittest discover -s tests -p test_skillspector_bridge.py -v
+      - name: Validate scanner Compose configuration
+        run: docker compose config --quiet
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Verify dashboard ecosystem parity with implemented catalog
