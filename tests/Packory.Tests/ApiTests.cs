@@ -1,3 +1,4 @@
+using ModelContextProtocol.Client;
 using System.Net.Http.Json;
 using System.IO.Compression;
 using System.Net;
@@ -444,6 +445,28 @@ public sealed class ApiTests
             JsonContent.Create(new { sha256 = digest, reason = "Test the revocation gate" })))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
             HttpMethod.Get, "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Mcp_AuthenticatedClientNegotiatesAndDiscoversReadOnlyTools()
+    {
+        using var host = new Host();
+        using var httpClient = host.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var transport = new HttpClientTransport(new HttpClientTransportOptions
+        {
+            Endpoint = new Uri(httpClient.BaseAddress!, "mcp"),
+            TransportMode = HttpTransportMode.StreamableHttp,
+            AdditionalHeaders = new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer " + ReadToken
+            }
+        }, httpClient);
+        await using var mcp = await McpClient.CreateAsync(transport, cancellationToken: timeout.Token);
+        var tools = await mcp.ListToolsAsync(cancellationToken: timeout.Token);
+        Assert.Contains(tools, tool => tool.Name == "search_artifacts");
+        Assert.Contains(tools, tool => tool.Name == "list_approved_skills");
+        Assert.DoesNotContain(tools, tool => tool.Name.Contains("approve", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
