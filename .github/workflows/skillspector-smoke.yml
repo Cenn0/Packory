@@ -72,3 +72,88 @@ jobs:
               "SAFE", "CAUTION", "DO_NOT_INSTALL")
           print("Pinned SkillSpector completed offline static analysis of inert fixture")
           PY
+
+      - name: Integration smoke - compose staging, offline scan, approval and revoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_READ_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_WRITE_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_PUBLIC_BASE_URL="http://localhost:8080"
+          trap 'docker compose logs --tail=80 || true; docker compose down -v --remove-orphans || true' EXIT
+          docker compose up -d --build
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://localhost:8080/health/live >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://localhost:8080/health/live >/dev/null
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+          import uuid
+          import zipfile
+
+          origin = "http://localhost:8080"
+          admin = os.environ["PACKORY_ADMIN_TOKEN"]
+          def send(path, method="GET", body=None, content_type=None):
+              headers = {"Authorization": "Bearer " + admin}
+              if content_type:
+                  headers["Content-Type"] = content_type
+              req = urllib.request.Request(origin + path, data=body, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      data = resp.read()
+                      return resp.status, json.loads(data) if data and resp.headers.get_content_type() == "application/json" else data
+              except urllib.error.HTTPError as err:
+                  return err.code, err.read()
+
+          archive = io.BytesIO()
+          with zipfile.ZipFile(archive, "w") as z:
+              z.writestr("compose-smoke/SKILL.md",
+                         "---\nname: compose-smoke\ndescription: Harmless synthetic integration fixture\n---\n"
+                         "# Safe verification\nThis fixture contains no executable code.\n")
+          boundary = "packory-" + uuid.uuid4().hex
+          def part(field, filename, content):
+              return (("--" + boundary + "\r\n"
+                       "Content-Disposition: form-data; name=\"" + field + "\"" +
+                       ("; filename=\"" + filename + "\"" if filename else "") +
+                       "\r\n" +
+                       ("Content-Type: application/zip\r\n" if filename else "") +
+                       "\r\n").encode() + content + b"\r\n")
+          payload = part("version", None, b"1.0.0") + part("file", "skill.zip", archive.getvalue()) + ("--" + boundary + "--\r\n").encode()
+          code, response = send("/api/skills", "POST", payload, "multipart/form-data; boundary=" + boundary)
+          assert code == 202 and response["status"] == "QUEUED", (code, response)
+          digest = response["sha256"]
+          download = "/api/skills/compose-smoke/1.0.0/download"
+          code, _ = send(download)
+          assert code == 404, "Premature distribution of unapproved Skill"
+
+          terminal = None
+          for _ in range(90):
+              status, result = send("/api/security/skills/compose-smoke/1.0.0")
+              assert status == 200, status
+              terminal = result["skill"]["state"]
+              if terminal not in ("QUEUED", "PUBLISHING"):
+                  break
+              time.sleep(2)
+          assert terminal == "NEEDS_REVIEW", "Offline scanner did not complete: " + str(terminal)
+
+          def decide(action, reason):
+              data = json.dumps({"sha256": digest, "reason": reason}).encode()
+              return send("/api/security/skills/compose-smoke/1.0.0/" + action,
+                          "POST", data, "application/json")
+          code, _ = decide("approve", "Reviewed inert smoke sample and its completed scan")
+          assert code == 200, "Failed digest-bound approval: " + str(code)
+          code, data = send(download)
+          assert code == 200 and data == archive.getvalue(), "Approved ZIP digest differs"
+          code, _ = decide("revoke", "Integration test requires revoke protection")
+          assert code == 200, "Failed revocation"
+          code, _ = send(download)
+          assert code == 404, "Revoked Skill remains accessible"
+          print("Packory + real NVIDIA offline scanner staging, approval and revoke smoke succeeded")
+          PY
