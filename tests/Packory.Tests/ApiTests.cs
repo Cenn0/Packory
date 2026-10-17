@@ -487,8 +487,9 @@ public sealed class ApiTests
         request.Headers.Accept.ParseAdd("application/json");
         request.Headers.Accept.ParseAdd("text/event-stream");
         using var response = await http.SendAsync(request);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var text = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            "MCP skills/list HTTP " + (int)response.StatusCode + ": " + text);
         Assert.Contains("skills", text, StringComparison.Ordinal);
         Assert.Contains("resultType", text, StringComparison.Ordinal);
     }
