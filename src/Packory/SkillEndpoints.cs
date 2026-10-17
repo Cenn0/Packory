@@ -57,9 +57,10 @@ public static class SkillEndpoints
             var version = form["version"].ToString();
             if (!Names.Version(version) || form.Files.Count != 1) return Results.BadRequest(new { error = "Expected version and one ZIP file" });
             var file = form.Files[0];
-            if (file.Length > settings.MaxArtifactBytes) return Results.StatusCode(413);
+            var maxSkillBytes = Math.Min(settings.MaxArtifactBytes, 20L * 1024 * 1024);
+            if (file.Length > maxSkillBytes) return Results.StatusCode(413);
             await using var input = file.OpenReadStream();
-            var bytes = await BlobStore.ReadBoundedAsync(input, settings.MaxArtifactBytes, ctx.RequestAborted);
+            var bytes = await BlobStore.ReadBoundedAsync(input, maxSkillBytes, ctx.RequestAborted);
             SkillManifest manifest;
             try { manifest = InspectZip(bytes); }
             catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -123,7 +124,7 @@ public static class SkillEndpoints
                     entryName.Any(char.IsControl) ||
                     entryName.Split('/').Any(p => p is "." or "..") ||
                     unixType is not (0 or 0x4000 or 0x8000) ||
-                    !names.Add(entryName))
+                    !names.Add(entryName.Normalize(NormalizationForm.FormC)))
                     throw new InvalidDataException("Unsafe or ambiguous ZIP entry");
                 if (entryName.EndsWith('/'))
                 {
