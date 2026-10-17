@@ -637,7 +637,9 @@ public sealed class ApiTests
     [Fact]
     public async Task AuditEvents_RecordSuccessfulHostedPublishesWithoutCredentials()
     {
-        using var host = new Host();
+        // This test asserts the legacy synchronous publication/audit contract.
+        // The enforced asynchronous security flow is covered in the separate test.
+        using var host = new Host(configure: cfg => cfg.SkillSecurityEnforced = false);
         using var client = host.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/admin/audit")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,
