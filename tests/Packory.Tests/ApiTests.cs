@@ -522,6 +522,26 @@ public sealed class ApiTests
         var suspicious = JsonSerializer.Serialize(complete).Replace(
             "\"severity\":\"LOW\"", "\"severity\":\"CRITICAL\"", StringComparison.Ordinal);
         Assert.Equal("QUARANTINED", SkillScanResult.Parse(suspicious, digest).State);
+        // NVIDIA may smooth its aggregate risk even when one individual finding
+        // remains HIGH/CRITICAL. That finding must block a reviewer approval.
+        var withHighFinding = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        withHighFinding["report"]!["issues"] = JsonSerializer.SerializeToNode(
+            new[] { new { severity = "HIGH", rule_id = "SYNTHETIC-TEST" } });
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(
+            withHighFinding.ToJsonString(), digest).State);
+        // Unknown suppression/baseline entries must not silently hide risk.
+        withHighFinding["report"]!["issues"] = new JsonArray();
+        withHighFinding["report"]!["suppressed_count"] = 1;
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(
+            withHighFinding.ToJsonString(), digest).State);
+        var missingRiskFields = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        ((JsonObject)missingRiskFields["report"]!).Remove("risk_assessment");
+        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(
+            missingRiskFields.ToJsonString(), digest).State);
+        var malformedFinding = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        malformedFinding["report"]!["issues"] = new JsonArray(new JsonObject { ["unexpected"] = "value" });
+        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(
+            malformedFinding.ToJsonString(), digest).State);
     }
 
     [Fact]
