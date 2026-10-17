@@ -79,22 +79,52 @@ public static class SkillEndpoints
         {
             using var zip = new ZipArchive(new MemoryStream(data, false), ZipArchiveMode.Read);
             if (zip.Entries.Count is < 1 or > 250) throw new InvalidDataException("ZIP has an invalid number of files");
+            const long maximumUncompressed = 20 * 1024 * 1024;
             long uncompressed = 0;
+            // ZIP archives can contain duplicate/case-conflicting paths. They are
+            // ambiguous on common client filesystems even without traversal.
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in zip.Entries)
             {
                 var entryName = e.FullName;
-                if (entryName.Length > 512 || entryName.Contains('\\') || entryName.StartsWith('/') || entryName.Contains(':') ||
+                var unixType = (e.ExternalAttributes >> 16) & 0xF000;
+                if (entryName.Length is < 1 or > 512 || entryName.Contains('\\') ||
+                    entryName.StartsWith('/') || entryName.Contains(':') ||
+                    entryName.Contains("//", StringComparison.Ordinal) ||
+                    entryName.Any(char.IsControl) ||
                     entryName.Split('/').Any(p => p is "." or "..") ||
-                    ((e.ExternalAttributes >> 16) & 0xF000) == 0xA000)
-                    throw new InvalidDataException("Unsafe ZIP entry");
-                uncompressed += e.Length;
-                if (uncompressed > 20 * 1024 * 1024) throw new InvalidDataException("Uncompressed ZIP exceeds 20 MiB");
+                    unixType is not (0 or 0x4000 or 0x8000) ||
+                    !names.Add(entryName))
+                    throw new InvalidDataException("Unsafe or ambiguous ZIP entry");
+                if (entryName.EndsWith('/'))
+                {
+                    if (e.Length != 0) throw new InvalidDataException("Directory ZIP entry contains bytes");
+                    continue;
+                }
+                // Length in the central directory is attacker-controlled. Both
+                // the declared total and actual decompressed bytes are bounded.
+                if (e.Length > maximumUncompressed - uncompressed)
+                    throw new InvalidDataException("Uncompressed ZIP exceeds 20 MiB");
+                using var stream = e.Open();
+                var buffer = new byte[81920];
+                long actual = 0;
+                int count;
+                while ((count = stream.Read(buffer, 0, buffer.Length)) != 0)
+                {
+                    if (count > e.Length - actual ||
+                        count > maximumUncompressed - uncompressed - actual)
+                        throw new InvalidDataException("ZIP entry expanded beyond declared limits");
+                    actual += count;
+                }
+                if (actual != e.Length) throw new InvalidDataException("ZIP entry length mismatch");
+                uncompressed += actual;
             }
             var manifests = zip.Entries.Where(e => e.FullName == "SKILL.md" ||
                 (e.FullName.EndsWith("/SKILL.md", StringComparison.Ordinal) && e.FullName.Count(c => c == '/') == 1)).ToList();
             if (manifests.Count != 1 || manifests[0].Length is < 12 or > 256 * 1024)
                 throw new InvalidDataException("Exactly one SKILL.md is required at root or one folder below root");
-            using var reader = new StreamReader(manifests[0].Open(), Encoding.UTF8);
+            using var reader = new StreamReader(manifests[0].Open(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true));
             var markdown = reader.ReadToEnd();
             var lines = markdown.Replace("\r\n", "\n").Split('\n');
             if (lines.Length < 4 || lines[0].Trim() != "---") throw new InvalidDataException("Missing YAML frontmatter");
@@ -103,8 +133,16 @@ public static class SkillEndpoints
             string? name = null; string? description = null;
             foreach (var line in lines.Skip(1).Take(end - 1))
             {
-                if (line.StartsWith("name:", StringComparison.Ordinal)) name = Unquote(line[5..].Trim());
-                if (line.StartsWith("description:", StringComparison.Ordinal)) description = Unquote(line[12..].Trim());
+                if (line.StartsWith("name:", StringComparison.Ordinal))
+                {
+                    if (name is not null) throw new InvalidDataException("Duplicate skill name");
+                    name = Unquote(line[5..].Trim());
+                }
+                if (line.StartsWith("description:", StringComparison.Ordinal))
+                {
+                    if (description is not null) throw new InvalidDataException("Duplicate skill description");
+                    description = Unquote(line[12..].Trim());
+                }
             }
             if (name is null || !Names.Skill(name) || description is null || description.Length is < 1 or > 1024)
                 throw new InvalidDataException("SKILL.md requires valid name and description frontmatter fields");
