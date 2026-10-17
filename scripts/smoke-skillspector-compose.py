@@ -151,7 +151,7 @@ def check_mcp():
         "POST", "/mcp", json.dumps(read_request).encode(),
         "application/json", mcp_method="resources/read"
     )
-    require(code == 200, "MCP resources/read did not return HTTP 200")
+    require(code == 200, "MCP resources/read HTTP " + str(code) + ", response: " + result_bytes[:350].decode("utf-8", "replace"))
     result = jsonrpc_payload(result_bytes)
     contents = result.get("result", {}).get("contents", [])
     item = next((x for x in contents if x.get("uri") == entry["uri"]), None)
