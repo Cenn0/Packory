@@ -243,7 +243,7 @@ public sealed class PackoryMcpOptionsConfigurator(
 }
 
 [McpServerToolType]
-public static class PackoryMcpTools
+public sealed class PackoryMcpTools
 {
     [McpServerTool(Name = "search_artifacts", ReadOnly = true)]
     [Description("Search Packory's locally indexed NuGet, npm, Cargo, PyPI, OCI and approved Skill revisions. No remote fetch or execution.")]
@@ -290,7 +290,7 @@ public static class PackoryMcpTools
 }
 
 [McpServerResourceType]
-public static class PackoryMcpResources
+public sealed class PackoryMcpResources
 {
     [McpServerResource(UriTemplate = "skill://packory/{version}/{name}/{+path}",
         Name = "Approved Skill File", MimeType = "text/plain")]
@@ -330,7 +330,7 @@ public static class PackoryMcpResources
 }
 
 [McpServerPromptType]
-public static class PackoryMcpPrompts
+public sealed class PackoryMcpPrompts
 {
     [McpServerPrompt(Name = "review_skill")]
     [Description("Review a version-pinned Skill's risk and integrity before the client requests consent to use it.")]
