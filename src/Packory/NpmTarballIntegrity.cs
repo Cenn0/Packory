@@ -34,9 +34,11 @@ public static class NpmTarballIntegrity
 
             // When integrity is supplied it is authoritative. Never downgrade a
             // malformed SHA-512 claim to a weaker shasum.
-            if (Unique(dist, "integrity", out var integrity))
+            if (dist.ValueKind == JsonValueKind.Object &&
+                dist.EnumerateObject().Any(p => p.NameEquals("integrity")))
             {
-                if (integrity.ValueKind != JsonValueKind.String) return null;
+                if (!Unique(dist, "integrity", out var integrity) ||
+                    integrity.ValueKind != JsonValueKind.String) return null;
                 var sri = integrity.GetString()!;
                 if (!sri.StartsWith("sha512-", StringComparison.Ordinal)) return null;
                 try
