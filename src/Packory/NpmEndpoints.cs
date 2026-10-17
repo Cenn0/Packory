@@ -39,8 +39,14 @@ public static class NpmEndpoints
                 var origin = db.PackageOrigin("npm", name, version);
                 if (blobs.Existing(key) is { } local)
                 {
-                    if (origin is not null) return Results.File(local, "application/octet-stream", enableRangeProcessing: true);
-                    throw new InvalidDataException("Unindexed npm blob requires recovery");
+                    if (origin is null)
+                        throw new InvalidDataException("Unindexed npm blob requires recovery");
+                    // Existing tarballs must not be served based on a checksum
+                    // computed from the possibly corrupted file itself.
+                    if (!await NpmTarballIntegrity.VerifyAsync(local, origin, name, version,
+                            db, blobs, settings, ctx.RequestAborted))
+                        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                    return Results.File(local, "application/octet-stream", enableRangeProcessing: true);
                 }
                 if (origin == "hosted") throw new InvalidDataException("Hosted npm blob is missing");
                 if (settings.IsReservedNpm(name)) return Results.NotFound();
