@@ -155,48 +155,111 @@ public sealed class SkillScanCoordinator(
 
 public static class SkillScanResult
 {
-    /// <summary>Accept only the verified SkillSpector JSON contract and conservative policy decisions.</summary>
+    private static readonly (string State, int? Risk, string? Recommendation, string? Report) Failed =
+        ("SCAN_FAILED", null, null, null);
+
+    /// <summary>
+    /// The scanner's aggregate risk may be lower than an individual HIGH/CRITICAL
+    /// finding. Evaluate every finding and never interpret missing/malformed fields as
+    /// a clean result. Unknown suppressed findings are not safe to release.
+    /// </summary>
     public static (string State, int? Risk, string? Recommendation, string? Report) Parse(
         string serialized, string requiredDigest)
     {
-        if (serialized.Length > 1024 * 1024) throw new InvalidDataException("Oversized scanner response.");
+        if (serialized.Length > 1024 * 1024)
+            throw new InvalidDataException("Oversized scanner response.");
         using var envelope = JsonDocument.Parse(serialized);
         var root = envelope.RootElement;
         if (root.ValueKind != JsonValueKind.Object ||
-            root.GetProperty("sha256").GetString() != requiredDigest)
+            !root.TryGetProperty("sha256", out var providedDigest) ||
+            providedDigest.ValueKind != JsonValueKind.String ||
+            !string.Equals(providedDigest.GetString(), requiredDigest, StringComparison.Ordinal))
             throw new InvalidDataException("Scanner response digest mismatch.");
 
-        var exitCode = root.GetProperty("exit_code").GetInt32();
-        if (exitCode is not (0 or 1)) return ("SCAN_FAILED", null, null, null);
-        var report = root.GetProperty("report");
-        if (report.ValueKind != JsonValueKind.Object) return ("SCAN_FAILED", null, null, null);
-        if (!report.TryGetProperty("execution_successful", out var success) ||
-            success.ValueKind != JsonValueKind.True)
-            return ("SCAN_FAILED", null, null, null);
-        if (!report.TryGetProperty("analysis_completeness", out var completeness) ||
-            completeness.ValueKind != JsonValueKind.Object ||
-            !completeness.TryGetProperty("is_complete", out var complete) ||
-            complete.ValueKind != JsonValueKind.True)
-            return ("SCAN_FAILED", null, null, null);
-        if (!report.TryGetProperty("metadata", out var metadata) ||
-            metadata.ValueKind != JsonValueKind.Object ||
-            !metadata.TryGetProperty("llm_requested", out var llm) ||
-            llm.ValueKind != JsonValueKind.False)
-            return ("SCAN_FAILED", null, null, null);
-        var assessment = report.GetProperty("risk_assessment");
-        var score = assessment.GetProperty("score").GetInt32();
-        var severity = assessment.GetProperty("severity").GetString();
-        var recommendation = assessment.GetProperty("recommendation").GetString();
-        if (score is < 0 or > 100 || severity is not ("LOW" or "MEDIUM" or "HIGH" or "CRITICAL") ||
-            recommendation is not ("SAFE" or "CAUTION" or "DO_NOT_INSTALL"))
-            return ("SCAN_FAILED", null, null, null);
-        if (!report.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array)
-            return ("SCAN_FAILED", null, null, null);
+        try
+        {
+            if (!root.TryGetProperty("exit_code", out var code) ||
+                code.ValueKind != JsonValueKind.Number ||
+                !code.TryGetInt32(out var exitCode) || exitCode is not (0 or 1))
+                return Failed;
+            if (!root.TryGetProperty("report", out var report) ||
+                report.ValueKind != JsonValueKind.Object)
+                return Failed;
+            if (!report.TryGetProperty("execution_successful", out var success) ||
+                success.ValueKind != JsonValueKind.True)
+                return Failed;
+            if (!report.TryGetProperty("analysis_completeness", out var completeness) ||
+                completeness.ValueKind != JsonValueKind.Object ||
+                !completeness.TryGetProperty("is_complete", out var complete) ||
+                complete.ValueKind != JsonValueKind.True)
+                return Failed;
+            if (completeness.TryGetProperty("status", out var completionStatus) &&
+                (completionStatus.ValueKind != JsonValueKind.String ||
+                 completionStatus.GetString() != "complete"))
+                return Failed;
+            if (!report.TryGetProperty("metadata", out var metadata) ||
+                metadata.ValueKind != JsonValueKind.Object ||
+                !metadata.TryGetProperty("llm_requested", out var llm) ||
+                llm.ValueKind != JsonValueKind.False)
+                return Failed;
 
-        var state = severity is "HIGH" or "CRITICAL" || recommendation == "DO_NOT_INSTALL"
-            ? "QUARANTINED" : "NEEDS_REVIEW";
-        // The original findings can contain credentials or prompt injection. Never return this JSON
-        // via public listing or MCP; privileged UI treats all fields strictly as text.
-        return (state, score, recommendation, report.GetRawText());
+            if (!report.TryGetProperty("risk_assessment", out var assessment) ||
+                assessment.ValueKind != JsonValueKind.Object ||
+                !assessment.TryGetProperty("score", out var rawScore) ||
+                rawScore.ValueKind != JsonValueKind.Number ||
+                !rawScore.TryGetInt32(out var score) || score is < 0 or > 100 ||
+                !assessment.TryGetProperty("severity", out var rawSeverity) ||
+                rawSeverity.ValueKind != JsonValueKind.String ||
+                !assessment.TryGetProperty("recommendation", out var rawRecommendation) ||
+                rawRecommendation.ValueKind != JsonValueKind.String)
+                return Failed;
+            var severity = rawSeverity.GetString();
+            var recommendation = rawRecommendation.GetString();
+            if (severity is not ("LOW" or "MEDIUM" or "HIGH" or "CRITICAL") ||
+                recommendation is not ("SAFE" or "CAUTION" or "DO_NOT_INSTALL"))
+                return Failed;
+            if (!report.TryGetProperty("issues", out var issues) ||
+                issues.ValueKind != JsonValueKind.Array)
+                return Failed;
+
+            var dangerousFinding = false;
+            foreach (var issue in issues.EnumerateArray())
+            {
+                if (issue.ValueKind != JsonValueKind.Object ||
+                    !issue.TryGetProperty("severity", out var findingSeverity) ||
+                    findingSeverity.ValueKind != JsonValueKind.String)
+                    return Failed;
+                var rating = findingSeverity.GetString();
+                if (rating is not ("LOW" or "MEDIUM" or "HIGH" or "CRITICAL"))
+                    return Failed;
+                if (rating is "HIGH" or "CRITICAL") dangerousFinding = true;
+            }
+            // No publisher-controlled baselines/suppressions are configured in
+            // Packory. Unexpected suppressions might hide a severe finding.
+            if (report.TryGetProperty("suppressed", out var suppressed))
+            {
+                if (suppressed.ValueKind != JsonValueKind.Array) return Failed;
+                if (suppressed.GetArrayLength() != 0) dangerousFinding = true;
+            }
+            if (report.TryGetProperty("suppressed_count", out var suppressedCount))
+            {
+                if (suppressedCount.ValueKind != JsonValueKind.Number ||
+                    !suppressedCount.TryGetInt32(out var count) || count < 0)
+                    return Failed;
+                if (count != 0) dangerousFinding = true;
+            }
+
+            var state = dangerousFinding || severity is "HIGH" or "CRITICAL" ||
+                        recommendation == "DO_NOT_INSTALL"
+                ? "QUARANTINED" : "NEEDS_REVIEW";
+            // Retain findings for admin review only. The original report must
+            // never appear in anonymous REST endpoints or MCP tools.
+            return (state, score, recommendation, report.GetRawText());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException
+                                   or KeyNotFoundException or OverflowException)
+        {
+            return Failed;
+        }
     }
 }
