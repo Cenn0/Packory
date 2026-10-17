@@ -12,14 +12,14 @@ namespace Packory;
 /// </summary>
 public static class CargoEndpoints
 {
-    private static readonly Regex ValidName = new("^[a-z][a-z0-9_-]{0,63}$",
+    private static readonly Regex ValidName = new("\\A[a-z][a-z0-9_-]{0,63}\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex Semver = new(
-        @"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$",
+        @"\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    public static bool IsName(string value) => value.Length <= 64 && ValidName.IsMatch(value);
-    public static bool IsVersion(string value) => value.Length <= 128 && Semver.IsMatch(value);
+    public static bool IsName(string? value) => value is not null && value.Length <= 64 && ValidName.IsMatch(value);
+    public static bool IsVersion(string? value) => value is not null && value.Length <= 128 && Semver.IsMatch(value);
 
     public static string IndexPath(string name) => name.Length switch
     {
@@ -60,15 +60,18 @@ public static class CargoEndpoints
             return Results.Text(data, "text/plain; charset=utf-8");
         });
 
-        app.MapGet("/cargo/api/v1/crates/{name}/{version}/download", (string name, string version,
+        app.MapGet("/cargo/api/v1/crates/{name}/{version}/download", async (string name, string version,
             Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg) is { } denied) return denied;
             if (!IsName(name) || !IsVersion(version) || db.PackageOrigin("cargo", name, version) is null)
                 return Results.NotFound();
             var path = blobs.Existing(Key(name, version));
-            return path is null ? Results.NotFound() :
-                Results.File(path, "application/octet-stream", enableRangeProcessing: true);
+            if (path is null) return Results.NotFound();
+            var expected = ArtifactDigests.CargoExpected(db.CargoIndex(name), name, version);
+            if (!await ArtifactDigests.MatchesSha256Async(path, expected, null, ctx.RequestAborted))
+                return Results.Json(new { error = "Stored crate requires integrity recovery" }, statusCode: 503);
+            return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
         });
 
         // Cargo's native yank/unyank API modifies index visibility, not crate bytes.
