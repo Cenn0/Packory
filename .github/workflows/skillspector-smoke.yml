@@ -1,0 +1,169 @@
+name: SkillSpector pinned worker smoke
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned offline scanner image
+        run: docker build -t packory-skillspector:smoke workers/skillspector
+      - name: Scan a synthetic benign Skill in a networkless runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          temp="$(mktemp -d)"
+          mkdir -p "$temp/in" "$temp/out"
+          chmod 0777 "$temp/out"
+          trap 'docker rm -f scanner-smoke >/dev/null 2>&1 || true; rm -rf "$temp"' EXIT
+          export SCANNER_TEST_ROOT="$temp"
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, zipfile
+          root = pathlib.Path(os.environ["SCANNER_TEST_ROOT"])
+          name, version = "synthetic-check", "1.0.0"
+          blob = io.BytesIO()
+          with zipfile.ZipFile(blob, "w") as archive:
+              archive.writestr("synthetic-check/SKILL.md",
+                               "---\nname: synthetic-check\ndescription: Harmless test fixture\n---\n"
+                               "This is an inert test fixture.\n")
+          digest = hashlib.sha256(blob.getvalue()).hexdigest()
+          job_id = hashlib.sha256((name + "\n" + version + "\n" + digest).encode()).hexdigest()
+          (root / "in" / (job_id + ".zip")).write_bytes(blob.getvalue())
+          (root / "in" / (job_id + ".json")).write_text(
+              json.dumps({"id": job_id, "sha256": digest}), encoding="utf-8")
+          (root / "job.json").write_text(json.dumps({"id": job_id, "sha256": digest}), encoding="utf-8")
+          PY
+          docker run -d --name scanner-smoke --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --pids-limit 64 --memory 768m --cpus 1.0 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --mount "type=bind,src=$temp/in,dst=/work/in,readonly" \
+            --mount "type=bind,src=$temp/out,dst=/work/out" \
+            packory-skillspector:smoke
+          for i in $(seq 1 120); do
+            if find "$temp/out" -maxdepth 1 -type f -name '*.json' -print -quit | grep -q .; then break; fi
+            if [ "$(docker inspect --format '{{.State.Running}}' scanner-smoke)" != true ]; then
+              docker logs scanner-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["SCANNER_TEST_ROOT"])
+          job = json.loads((root / "job.json").read_text())
+          report_path = root / "out" / (job["id"] + ".json")
+          assert report_path.exists(), "Scanner did not produce a report"
+          result = json.loads(report_path.read_text())
+          assert result["sha256"] == job["sha256"], "Digest mismatch"
+          assert result["exit_code"] in (0, 1), "Scanner execution failed"
+          report = result["report"]
+          assert isinstance(report, dict), "Scanner JSON report missing"
+          assert report.get("metadata", {}).get("llm_requested") is False
+          assert report.get("execution_successful") is True
+          assert report.get("analysis_completeness", {}).get("is_complete") is True
+          assert report.get("risk_assessment", {}).get("recommendation") in (
+              "SAFE", "CAUTION", "DO_NOT_INSTALL")
+          print("Pinned SkillSpector completed offline static analysis of inert fixture")
+          PY
+      - name: Test complete Compose import, scan, approval, MCP distribution and revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_READ_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_WRITE_TOKEN="$(openssl rand -hex 32)"
+          trap 'docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true' EXIT
+          docker compose up -d --build
+          python3 scripts/smoke-skillspector-compose.py
+
+      - name: Integration smoke - compose staging, offline scan, approval and revoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_READ_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_WRITE_TOKEN="$(openssl rand -hex 32)"
+          export PACKORY_PUBLIC_BASE_URL="http://localhost:8080"
+          trap 'docker compose logs --tail=80 || true; docker compose down -v --remove-orphans || true' EXIT
+          docker compose up -d --build
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://localhost:8080/health/live >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://localhost:8080/health/live >/dev/null
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+          import uuid
+          import zipfile
+
+          origin = "http://localhost:8080"
+          admin = os.environ["PACKORY_ADMIN_TOKEN"]
+          def send(path, method="GET", body=None, content_type=None):
+              headers = {"Authorization": "Bearer " + admin}
+              if content_type:
+                  headers["Content-Type"] = content_type
+              req = urllib.request.Request(origin + path, data=body, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      data = resp.read()
+                      return resp.status, json.loads(data) if data and resp.headers.get_content_type() == "application/json" else data
+              except urllib.error.HTTPError as err:
+                  return err.code, err.read()
+
+          archive = io.BytesIO()
+          with zipfile.ZipFile(archive, "w") as z:
+              z.writestr("compose-smoke/SKILL.md",
+                         "---\nname: compose-smoke\ndescription: Harmless synthetic integration fixture\n---\n"
+                         "# Safe verification\nThis fixture contains no executable code.\n")
+          boundary = "packory-" + uuid.uuid4().hex
+          def part(field, filename, content):
+              return (("--" + boundary + "\r\n"
+                       "Content-Disposition: form-data; name=\"" + field + "\"" +
+                       ("; filename=\"" + filename + "\"" if filename else "") +
+                       "\r\n" +
+                       ("Content-Type: application/zip\r\n" if filename else "") +
+                       "\r\n").encode() + content + b"\r\n")
+          payload = part("version", None, b"1.0.0") + part("file", "skill.zip", archive.getvalue()) + ("--" + boundary + "--\r\n").encode()
+          code, response = send("/api/skills", "POST", payload, "multipart/form-data; boundary=" + boundary)
+          assert code == 202 and response["status"] == "QUEUED", (code, response)
+          digest = response["sha256"]
+          download = "/api/skills/compose-smoke/1.0.0/download"
+          code, _ = send(download)
+          assert code == 404, "Premature distribution of unapproved Skill"
+
+          terminal = None
+          for _ in range(90):
+              status, result = send("/api/security/skills/compose-smoke/1.0.0")
+              assert status == 200, status
+              terminal = result["skill"]["state"]
+              if terminal not in ("QUEUED", "PUBLISHING"):
+                  break
+              time.sleep(2)
+          assert terminal == "NEEDS_REVIEW", "Offline scanner did not complete: " + str(terminal)
+
+          def decide(action, reason):
+              data = json.dumps({"sha256": digest, "reason": reason}).encode()
+              return send("/api/security/skills/compose-smoke/1.0.0/" + action,
+                          "POST", data, "application/json")
+          code, _ = decide("approve", "Reviewed inert smoke sample and its completed scan")
+          assert code == 200, "Failed digest-bound approval: " + str(code)
+          code, data = send(download)
+          assert code == 200 and data == archive.getvalue(), "Approved ZIP digest differs"
+          code, _ = decide("revoke", "Integration test requires revoke protection")
+          assert code == 200, "Failed revocation"
+          code, _ = send(download)
+          assert code == 404, "Revoked Skill remains accessible"
+          print("Packory + real NVIDIA offline scanner staging, approval and revoke smoke succeeded")
+          PY

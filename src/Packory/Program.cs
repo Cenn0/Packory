@@ -6,6 +6,10 @@ using System.Threading.RateLimiting;
 using Packory;
 using System.Text;
 using System.Security.Cryptography;
+using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.Server;
+using ModelContextProtocol.Protocol;
+using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 var settings = new Settings();
@@ -64,6 +68,10 @@ if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_RECOVERY_MAINTENAN
     settings.RecoveryMaintenance = maintenance;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_ANONYMOUS_READ"), out var anonymousRead))
     settings.AnonymousRead = anonymousRead;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_SKILL_SECURITY_ENFORCED"), out var skillSecurity))
+    settings.SkillSecurityEnforced = skillSecurity;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_MCP_ENABLED"), out var mcpEnabled))
+    settings.McpEnabled = mcpEnabled;
 settings.Validate();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = settings.MaxArtifactBytes * 2 + 1024 * 1024);
 builder.Services.Configure<FormOptions>(options =>
@@ -109,6 +117,21 @@ builder.Services.AddSingleton<ArtifactRecovery>();
 builder.Services.AddSingleton<PublicationRecoveryService>();
 builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
+builder.Services.AddSingleton<SkillSecurityStore>();
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
+builder.Services.AddSingleton<SkillScanCoordinator>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
+if (settings.McpEnabled)
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options =>
+        {
+            options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
+        })
+        .WithTools<PackoryMcpTools>()
+        .WithResources<PackoryMcpResources>()
+        .WithPrompts<PackoryMcpPrompts>();
+}
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("publish", context =>
@@ -145,6 +168,7 @@ app.Lifetime.ApplicationStopped.Register(startupLease.Dispose);
 if (!readerInstance)
 {
     app.Services.GetRequiredService<IPackageDatabase>().Initialize();
+    app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
     app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
 }
 else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
@@ -152,6 +176,32 @@ else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
     throw new InvalidOperationException("Read-only replica requires an initialized shared metadata database.");
 }
 app.UseRouting();
+// Authenticate before applying the MCP token/OIDC scope gate.
+if (settings.OidcEnabled) app.UseAuthentication();
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/mcp"))
+    {
+        // Explicit Origin validation plus mandatory bearer auth for remote MCP.
+        var origin = ctx.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin))
+        {
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri) ||
+                !Uri.TryCreate(activeSettings.Base, UriKind.Absolute, out var publicUri) ||
+                originUri.GetLeftPart(UriPartial.Authority) != publicUri.GetLeftPart(UriPartial.Authority))
+            {
+                ctx.Response.StatusCode = 403;
+                return;
+            }
+        }
+        if (Access.RequireMcp(ctx, activeSettings) is { } denied)
+        {
+            await denied.ExecuteAsync(ctx);
+            return;
+        }
+    }
+    await next(ctx);
+});
 app.Use(async (ctx, next) =>
 {
     if (readerInstance)
@@ -188,7 +238,6 @@ app.Use(async (ctx, next) =>
     }
     await next(ctx);
 });
-if (settings.OidcEnabled) app.UseAuthentication();
 app.UseRateLimiter();
 app.Use(async (ctx, next) =>
 {
@@ -222,11 +271,13 @@ app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
             statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { status = "ready" });
 });
-app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, IPackageDatabase db, SkillSecurityStore security, HttpContext ctx) =>
 {
     if (Access.Require(ctx, cfg) is { } denied) return denied;
     if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return Results.BadRequest(new { error = "Unknown package kind" });
-    return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50) });
+    return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50)
+        .Where(x => x.Kind != "skill" || !cfg.SkillSecurityEnforced ||
+                    security.IsApproved(x.Name, x.Version)).ToList() });
 });
 app.MapGet("/api/admin/operations/status", (Settings cfg, IPackageDatabase db,
     ArtifactRecovery recovery, HttpContext ctx) =>
@@ -311,6 +362,8 @@ PyPiEndpoints.Map(app);
 NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
+SkillSecurityEndpoints.Map(app);
+if (settings.McpEnabled) app.MapMcp("/mcp");
 app.Run();
 
 public partial class Program { }

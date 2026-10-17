@@ -32,6 +32,9 @@ public sealed class Settings
     public bool StrictDeployment { get; set; }
     // Opt-in Docker authentication handshake even when generic anonymous reads are enabled.
     public bool OciAuthenticatedPing { get; set; }
+    // Security enforcement never trusts the mere existence of a staged ZIP.
+    public bool SkillSecurityEnforced { get; set; } = true;
+    public bool McpEnabled { get; set; } = true;
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
     // Optional single-node filesystem capacity guard. Zero disables it.
     // This does not provide a distributed S3 usage quota.

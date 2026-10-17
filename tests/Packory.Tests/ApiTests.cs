@@ -1,3 +1,5 @@
+using ModelContextProtocol.Client;
+using System.Net.Http.Json;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -379,7 +381,7 @@ public sealed class ApiTests
             form.Add(new ByteArrayContent(bytes), "file", "hello-world.zip");
             return form;
         }
-        using var host = new Host();
+        using var host = new Host(configure: cfg => cfg.SkillSecurityEnforced = false);
         using var client = host.CreateClient();
         Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(WithToken(HttpMethod.Post, "/api/skills", Form(Zip("../SKILL.md"))))).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(WithToken(HttpMethod.Post, "/api/skills", Form(Zip())))).StatusCode);
@@ -389,6 +391,200 @@ public sealed class ApiTests
         Assert.Contains("A demo skill", await (await client.SendAsync(WithToken(HttpMethod.Get,
             "/api/skills/hello-world/1.0.0/skill.md"))).Content.ReadAsStringAsync());
         Assert.Contains("hello-world", await (await client.SendAsync(WithToken(HttpMethod.Get, "/api/packages?kind=skill"))).Content.ReadAsStringAsync());
+    }
+
+
+    [Fact]
+    public async Task Skills_EnforcedUploadIsQueuedAndNeverPublicBeforeReview()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        static byte[] Zip()
+        {
+            using var ms = new MemoryStream();
+            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            {
+                using var writer = new StreamWriter(archive.CreateEntry("scan-me/SKILL.md").Open());
+                writer.Write("---\nname: scan-me\ndescription: Test-only harmless skill\n---\n# Instructions\n");
+            }
+            return ms.ToArray();
+        }
+        var form = new MultipartFormDataContent();
+        form.Add(new StringContent("1.0.0"), "version");
+        form.Add(new ByteArrayContent(Zip()), "file", "test.zip");
+        var upload = await client.SendAsync(WithToken(HttpMethod.Post, "/api/skills", form));
+        Assert.Equal(HttpStatusCode.Accepted, upload.StatusCode);
+        using var metadata = JsonDocument.Parse(await upload.Content.ReadAsStringAsync());
+        var digest = metadata.RootElement.GetProperty("sha256").GetString()!;
+        Assert.Equal("QUEUED", metadata.RootElement.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/skills/scan-me/1.0.0/skill.md"))).StatusCode);
+        Assert.DoesNotContain("scan-me", await (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills"))).Content.ReadAsStringAsync());
+        Assert.DoesNotContain("scan-me", await (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/packages?kind=skill"))).Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync("/mcp",
+            new StringContent("{}", Encoding.UTF8, "application/json"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/security/skills", token: ReadToken))).StatusCode);
+
+        var body = JsonContent.Create(new { sha256 = digest, reason = "Reviewed synthetic harmless example" });
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/approve", body))).StatusCode);
+        var store = host.Services.GetRequiredService<SkillSecurityStore>();
+        Assert.True(store.SaveResult("scan-me", "1.0.0", digest, "NEEDS_REVIEW", 0, "SAFE", "{}"));
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/approve",
+            JsonContent.Create(new { sha256 = digest, reason = "Reviewed synthetic harmless example" })))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/revoke",
+            JsonContent.Create(new { sha256 = digest, reason = "Test the revocation gate" })))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Skills_LegacyBackfillIsExplicitQuarantinedIdempotentAndAdminOnly()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var database = host.Services.GetRequiredService<IPackageDatabase>();
+        var blobs = host.Services.GetRequiredService<BlobStore>();
+        using var stream = new MemoryStream();
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("legacy-smoke/SKILL.md").Open());
+            writer.Write("---\nname: legacy-smoke\ndescription: Inert legacy fixture\n---\n# Test\n");
+        }
+        var data = stream.ToArray();
+        Assert.True(await blobs.PutAsync(SkillEndpoints.SkillKey("legacy-smoke", "1.0.0"),
+            new MemoryStream(data, writable: false), data.Length + 1, CancellationToken.None));
+        Assert.True(database.AddSkill("legacy-smoke", "1.0.0", "Inert legacy fixture", "synthetic-actor"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/legacy-smoke/1.0.0/download"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/backfill", token: ReadToken))).StatusCode);
+
+        var response = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/backfill?limit=25"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(1, body.RootElement.GetProperty("queued").GetInt32());
+        Assert.Equal(0, body.RootElement.GetProperty("remaining").GetInt32());
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        var revision = security.Get("legacy-smoke", "1.0.0");
+        Assert.NotNull(revision);
+        Assert.Equal("QUEUED", revision.State);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(data)), revision.Sha256);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/skills/legacy-smoke/1.0.0/skill.md"))).StatusCode);
+
+        response = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/backfill?limit=25"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var duplicate = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, duplicate.RootElement.GetProperty("queued").GetInt32());
+    }
+
+    [Fact]
+    public async Task Mcp_AuthenticatedClientNegotiatesAndDiscoversReadOnlyTools()
+    {
+        using var host = new Host();
+        using var httpClient = host.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var transport = new HttpClientTransport(new HttpClientTransportOptions
+        {
+            Endpoint = new Uri(httpClient.BaseAddress!, "mcp"),
+            TransportMode = HttpTransportMode.StreamableHttp,
+            AdditionalHeaders = new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer " + ReadToken
+            }
+        }, httpClient);
+        await using var mcp = await McpClient.CreateAsync(transport, cancellationToken: timeout.Token);
+        var tools = await mcp.ListToolsAsync(cancellationToken: timeout.Token);
+        Assert.Contains(tools, tool => tool.Name == "search_artifacts");
+        Assert.Contains(tools, tool => tool.Name == "list_approved_skills");
+        Assert.DoesNotContain(tools, tool => tool.Name.StartsWith("approve_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Mcp_SkillsExtensionListsOnlyApprovedRevisions()
+    {
+        using var host = new Host();
+        using var http = host.CreateClient();
+        const string body = """
+            {"jsonrpc":"2.0","id":2,"method":"skills/list","params":{"_meta":{
+              "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+              "io.modelcontextprotocol/clientInfo":{"name":"test-client","version":"1.0"},
+              "io.modelcontextprotocol/clientCapabilities":{}
+            }}}
+            """;
+        using var request = WithToken(HttpMethod.Post, "/mcp",
+            new StringContent(body, Encoding.UTF8, "application/json"), ReadToken);
+        request.Headers.TryAddWithoutValidation("Mcp-Protocol-Version", "2026-07-28");
+        request.Headers.TryAddWithoutValidation("Mcp-Method", "skills/list");
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        using var response = await http.SendAsync(request);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            "MCP skills/list HTTP " + (int)response.StatusCode + ": " + text);
+        Assert.Contains("skills", text, StringComparison.Ordinal);
+        Assert.Contains("resultType", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SkillSpectorContract_FailsClosedWhenIncompleteOrMalformed()
+    {
+        const string digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var complete = new
+        {
+            sha256 = digest, exit_code = 0,
+            report = new
+            {
+                execution_successful = true,
+                analysis_completeness = new { is_complete = true },
+                metadata = new { llm_requested = false },
+                risk_assessment = new { score = 12, severity = "LOW", recommendation = "SAFE" },
+                issues = Array.Empty<object>()
+            }
+        };
+        var parsed = SkillScanResult.Parse(JsonSerializer.Serialize(complete), digest);
+        Assert.Equal("NEEDS_REVIEW", parsed.State);
+        Assert.Equal(12, parsed.Risk);
+        Assert.Throws<InvalidDataException>(() => SkillScanResult.Parse(
+            JsonSerializer.Serialize(complete), new string('b', 64)));
+        var incomplete = JsonSerializer.Serialize(complete).Replace(
+            "\"is_complete\":true", "\"is_complete\":false", StringComparison.Ordinal);
+        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(incomplete, digest).State);
+        var suspicious = JsonSerializer.Serialize(complete).Replace(
+            "\"severity\":\"LOW\"", "\"severity\":\"CRITICAL\"", StringComparison.Ordinal);
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(suspicious, digest).State);
+        // NVIDIA may smooth its aggregate risk even when one individual finding
+        // remains HIGH/CRITICAL. That finding must block a reviewer approval.
+        var withHighFinding = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        withHighFinding["report"]!["issues"] = JsonSerializer.SerializeToNode(
+            new[] { new { severity = "HIGH", rule_id = "SYNTHETIC-TEST" } });
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(
+            withHighFinding.ToJsonString(), digest).State);
+        // Unknown suppression/baseline entries must not silently hide risk.
+        withHighFinding["report"]!["issues"] = new JsonArray();
+        withHighFinding["report"]!["suppressed_count"] = 1;
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(
+            withHighFinding.ToJsonString(), digest).State);
+        var missingRiskFields = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        ((JsonObject)missingRiskFields["report"]!).Remove("risk_assessment");
+        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(
+            missingRiskFields.ToJsonString(), digest).State);
+        var malformedFinding = JsonNode.Parse(JsonSerializer.Serialize(complete))!;
+        malformedFinding["report"]!["issues"] = new JsonArray(new JsonObject { ["unexpected"] = "value" });
+        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(
+            malformedFinding.ToJsonString(), digest).State);
     }
 
     [Fact]
@@ -553,7 +749,9 @@ public sealed class ApiTests
     [Fact]
     public async Task AuditEvents_RecordSuccessfulHostedPublishesWithoutCredentials()
     {
-        using var host = new Host();
+        // This test asserts the legacy synchronous publication/audit contract.
+        // The enforced asynchronous security flow is covered in the separate test.
+        using var host = new Host(configure: cfg => cfg.SkillSecurityEnforced = false);
         using var client = host.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/admin/audit")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(HttpMethod.Get,

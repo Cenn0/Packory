@@ -10,7 +10,7 @@ WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     PACKORY_DATA_DIRECTORY=/data \
     DOTNET_EnableDiagnostics=0
-RUN mkdir -p /data && chown "$APP_UID:$APP_UID" /data
+RUN mkdir -p /data/skill-scans/in /data/skill-scans/out && chown -R "$APP_UID:$APP_UID" /data
 COPY --from=build /app/publish/ .
 USER $APP_UID
 EXPOSE 8080

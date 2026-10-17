@@ -36,6 +36,21 @@ public static class Access
             statusCode: StatusCodes.Status403Forbidden);
     }
 
+    // Remote MCP must require an authenticated reader even when the public REST catalog is anonymous.
+    public static IResult? RequireMcp(HttpContext context, Settings settings)
+    {
+        var token = ExtractToken(context);
+        var role = (token is null ? null : CredentialRole(token, settings, context)) ??
+            OidcCredentialRole(context, settings);
+        if (role is not ("admin-token" or "write-token" or "read-token" or "managed-write"
+            or "managed-read" or "oidc-admin" or "oidc-write" or "oidc-read"))
+            return Results.Unauthorized();
+        context.Items[RoleKey] = role;
+        context.Items[ActorKey] = role.StartsWith("managed-", StringComparison.Ordinal)
+            ? "managed-token:" + (context.Items[ManagedIdKey] as string ?? "unknown") : role;
+        return null;
+    }
+
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
