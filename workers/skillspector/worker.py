@@ -32,7 +32,8 @@ def process(job_file: pathlib.Path) -> None:
         result["sha256"] = digest
         if zip_file.stat().st_size > MAX_ARCHIVE:
             raise ValueError("Oversized archive")
-        hash_value = hashlib.file_digest(zip_file.open("rb"), "sha256").hexdigest()
+        with zip_file.open("rb") as handle:
+            hash_value = hashlib.file_digest(handle, "sha256").hexdigest()
         if hash_value != digest:
             raise ValueError("Snapshot digest differs from queue manifest")
         completed = subprocess.run(
