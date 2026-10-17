@@ -18,7 +18,7 @@ NAME = "compose-e2e-skill"
 VERSION = "1.0.0"
 
 
-def http(method, path, data=None, mime=None, *, mcp_method=None):
+def http(method, path, data=None, mime=None, *, mcp_method=None, mcp_name=None):
     headers = {"Authorization": "Bearer " + os.environ["PACKORY_ADMIN_TOKEN"]}
     if mime:
         headers["Content-Type"] = mime
@@ -28,6 +28,8 @@ def http(method, path, data=None, mime=None, *, mcp_method=None):
             "Mcp-Method": mcp_method,
             "Accept": "application/json, text/event-stream",
         })
+    if mcp_name:
+        headers["Mcp-Name"] = mcp_name
     request = urllib.request.Request(BASE + path, method=method, data=data, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -149,7 +151,7 @@ def check_mcp():
     }
     code, result_bytes = http(
         "POST", "/mcp", json.dumps(read_request).encode(),
-        "application/json", mcp_method="resources/read"
+        "application/json", mcp_method="resources/read", mcp_name=entry["uri"]
     )
     require(code == 200, "MCP resources/read HTTP " + str(code) + ", response: " + result_bytes[:350].decode("utf-8", "replace"))
     result = jsonrpc_payload(result_bytes)
