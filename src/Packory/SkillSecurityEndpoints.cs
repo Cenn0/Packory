@@ -92,6 +92,63 @@ public static class SkillSecurityEndpoints
             return Results.Conflict(new { error = "Revision, digest or state changed." });
         }).RequireRateLimiting("publish");
 
+        // Existing installations already have immutable Skill ZIPs in the catalog.
+        // An explicit admin-only backfill copies and revalidates them into the new
+        // quarantine namespace. No legacy revision is grandfathered as APPROVED.
+        app.MapPost("/api/security/skills/backfill", async (
+            Settings settings, IPackageDatabase database, BlobStore blobs,
+            SkillSecurityStore security, ArtifactLocks locks, HttpContext ctx, int? limit) =>
+        {
+            if (Access.RequireAdmin(ctx, settings) is { } denied) return denied;
+            if (settings.InstanceRole == "reader" || !settings.SkillSecurityEnforced)
+                return Results.Conflict(new { error = "Writer with skill enforcement is required." });
+            if (limit is < 1 or > 100) return Results.BadRequest(new { error = "limit must be 1..100." });
+            var entries = database.Skills().Where(skill =>
+                    Names.Skill(skill.Name) && Names.Version(skill.Version) &&
+                    security.Get(skill.Name, skill.Version) is null)
+                .Take(limit ?? 25).ToArray();
+            var queued = 0;
+            var skipped = 0;
+            var maxBytes = Math.Min(settings.MaxArtifactBytes, 20L * 1024 * 1024);
+            foreach (var skill in entries)
+            {
+                using var gate = await locks.AcquireAsync("skill", skill.Name, skill.Version, ctx.RequestAborted);
+                if (security.Get(skill.Name, skill.Version) is not null) continue;
+                var source = blobs.Existing(SkillEndpoints.SkillKey(skill.Name, skill.Version));
+                if (source is null || new FileInfo(source).Length > maxBytes)
+                {
+                    skipped++;
+                    continue;
+                }
+                var bytes = await File.ReadAllBytesAsync(source, ctx.RequestAborted);
+                SkillEndpoints.SkillManifest manifest;
+                try { manifest = SkillEndpoints.InspectZip(bytes); }
+                catch (InvalidDataException) { skipped++; continue; }
+                if (manifest.Name != skill.Name)
+                {
+                    skipped++;
+                    continue;
+                }
+                var digest = Convert.ToHexStringLower(
+                    System.Security.Cryptography.SHA256.HashData(bytes));
+                var stagingKey = $"skill-staging/{digest}.zip";
+                var existing = blobs.Existing(stagingKey);
+                if (existing is not null &&
+                    SkillScanCoordinator.HashFile(existing) != digest)
+                    return Results.StatusCode(503);
+                if (existing is null && !await blobs.PutAsync(stagingKey,
+                    new MemoryStream(bytes, false), maxBytes, ctx.RequestAborted))
+                    return Results.Conflict(new { error = "Staging collision; investigate storage." });
+                if (security.TryStage(skill.Name, skill.Version, skill.Description, digest, stagingKey))
+                    queued++;
+            }
+            ctx.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(new { queued, skipped, inspected = entries.Length,
+                remaining = database.Skills().Count(skill =>
+                    Names.Skill(skill.Name) && Names.Version(skill.Version) &&
+                    security.Get(skill.Name, skill.Version) is null) });
+        }).RequireRateLimiting("publish");
+
         app.MapGet("/api/security/status", (Settings settings, SkillSecurityStore security,
             HttpContext ctx) =>
         {
