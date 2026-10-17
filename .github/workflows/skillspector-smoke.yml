@@ -1,0 +1,74 @@
+name: SkillSpector pinned worker smoke
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned offline scanner image
+        run: docker build -t packory-skillspector:smoke workers/skillspector
+      - name: Scan a synthetic benign Skill in a networkless runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          temp="$(mktemp -d)"
+          mkdir -p "$temp/in" "$temp/out"
+          chmod 0777 "$temp/out"
+          trap 'docker rm -f scanner-smoke >/dev/null 2>&1 || true; rm -rf "$temp"' EXIT
+          export SCANNER_TEST_ROOT="$temp"
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, zipfile
+          root = pathlib.Path(os.environ["SCANNER_TEST_ROOT"])
+          name, version = "synthetic-check", "1.0.0"
+          blob = io.BytesIO()
+          with zipfile.ZipFile(blob, "w") as archive:
+              archive.writestr("synthetic-check/SKILL.md",
+                               "---\nname: synthetic-check\ndescription: Harmless test fixture\n---\n"
+                               "This is an inert test fixture.\n")
+          digest = hashlib.sha256(blob.getvalue()).hexdigest()
+          job_id = hashlib.sha256((name + "\n" + version + "\n" + digest).encode()).hexdigest()
+          (root / "in" / (job_id + ".zip")).write_bytes(blob.getvalue())
+          (root / "in" / (job_id + ".json")).write_text(
+              json.dumps({"id": job_id, "sha256": digest}), encoding="utf-8")
+          (root / "job.json").write_text(json.dumps({"id": job_id, "sha256": digest}), encoding="utf-8")
+          PY
+          docker run -d --name scanner-smoke --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --pids-limit 64 --memory 768m --cpus 1.0 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --mount "type=bind,src=$temp/in,dst=/work/in,readonly" \
+            --mount "type=bind,src=$temp/out,dst=/work/out" \
+            packory-skillspector:smoke
+          for i in $(seq 1 120); do
+            if find "$temp/out" -maxdepth 1 -type f -name '*.json' -print -quit | grep -q .; then break; fi
+            if [ "$(docker inspect --format '{{.State.Running}}' scanner-smoke)" != true ]; then
+              docker logs scanner-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["SCANNER_TEST_ROOT"])
+          job = json.loads((root / "job.json").read_text())
+          report_path = root / "out" / (job["id"] + ".json")
+          assert report_path.exists(), "Scanner did not produce a report"
+          result = json.loads(report_path.read_text())
+          assert result["sha256"] == job["sha256"], "Digest mismatch"
+          assert result["exit_code"] in (0, 1), "Scanner execution failed"
+          report = result["report"]
+          assert isinstance(report, dict), "Scanner JSON report missing"
+          assert report.get("metadata", {}).get("llm_requested") is False
+          assert report.get("execution_successful") is True
+          assert report.get("analysis_completeness", {}).get("is_complete") is True
+          assert report.get("risk_assessment", {}).get("recommendation") in (
+              "SAFE", "CAUTION", "DO_NOT_INSTALL")
+          print("Pinned SkillSpector completed offline static analysis of inert fixture")
+          PY
