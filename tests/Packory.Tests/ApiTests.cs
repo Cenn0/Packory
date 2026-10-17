@@ -200,7 +200,7 @@ public sealed class ApiTests
     [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad","enabled":true}""")]
     [InlineData("""{"id":"abc","id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
     [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":" Bad "}""")]
-    [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad\\nname"}""")]
+    [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad\nname"}""")]
     public async Task DraftFeeds_RejectAmbiguousOrUnsupportedSpecifications(string json)
     {
         using var host = new Host();
