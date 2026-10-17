@@ -90,3 +90,24 @@ Skills follow the [Agent Skills specification](https://agentskills.io/specificat
 ## HTTP error codes
 
 Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient token permission, `404` absent package/skill, `409` version already exists, `413` artifact too large, `502` upstream/error data, `504` upstream timeout. Errors do not intentionally expose environment secrets, connection strings, or upstream credentials. Inconsistent unindexed/missing local immutable blobs fail closed (502) rather than silently serving or substituting bytes from another origin. Readiness is 503 if a hosted blob is missing at startup. npm proxy tarballs require an upstream `sha512-` integrity or SHA-1 `shasum` claim that matches the downloaded bytes.
+
+## OCI upload and integrity contract
+
+See [OCI endpoints](oci.md) and [chunk recovery / upgrade](oci-upload-recovery.md).
+`POST /v2/<repository>/blobs/uploads/` starts a bounded session; use the returned
+Location for PATCH, GET, DELETE and final PUT with `?digest=sha256:<hex>`.
+PATCH/final PUT may provide inclusive `Content-Range: start-end`. A supplied
+range must begin at the committed offset and match Content-Length and the body.
+Invalid or replayed ranges return **416** with the current Range and Location;
+GET on the session returns **204** with the acknowledged offset. Complete chunks
+return **202**, successful digest-verified publication **201**, and cancellation
+**204**. Unknown or cross-repository sessions return **404**. Session exhaustion
+returns **429** with Retry-After. Existing artifact size limits still return 413.
+
+A process restart can resume current-format sessions on the same data directory;
+old session formats without committed offsets are preserved but not trusted.
+Filesystem OCI digest corruption is refused with **503** on read/mount, not
+returned as artifact bytes. This does not add independent private-feed read
+permissions, a Bearer grant service, multi-node sessions or provider certification.
+Referrers honor `artifactType` before setting OCI-Filters-Applied. Accepted subject
+associations return OCI-Subject; `tags/list?n=0` returns an empty page.

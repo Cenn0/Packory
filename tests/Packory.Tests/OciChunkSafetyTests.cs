@@ -178,7 +178,7 @@ public sealed class OciChunkSafetyTests
             catch (OciChunkRangeException) { return false; }
         }
         var results = await Task.WhenAll(Attempt(), Attempt());
-        Assert.Single(results.Where(result => result));
+        Assert.Single(results, result => result);
         Assert.Equal("abc", File.ReadAllText(f.Ticket.Path));
     }
 
