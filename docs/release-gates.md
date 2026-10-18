@@ -5,7 +5,7 @@ This is an **operator and reviewer acceptance record template**, not a certifica
 ## Mandatory single-writer preconditions
 
 1. Pin the release commit, supported client operations, provider versions and container artifact provenance. Record passed CI checks; a green workflow means only its tested scope.
-2. Confirm one writer only, restricted readers, no active-active claim; document lease behavior and restart semantics. PostgreSQL session advisory locks **do not fence a stale writer after partition**.
+2. Confirm one writer only, restricted readers, no active-active claim; document lease behavior and restart semantics. PostgreSQL session advisory locks **do not fence a stale writer after partition**. Runtime lease checks now verify that the backend still owns its granted advisory lock (rather than merely responding to `SELECT 1`); this is defense-in-depth only and **does not provide independent fencing or active-active correctness**.
 3. Check TLS on public ingress and PostgreSQL (`SSL Mode=VerifyFull` in strict mode), S3 HTTPS and least-privilege egress/credentials. No public anonymous reads for private feeds.
 4. Obtain a **consistent PostgreSQL metadata watermark and S3 object/version inventory while writes are fully stopped**. Include recovery/quarantine prefixes, immutable object versions, retention policy and encryption-key recovery. Confirm no life-cycle rule deletes quarantine evidence early.
 5. Restore database + objects to a completely isolated endpoint and bucket/prefix. Hash-verify NuGet, npm, Cargo, PyPI, OCI and Skills contents against authoritative references. Test native client retrieval **only** from restored Packory. Test abort/restart at every journal/quarantine boundary.
