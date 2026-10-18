@@ -87,6 +87,34 @@ public static class FeedEndpoints
             return Results.NoContent();
         }).RequireRateLimiting("publish");
 
+        // Activating a reviewed private NuGet-hosted draft is a separate,
+        // auditable administrator decision; proxy/group/other ecosystems remain
+        // draft-only until their native isolation suites are implemented.
+        app.MapPost("/api/v1/admin/feeds/{id}/activate", (
+            string id, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+        {
+            if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+            if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
+            ctx.Response.Headers.CacheControl = "no-store";
+            if (!db.TryActivateHostedNugetFeed(id, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Only disabled private hosted NuGet drafts can be activated" });
+            return Results.Ok(new { id, enabled = true, kind = "nuget", mode = "hosted",
+                visibility = "private" });
+        }).RequireRateLimiting("publish");
+
+        app.MapPost("/api/v1/admin/feeds/{id}/deactivate", (
+            string id, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+        {
+            if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+            if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
+            ctx.Response.Headers.CacheControl = "no-store";
+            if (!db.TryDeactivateHostedNugetFeed(id, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Only active private hosted NuGet feeds can be disabled" });
+            // Keep every revision, digest, journal and blob. Re-activation
+            // is a separate explicit operator action; no GC is performed.
+            return Results.Ok(new { id, enabled = false, retained = true });
+        }).RequireRateLimiting("publish");
+
         app.MapGet("/api/v1/admin/feeds/{id}", (string id, Settings cfg,
             IPackageDatabase db, HttpContext ctx) =>
         {
