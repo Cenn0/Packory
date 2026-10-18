@@ -152,7 +152,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as out:
     json.dump(value, out, separators=(",", ":"))
 PY
 openssl dgst -sha256 -sign "$WORK/validation/signer-private.pem" \
-  -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:-1 \
+  -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest \
   -out "$WORK/validation/synthetic-run.sig" "$WORK/validation/synthetic-run.json"
 VALIDATION_DIGEST="$(sha256sum "$WORK/validation/synthetic-run.json" | cut -d' ' -f1)"
 
