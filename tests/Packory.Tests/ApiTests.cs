@@ -267,6 +267,27 @@ public sealed class ApiTests
 
         await CreateAndActivateAsync("alpha-feed");
         await CreateAndActivateAsync("beta-feed");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "read", @namespace = "feed:alpha-feed:publish",
+                    expiresInHours = 1
+                })))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "write", @namespace = "feed:alpha-feed:read",
+                    expiresInHours = 1
+                })))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "write", @namespace = "feed:future-feed:publish",
+                    expiresInHours = 1
+                })))).StatusCode);
         var writer = await TokenAsync("write", "feed:alpha-feed:publish");
         var alphaReader = await TokenAsync("read", "feed:alpha-feed:read");
         var betaReader = await TokenAsync("read", "feed:beta-feed:read");
