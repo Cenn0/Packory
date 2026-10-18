@@ -268,4 +268,52 @@ public sealed class ValidationTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData("feed:alpha-feed:read", true)]
+    [InlineData("feed:alpha-feed:publish", true)]
+    [InlineData("feed:alpha-feed:admin", false)]
+    [InlineData("feed:../test:read", false)]
+    [InlineData("feed:alpha-feed:write", false)]
+    [InlineData("nuget:demo.*", false)]
+    [InlineData("feed:alpha-feed:read:admin", false)]
+    [InlineData("feed:default:read", true)]
+    public void FeedGrantSyntaxIsSeparateFromLegacyNamespaceGrants(
+        string grant, bool accepted)
+    {
+        Assert.Equal(accepted, Access.ValidFeedGrant(grant));
+        if (accepted)
+            Assert.False(Access.MatchesNamespace(grant, "nuget", "Private.Package"));
+    }
+
+    [Fact]
+    public void OidcFeedClaimsAreNarrowedToSignedAudienceAndScopedOperations()
+    {
+        var cfg = new Settings
+        {
+            OidcAuthority = "https://identity.example.invalid/realms/fixture",
+            OidcAudience = "packory-api",
+            AnonymousRead = true
+        };
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        var identity = new System.Security.Claims.ClaimsIdentity(new[]
+        {
+            new System.Security.Claims.Claim("scope", "packory.read packory.write"),
+            new System.Security.Claims.Claim("packory_feed", "alpha-feed:read")
+        }, "signed-test-fixture");
+        context.User = new System.Security.Claims.ClaimsPrincipal(identity);
+        Assert.Null(Access.RequireFeed(context, cfg, "alpha-feed"));
+        Assert.NotNull(Access.RequireFeed(context, cfg, "alpha-feed", publish: true));
+        Assert.NotNull(Access.RequireFeed(context, cfg, "beta-feed"));
+        identity.AddClaim(new System.Security.Claims.Claim("packory_feed",
+            "alpha-feed:publish"));
+        Assert.Null(Access.RequireFeed(context, cfg, "alpha-feed", publish: true));
+        // No authorization simply because a user is authenticated.
+        context.User = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(new[]
+            {
+                new System.Security.Claims.Claim("scope", "openid")
+            }, "signed-test-fixture"));
+        Assert.NotNull(Access.RequireFeed(context, cfg, "alpha-feed"));
+    }
+
 }
