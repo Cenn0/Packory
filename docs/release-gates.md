@@ -99,3 +99,17 @@ trusted checksum from the bytes being inspected. Historical V1/V2 packages
 without this ledger remain explicitly unverified; they are not accepted as
 proof of an all-six-ecosystem integrity pass. Independently test historical
 upgrade/rollback and real-provider restore before production deployment.
+
+
+## Private hosted-feed V4 release gate
+
+A native client passing a test against one private NuGet hosted feed
+is **not** global multi-feed certification. Verify at least two
+same-package/same-version revisions in separate feed stores and
+independently scoped readers/publishers. Confirm denied cross-feed
+access, revocation, reserved legacy namespace isolation,
+disabled-feed behavior and recovery after interrupted uploads.
+Check V4 `feed_nuget_versions` fingerprints in PostgreSQL/S3 restore
+and retention of all private objects. MS2 still requires independent
+provider tests, quota/accounting, IAM and browser hardening and the
+remaining ecosystem adapters.
