@@ -51,6 +51,24 @@ public static class Access
         return null;
     }
 
+    /// <summary>
+    /// Packory MCP exposes the global artifact catalog, not a single hosted
+    /// feed. A managed credential restricted to one feed or publishing
+    /// namespace must never escape that grant by calling MCP tools.
+    /// RequireFeed continues to use RequireMcp so native feed tokens work.
+    /// </summary>
+    public static IResult? RequireGlobalMcp(HttpContext context, Settings settings)
+    {
+        if (RequireMcp(context, settings) is { } denied) return denied;
+        var role = context.Items[RoleKey] as string;
+        if ((role is "managed-read" or "managed-write") &&
+            context.Items.TryGetValue(ManagedNamespaceKey, out var scope) &&
+            scope is string)
+            return Results.Json(new { error = "Scoped credentials cannot read the global MCP catalog" },
+                statusCode: StatusCodes.Status403Forbidden);
+        return null;
+    }
+
     // Validation is never authorized by static catalog credentials or general packory.read.
     // The authenticated OIDC token must carry both the ordinary MCP entry scope
     // and the additional, dedicated validation scope.
