@@ -105,6 +105,27 @@ public sealed class PostgresProviderTests
         Assert.Contains("1.0.0", db.Versions("nuget", nuget));
         Assert.Single(db.Search(nuget, "nuget", 50));
 
+        var feedId = "isolated-" + suffix;
+        var created = DateTimeOffset.UtcNow.ToString("O");
+        Assert.True(db.TryCreateDraftFeed(new FeedDefinition(feedId, "nuget", "hosted",
+            "private", "Synthetic isolated NuGet", false, created, created), "integration-admin"));
+        Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
+        var scopedDigest = Convert.ToBase64String(
+            System.Security.Cryptography.SHA512.HashData("feed-only"u8.ToArray()));
+        Assert.True(db.PublishFeedNuget(feedId, nuget, "1.0.0", "only-in-feed",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.False(db.PublishFeedNuget(feedId, nuget, "1.0.0", "overwrite",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.Single(db.FeedNugetVersions(feedId, nuget));
+        Assert.Equal(scopedDigest, db.GetFeedNugetRevision(feedId, nuget, "1.0.0")?.Sha512);
+        Assert.Null(db.GetFeedNugetRevision("default-nuget", nuget, "1.0.0"));
+        Assert.True(db.TryDeactivateHostedNugetFeed(feedId, "integration-admin"));
+        Assert.False(db.PublishFeedNuget(feedId, "disabled", "1.0.0", "deny",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.False(db.TryDeleteDraftFeed(feedId, "integration-admin"));
+        Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
+        Assert.Equal(scopedDigest, db.GetFeedNugetRevision(feedId, nuget, "1.0.0")?.Sha512);
+
         var npm = "pg-" + suffix;
         Assert.True(db.PutNpmVersion(npm, "1.0.0", "{\"name\":\"test\"}",
             "test", new Dictionary<string, string> { ["latest"] = "1.0.0" }, "integration-writer"));
