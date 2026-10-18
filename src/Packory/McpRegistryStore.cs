@@ -79,7 +79,8 @@ public sealed record McpRegistryManifest(
             uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
             uri.Host.Contains('_') || uri.Host.Contains('%') ||
             !uri.Host.Contains('.') || IPAddress.TryParse(uri.Host, out _) ||
-            url.Any(char.IsControl))
+            url.Any(char.IsControl) || url.Contains('{') || url.Contains('}') ||
+            url.Contains('\\'))
             return false;
         // No network calls are made here. A DNS name can still later resolve to
         // a private address; consumers must implement their own SSRF defenses.
@@ -241,10 +242,30 @@ public sealed class McpRegistryStore(Settings settings)
         cmd.ExecuteNonQuery();
     }
 
-    private static McpRegistryEntry Read(DbDataReader row) => new(
-        row.GetString(0), row.GetString(1), row.GetString(2), row.GetString(3),
-        row.GetString(4), row.GetString(5), row.GetString(6), row.GetString(7),
-        row.GetString(8));
+    private static McpRegistryEntry? Read(DbDataReader row)
+    {
+        var entry = new McpRegistryEntry(
+            row.GetString(0), row.GetString(1), row.GetString(2), row.GetString(3),
+            row.GetString(4), row.GetString(5), row.GetString(6), row.GetString(7),
+            row.GetString(8));
+        // Detect storage-level corruption or an incomplete out-of-band edit.
+        // This is NOT publisher authentication: a DB administrator could
+        // modify both bytes and checksum. Do not return inconsistent metadata.
+        if (!ArtifactDigests.ValidSha256(entry.Sha256))
+            return null;
+        var bytes = Encoding.UTF8.GetBytes(entry.Json);
+        if (!CryptographicOperations.FixedTimeEquals(
+            SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
+            return null;
+        try
+        {
+            var manifest = McpRegistryManifest.Parse(bytes);
+            return manifest.Name == entry.Name && manifest.Version == entry.Version &&
+                   manifest.Title == entry.Title && manifest.Description == entry.Description &&
+                   manifest.RemoteUrl == entry.RemoteUrl ? entry : null;
+        }
+        catch (InvalidDataException) { return null; }
+    }
 
     public bool Stage(McpRegistryManifest manifest)
     {
@@ -335,7 +356,11 @@ public sealed class McpRegistryStore(Settings settings)
             ("limit", Math.Clamp(limit, 1, 101)), ("skip", skip));
         using var reader = cmd.ExecuteReader();
         var results = new List<McpRegistryEntry>();
-        while (reader.Read()) results.Add(Read(reader));
+        while (reader.Read())
+        {
+            var entry = Read(reader);
+            if (entry is not null) results.Add(entry);
+        }
         return results;
     }
 }
