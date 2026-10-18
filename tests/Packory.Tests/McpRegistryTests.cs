@@ -1,4 +1,5 @@
 using System.Net;
+using ModelContextProtocol.Client;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -166,6 +167,58 @@ public sealed class McpRegistryTests
     }
 
     [Fact]
+    public async Task OfficialMcpClientDiscoversAndInvokesPublishedServerMetadataOnly()
+    {
+        using var host = new Host();
+        using var httpClient = host.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var transport = new HttpClientTransport(new HttpClientTransportOptions
+        {
+            Endpoint = new Uri(httpClient.BaseAddress!, "mcp"),
+            TransportMode = HttpTransportMode.StreamableHttp,
+            AdditionalHeaders = new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer " + ReaderToken
+            }
+        }, httpClient);
+        await using var mcp = await McpClient.CreateAsync(transport, cancellationToken: timeout.Token);
+        var tools = await mcp.ListToolsAsync(cancellationToken: timeout.Token);
+        Assert.Contains(tools, tool => tool.Name == "search_mcp_servers");
+        Assert.Contains(tools, tool => tool.Name == "get_mcp_server");
+        Assert.DoesNotContain(tools, tool => tool.Name.StartsWith("publish_mcp_", StringComparison.Ordinal));
+
+        var before = await mcp.CallToolAsync("search_mcp_servers",
+            new Dictionary<string, object?> { ["query"] = "synthetic" },
+            cancellationToken: timeout.Token);
+        Assert.DoesNotContain("synthetic-server", JsonSerializer.Serialize(before));
+        var store = host.Services.GetRequiredService<McpRegistryStore>();
+        var metadata = McpRegistryManifest.Parse(Payload(ValidJson));
+        Assert.True(store.Stage(metadata));
+        Assert.True(store.Decide(metadata.Name, metadata.Version, metadata.Sha256,
+            "publish", "Verified inert metadata for transport test", "test-admin"));
+
+        var after = await mcp.CallToolAsync("search_mcp_servers",
+            new Dictionary<string, object?> { ["query"] = "synthetic" },
+            cancellationToken: timeout.Token);
+        Assert.Contains("synthetic-server", JsonSerializer.Serialize(after));
+        Assert.Contains("publisherVerified", JsonSerializer.Serialize(after));
+        var detail = await mcp.CallToolAsync("get_mcp_server",
+            new Dictionary<string, object?>
+            {
+                ["name"] = metadata.Name, ["version"] = metadata.Version
+            }, cancellationToken: timeout.Token);
+        Assert.Contains(metadata.Sha256, JsonSerializer.Serialize(detail));
+        Assert.True(store.Decide(metadata.Name, metadata.Version, metadata.Sha256,
+            "revoke", "Synthetic transport revoke", "test-admin"));
+        var revoked = await mcp.CallToolAsync("get_mcp_server",
+            new Dictionary<string, object?>
+            {
+                ["name"] = metadata.Name, ["version"] = metadata.Version
+            }, cancellationToken: timeout.Token);
+        Assert.Contains("unavailable", JsonSerializer.Serialize(revoked));
+    }
+
+    [Fact]
     public async Task RestAndMcpNeverExposePendingOrRevokedMetadata()
     {
         using var host = new Host();
@@ -194,8 +247,8 @@ public sealed class McpRegistryTests
         Assert.Equal(HttpStatusCode.NotFound,
             (await client.SendAsync(Bearer(HttpMethod.Get, detail, ReaderToken))).StatusCode);
         var store = host.Services.GetRequiredService<McpRegistryStore>();
-        Assert.Equal("unavailable", JsonSerializer.Serialize(McpRegistryMcpTools.GetMcpServer(
-            "org.example/synthetic-server", "1.2.3", store)).Contains("unavailable") ? "unavailable" : "unexpected");
+        Assert.Contains("unavailable", JsonSerializer.Serialize(McpRegistryMcpTools.GetMcpServer(
+            "org.example/synthetic-server", "1.2.3", store)));
         var decisionJson = JsonSerializer.Serialize(new
         {
             name = "org.example/synthetic-server", version = "1.2.3", sha256 = digest,
