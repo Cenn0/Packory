@@ -310,6 +310,21 @@ public sealed class PostgresS3RecoveryTests
                     "Bearer", cfg.AdminToken);
                 using var response = await client.SendAsync(request);
                 Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+
+                using var unauthenticatedScan = await client.GetAsync("/api/admin/integrity/scan");
+                Assert.Equal(System.Net.HttpStatusCode.Unauthorized, unauthenticatedScan.StatusCode);
+                using var scanRequest = new HttpRequestMessage(HttpMethod.Get,
+                    "/api/admin/integrity/scan?after=0&limit=3");
+                scanRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                    "Bearer", cfg.AdminToken);
+                using var scanResponse = await client.SendAsync(scanRequest);
+                Assert.Equal(System.Net.HttpStatusCode.OK, scanResponse.StatusCode);
+                Assert.Equal("no-store", scanResponse.Headers.CacheControl?.ToString());
+                using var scan = System.Text.Json.JsonDocument.Parse(
+                    await scanResponse.Content.ReadAsStringAsync());
+                Assert.Equal(0, scan.RootElement.GetProperty("checked").GetInt32());
+                Assert.Equal(1, scan.RootElement.GetProperty("pendingPublicationIntents").GetInt32());
+                Assert.Equal(0, scan.RootElement.GetProperty("totalReferences").GetInt32());
             }
             Assert.Contains(db.PendingPublications(), entry => entry.Key == key);
         }
