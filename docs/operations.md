@@ -379,13 +379,18 @@ Result states:
 | `storage_unavailable` | Provider, filesystem or permission failure; treat as inconclusive |
 
 The scanner uses bounded per-request pages, a shared **two requests/minute**
-zero-queue limiter and a 45-second application cancellation budget. Provider
-methods that synchronously materialize local S3 cache files may have their own
-network timeouts and do not provide a guaranteed wall-clock limit. The auditor
-does **not** mutate registry metadata, quarantine, delete, publish, garbage
-collect or automatically repair any object. S3 inspection can populate the
-**local** cache. Some objects (notably NuGet) have no durable publisher-time
-digests; checking that a file exists does not validate its bytes.
+zero-queue limiter and a 45-second application cancellation budget. For S3,
+it performs a direct cancellation-aware **remote HEAD** when there is no
+recorded digest, or a bounded streaming **GET plus SHA-256/SHA-512/SHA-1**
+when a digest exists; it never trusts an older local artifact cache copy
+as remote integrity evidence. The legacy npm mirror **metadata** lookup can
+still materialize a local cache and may have its own storage/network
+timeout; a 45-second wall-clock completion guarantee is not established.
+The auditor does **not** mutate registry metadata, quarantine, delete,
+publish, garbage collect or automatically repair any S3 object. No existing
+local artifact copy is deleted or refreshed by direct remote inspection.
+Some objects (notably NuGet) have no durable publisher-time digests;
+checking only remote existence does not validate their bytes.
 
 Treat any nonzero `pendingPublicationIntents` as an outstanding recovery
 blocker and separately inspect `/api/admin/publications/pending`. Even when

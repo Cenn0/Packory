@@ -171,8 +171,9 @@ Open decisions: first real S3 provider/PG topology; hosted+proxy before any grou
 ## Delivery note — MS1.6 inspection slice (18 October 2026)
 
 A maintenance-only, admin-scoped bounded catalog-reference integrity audit
-has been implemented with per-family digest comparisons, negative cases and
-a real PostgreSQL/S3-emulator authorization check. This covers an **inspection
+has been implemented with per-family digest comparisons, negative cases,
+a real PostgreSQL/S3-emulator authorization check, and direct streamed S3
+integrity reads that cannot silently accept a stale local cache. This covers an **inspection
 subset**, not M1.6 exit: NuGet lacks durable publication-time digests, remote
 S3 object versions/retention and unreferenced objects are not exhaustively
 inventoried, and the scan is not an atomic cross-store snapshot. The existing

@@ -7,8 +7,8 @@ namespace Packory;
 /// <summary>
 /// Bounded, read-only inspection of *referenced* immutable artifacts.
 /// This is not garbage collection, provider certification, or an atomic
-/// multi-store snapshot. The only network reads are through the configured
-/// BlobStore; S3 may populate its local cache without mutating remote objects.
+/// multi-store snapshot. S3 artifact evidence uses direct, cancellation-aware
+/// HEAD/streaming GET, not a potentially stale local file cache.
 /// </summary>
 public sealed class ArtifactIntegrityScanner(
     IPackageDatabase database, BlobStore blobs, SkillSecurityStore security, Settings settings)
@@ -44,7 +44,7 @@ public sealed class ArtifactIntegrityScanner(
             database.PendingPublications().Count,
             "catalog-references-only; no unreferenced-object sweep; no full snapshot guarantee",
             settings.BlobProvider == "s3"
-                ? "configured-S3-provider-with-local-read-cache; not full provider certification"
+                ? "direct remote S3 HEAD/streamed GET; not version-pinned or provider-certified"
                 : "local-filesystem", items);
     }
 
@@ -106,8 +106,31 @@ public sealed class ArtifactIntegrityScanner(
             return With(entry, "invalid_reference", "none");
         try
         {
-            // For S3 this can download a bounded local cache copy. Do not treat
-            // a cache digest match as proof of remote bucket version/retention.
+            if (blobs is S3BlobStore remote)
+            {
+                // Always hash the actual remote object; a previously cached
+                // local copy must not hide a changed S3 object.
+                var expectedRemote = await ExpectedAsync(entry, ct);
+                var probe = await remote.InspectRemoteAsync(entry.Key,
+                    expectedRemote?.Algorithm, settings.MaxArtifactBytes, ct);
+                if (!probe.Exists) return With(entry, "missing", "none");
+                if (probe.ExceedsLimit) return With(entry, "size_limit", "none");
+                if (expectedRemote is null)
+                    return With(entry, "unverifiable", "no-stored-digest");
+                if (expectedRemote.Size is { } requiredSize &&
+                    (requiredSize < 0 || probe.Size != requiredSize))
+                    return With(entry, "digest_mismatch", expectedRemote.Algorithm);
+                if (probe.Digest is null)
+                    return With(entry, "storage_unavailable", "none");
+                return CryptographicOperations.FixedTimeEquals(
+                    probe.Digest, expectedRemote.Bytes)
+                    ? With(entry, expectedRemote.Algorithm == "sha1"
+                        ? "weak_digest_match" : "digest_match", expectedRemote.Algorithm)
+                    : With(entry, "digest_mismatch", expectedRemote.Algorithm);
+            }
+
+            // Filesystem storage uses the current file, not a self-computed
+            // expected digest. Remote providers take the path above.
             var path = blobs.Existing(entry.Key);
             if (path is null) return With(entry, "missing", "none");
             var size = new FileInfo(path).Length;

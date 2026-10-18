@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Security.Cryptography;
 using Amazon;
@@ -64,6 +65,71 @@ public sealed class S3BlobStore : BlobStore, IDisposable
         catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Read-only, cancellation-aware operator integrity probe. GETs the actual
+    /// remote S3 object rather than hashing a possibly stale local cache.
+    /// Never treats ETag as a cryptographic digest, updates metadata, or writes
+    /// remote storage. Streaming bounds memory independently from artifact size.
+    /// </summary>
+    public sealed record RemoteIntegrityProbe(bool Exists, bool ExceedsLimit, long Size, byte[]? Digest);
+
+    public async Task<RemoteIntegrityProbe> InspectRemoteAsync(
+        string key, string? algorithm, long maxBytes, CancellationToken ct)
+    {
+        if (maxBytes < 1) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        if (algorithm is not (null or "sha256" or "sha512" or "sha1"))
+            throw new ArgumentException("Unsupported integrity algorithm", nameof(algorithm));
+        var objectKey = ObjectKey(key);
+        try
+        {
+            if (algorithm is null)
+            {
+                // No expected checksum exists. HEAD is enough to establish
+                // existence; never claim to have verified its contents.
+                var head = await _client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+                {
+                    BucketName = _bucket, Key = objectKey
+                }, ct);
+                return new RemoteIntegrityProbe(true, head.ContentLength > maxBytes,
+                    head.ContentLength, null);
+            }
+
+            using var response = await _client.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = _bucket, Key = objectKey
+            }, ct);
+            using var hash = IncrementalHash.CreateHash(algorithm switch
+            {
+                "sha256" => HashAlgorithmName.SHA256,
+                "sha512" => HashAlgorithmName.SHA512,
+                _ => HashAlgorithmName.SHA1
+            });
+            var buffer = ArrayPool<byte>.Shared.Rent(81920);
+            long size = 0;
+            try
+            {
+                int read;
+                while ((read = await response.ResponseStream.ReadAsync(
+                    buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                {
+                    size = checked(size + read);
+                    if (size > maxBytes)
+                        return new RemoteIntegrityProbe(true, true, size, null);
+                    hash.AppendData(buffer, 0, read);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+            return new RemoteIntegrityProbe(true, false, size, hash.GetHashAndReset());
+        }
+        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound)
+        {
+            return new RemoteIntegrityProbe(false, false, 0, null);
         }
     }
 
