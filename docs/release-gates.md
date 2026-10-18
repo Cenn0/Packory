@@ -45,3 +45,31 @@ If metadata refers to absent/corrupt bytes, or an S3 ETag/conditional delete beh
 - [ ] Migration and rollback if schema/keys changed
 - [ ] Docs, matrix, upgrade notes and accepted limitations updated
 - [ ] No false "production-ready", "fully OCI compliant" or "active-active" claim
+
+## Offline signed evidence acceptance guard
+
+`scripts/verify_release_evidence.py` is a **fail-closed verification helper**, not a production certification service. It requires a locally stored detached RSA-PSS/SHA-256 signature from an **independently controlled release reviewer**, an exact 40-character source commit SHA, and eight signed, current, content-digest-bound report entries:
+
+| Gate identifier | Required operator evidence |
+| --- | --- |
+| `pg_s3_restore` | Coordinated stopped-writer backup, isolated restore, hash checks, measured RPO/RTO |
+| `real_s3_provider` | Conditional PUT/DELETE, versioning/retention, partition tests on **actual** provider |
+| `writer_fencing` | Independent stale-writer fencing and verified failover/partition tests, or independently reviewed no-active-active deployment restriction |
+| `multi_node_protocol` | Rolling restarts, native client read/write/routing checks, reader restrictions |
+| `security_audit` | Threat-model review, provenance/policy tests, credentials and immutable audit log controls |
+| `slo_faults` | Measured capacity/error budget, alerting, outage and disaster exercises |
+| `load_interop` | Load, fuzz, timeout and native CLI interoperability matrix |
+| `supply_chain` | SBOM, licensing, signed artifacts, digest-pinned image provenance and rollback plan |
+
+**Operator workflow:** collect authentic **private** reports from the real intended infrastructure, sanitize or redact the public-facing approval record, independently review each report, and create `release-manifest.json` in an operator-only directory. The strict v1 manifest contains only `schema_version: 1`, `revision`, `audience: "packory-production-acceptance"`, `environment: "isolated-production-like"`, `verifier_key_id`, `issued_at`, `expires_at`, and `gates`. Each gate contains precisely `status: "pass"`, `report: "<basename>.json"` and `sha256: "<64 lowercase hex>"`. Every referenced report must be a unique regular JSON file in the same directory, not a symlink, up to 2 MiB. The signed manifest is limited to 32 KiB and expires no later than 30 days after issuance.
+
+Sign the **exact manifest bytes** using RSA-PSS/SHA-256 and an independently protected private key (not committed to GitHub):
+
+```sh
+openssl dgst -sha256 -sign <REVIEWER_PRIVATE_KEY> -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:-1 -out <EVIDENCE_DIR>/release-manifest.sig <EVIDENCE_DIR>/release-manifest.json
+python3 scripts/verify_release_evidence.py --evidence-dir <EVIDENCE_DIR> --public-key <APPROVED_PUBLIC_KEY> --key-id <VERIFIER_ID> --expected-sha <EXACT_RELEASE_COMMIT_SHA>
+```
+
+The command returns nonzero and prints `BLOCKED` for a missing, unsigned, tampered, expired, inconsistent or incomplete set of evidence. Never publish raw evidence, actual endpoint names, signer private keys, internal logs or operator identities. It performs **no network access and no infrastructure mutations**.
+
+**Important:** An operator can sign misleading reports. Cryptographic envelope authentication and file integrity are necessary but **not sufficient** for independent validation of test provenance, realistic coverage, achieved RPO/RTO/SLO or production safety. Without real-provider acceptance and independently reviewed records, issue #36 remains open. The CI job executes **synthetic negative tests of the verifier**, not an actual release acceptance.

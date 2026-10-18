@@ -46,6 +46,8 @@ jobs:
           package-manager-cache: false
       - name: Validate offline backup and restore tooling
         run: python3 -m unittest discover -s tests -p test_offline_backup.py -v
+      - name: Verify fail-closed signed production release evidence checks (synthetic fixtures)
+        run: python3 -m unittest discover -s tests -p test_release_evidence.py -v
       - name: Validate S3 real-provider probe failure detection (synthetic only)
         run: python3 -m unittest discover -s tests -p test_s3_provider_probe.py -v
       - name: Validate PostgreSQL/S3 offline snapshot integrity logic (synthetic only)
