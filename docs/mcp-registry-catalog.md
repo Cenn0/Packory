@@ -66,6 +66,10 @@ Use action **revoke** and the same digest to prevent subsequent discovery. Trans
 
 The ordinary REST discovery obeys PACKORY_ANONYMOUS_READ; /mcp always requires an explicit bearer credential.
 
+## Web dashboard
+
+The main Packory dashboard includes a read-only **MCP server catalog** with name/title search, version and remote endpoint displayed as inert text. The existing in-memory API token is used only for authenticated Packory requests, never sent to a remote MCP endpoint. The UI has **no launch/connect action and no privileged staging, publishing or revocation controls**; these remain administrator-only REST operations until the browser BFF/session and CSRF gate is implemented and tested. Publisher verification stays explicitly false.
+
 ## Operational limitations
 
 - No automatic ownership/domain proof, signature verification, upstream registry import, remote runtime authentication, tool permission mediation or third-party scanning. The receiving MCP client must separately verify endpoints and apply SSRF and injection controls. A DNS hostname that passes import checks can later resolve to a private address.
