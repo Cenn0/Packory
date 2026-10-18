@@ -22,7 +22,12 @@ public interface IPackageDatabase
     bool RevokeManagedToken(string id);
     bool IsHealthy();
     void UpsertPackage(string kind, string name, string version, string description, string origin);
-    bool PublishNuget(string name, string version, string description, string actor);
+    bool PublishNuget(string name, string version, string description, string actor,
+        string? sha512 = null, long? size = null);
+    // Atomic metadata + checksum pair for verified NuGet mirrors.
+    void UpsertNugetMirror(string name, string version, string description,
+        string sha512, long size);
+    NugetDigest? NugetDigest(string name, string version);
     IReadOnlyList<string> Versions(string kind, string name);
     IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit);
     bool OciHasBlob(string repository, string digest);
