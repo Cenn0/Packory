@@ -118,10 +118,16 @@ jobs:
           assert unsafe_result["exit_code"] in (0, 1), "Adversarial scanner failed to complete"
           unsafe_report = unsafe_result["report"]
           assert isinstance(unsafe_report, dict) and unsafe_report.get("execution_successful") is True
-          assert unsafe_report.get("analysis_completeness", {}).get("is_complete") is True
+          # Suspicious input can also produce an intentionally incomplete report;
+          # that must fail closed, never silently become an approved Skill.
           high = any(issue.get("severity") in ("HIGH", "CRITICAL")
                      for issue in unsafe_report.get("issues", []))
           block = unsafe_report.get("risk_assessment", {}).get("recommendation") == "DO_NOT_INSTALL"
+          print("Synthetic risky Skill: verdict=" +
+                str(unsafe_report.get("risk_assessment", {}).get("recommendation")) +
+                ", coverageComplete=" +
+                str(unsafe_report.get("analysis_completeness", {}).get("is_complete")) +
+                ", highOrCritical=" + str(high))
           assert high or block, "Pinned static scanner missed synthetic secret-exfiltration pattern"
 
           invalid_job = json.loads((root / "job-invalid.json").read_text())
