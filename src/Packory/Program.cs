@@ -368,8 +368,10 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     catch (System.Text.Json.JsonException) { return Results.BadRequest(new { error = "Invalid token request" }); }
     if (input is null || input.Role is not ("read" or "write") || input.ExpiresInHours is < 1 or > 2160 ||
         (input.Role == "write" && (input.Namespace is null ||
-                                   !Access.ValidNamespaceGrant(input.Namespace))) ||
-        (input.Role == "read" && input.Namespace is not null))
+                                   !(Access.ValidNamespaceGrant(input.Namespace) ||
+                                     Access.ValidFeedGrant(input.Namespace)))) ||
+        (input.Role == "read" && input.Namespace is not null &&
+         !Access.ValidFeedGrant(input.Namespace)))
         return Results.BadRequest(new { error = "Role, namespace or expiry is invalid" });
     var id = Guid.NewGuid().ToString("N");
     var secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
@@ -436,6 +438,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
     catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
 }).RequireRateLimiting("publish");
 FeedEndpoints.Map(app);
+FeedNugetEndpoints.Map(app);
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
