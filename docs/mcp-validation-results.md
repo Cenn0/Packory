@@ -46,3 +46,7 @@ Do not enable for public production use until a deployment-specific review cover
 The future `request_ci_validation` is expressly **not implemented**; no arbitrary command, provider URL, Docker socket or shell execution is available via these tools.
 
 See [ADR 0002](adr/0002-validation-evidence-boundary.md) for the threat model.
+
+## Real signed Keycloak MCP integration coverage
+
+The dedicated [Keycloak integration workflow](../.github/workflows/keycloak.yml) now starts a disposable TLS-enabled Keycloak with two machine clients: a regular package reader/writer and a separate `packory.validation.read` reader. It publishes only a synthetic RSA-PSS-signed, SHA-256-pinned validation export to a disposable Packory process. The Streamable HTTP MCP smoke test negotiates sessions and verifies regular-token denial, scoped-token list/findings access and unknown-alias denial. It does **not** substitute for the independent external evaluator, the target deployment's access policy review or any real private test data.
