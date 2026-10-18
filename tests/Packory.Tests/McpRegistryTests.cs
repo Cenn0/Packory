@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Data.Sqlite;
 using Packory;
 using Xunit;
 
@@ -100,6 +101,7 @@ public sealed class McpRegistryTests
     [InlineData("https://mcp.example.org/mcp", "https://host.internal/mcp")]
     [InlineData("https://mcp.example.org/mcp", "https://user:pass@example.com/mcp")]
     [InlineData("https://mcp.example.org/mcp", "https://mcp.example.org/mcp?token=synthetic")]
+    [InlineData("https://mcp.example.org/mcp", "https://mcp.example.org/mcp/{tenant}")]
     public void RejectsUnsafeRemoteDescriptors(string original, string replacement)
     {
         Assert.Throws<InvalidDataException>(() =>
@@ -163,6 +165,44 @@ public sealed class McpRegistryTests
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void ModifiedPublishedJsonCannotBeDiscoveredAsTheApprovedRevision()
+    {
+        var data = Path.Combine(Path.GetTempPath(), "packory-registry-corruption-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(data);
+            var store = new McpRegistryStore(new Settings { DataDirectory = data });
+            store.Initialize();
+            var metadata = McpRegistryManifest.Parse(Payload(ValidJson));
+            Assert.True(store.Stage(metadata));
+            Assert.True(store.Decide(metadata.Name, metadata.Version, metadata.Sha256,
+                "publish", "Inert synthetic review", "synthetic-admin"));
+            Assert.NotNull(store.Find(metadata.Name, metadata.Version));
+            using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = Path.Combine(data, "packory.sqlite") }.ToString()))
+            {
+                db.Open();
+                using var update = db.CreateCommand();
+                update.CommandText = """
+                    UPDATE mcp_registry_manifests
+                    SET document_json = '{"name":"tampered-mcp-metadata"}'
+                    WHERE name = @name AND version = @version
+                    """;
+                update.Parameters.AddWithValue("@name", metadata.Name);
+                update.Parameters.AddWithValue("@version", metadata.Version);
+                Assert.Equal(1, update.ExecuteNonQuery());
+            }
+            Assert.Null(store.Find(metadata.Name, metadata.Version));
+            Assert.Empty(store.List("synthetic"));
+        }
+        finally
+        {
+            if (Directory.Exists(data)) Directory.Delete(data, true);
         }
     }
 
