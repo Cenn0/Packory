@@ -58,6 +58,7 @@ def wait_ready(deadline):
 def zip_data():
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(NAME + "/", "")
         archive.writestr(
             NAME + "/SKILL.md",
             "---\nname: " + NAME +
