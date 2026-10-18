@@ -35,6 +35,12 @@ Scopes may appear as space-separated `scope` or `scp` claims. Keycloak's
 `realm_access.roles` and `resource_access` roles are **not implicitly trusted**;
 an operator must explicitly map the appropriate scopes in Keycloak.
 
+## Remote MCP OAuth discovery
+
+For a public HTTPS origin and configured OIDC issuer/audience, Packory now serves `GET /.well-known/oauth-protected-resource/mcp` under RFC 9728. It announces `/mcp` as the protected resource, the configured Keycloak issuer and the minimum `packory.read` scope. A missing or invalid Bearer credential receives a `WWW-Authenticate` 401 response with the metadata document URL.
+
+Static-token and HTTP development profiles deliberately **do not** publish OAuth metadata. The public discovery document contains no secret, token or personal data. It does not establish that the identity provider supports OAuth 2.1, dynamic client registration, browser PKCE or automatic token renewal; these require separate provider-side configuration and live interoperability testing. See [MCP integration](mcp-security-integration.md).
+
 ## Native clients and browser dashboard
 
 An API client may use `Authorization: Bearer <signed-JWT>`. Existing long
