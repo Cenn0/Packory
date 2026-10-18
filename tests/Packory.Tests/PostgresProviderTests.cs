@@ -81,8 +81,24 @@ public sealed class PostgresProviderTests
         Assert.False(db.TryDeleteDraftFeed(draftId, "integration-admin"));
 
         var nuget = "pgtest." + suffix;
-        Assert.True(db.PublishNuget(nuget, "1.0.0", "test", "integration-writer"));
+        var expectedNuget = Convert.ToBase64String(
+            System.Security.Cryptography.SHA512.HashData("pg-immutable"u8.ToArray()));
+        Assert.True(db.PublishNuget(nuget, "1.0.0", "test", "integration-writer",
+            expectedNuget, "pg-immutable"u8.Length));
         Assert.False(db.PublishNuget(nuget, "1.0.0", "test", "integration-writer"));
+        Assert.Equal(expectedNuget, db.GetNugetDigest(nuget, "1.0.0")?.Sha512);
+        Assert.Equal("hosted", db.GetNugetDigest(nuget, "1.0.0")?.Origin);
+        Assert.Throws<InvalidOperationException>(() => db.UpsertNugetMirror(
+            nuget, "1.0.0", "wrong source", expectedNuget, "pg-immutable"u8.Length));
+        var mirrorName = "pgmirror" + suffix;
+        db.UpsertNugetMirror(mirrorName, "1.0.0", "mirror", expectedNuget,
+            "pg-immutable"u8.Length);
+        Assert.Equal("mirror", db.PackageOrigin("nuget", mirrorName, "1.0.0"));
+        Assert.Equal(expectedNuget, db.GetNugetDigest(mirrorName, "1.0.0")?.Sha512);
+        Assert.Throws<InvalidDataException>(() => db.UpsertNugetMirror(
+            mirrorName, "1.0.0", "altered", Convert.ToBase64String(
+                System.Security.Cryptography.SHA512.HashData("other-bytes"u8.ToArray())),
+            "other-bytes"u8.Length));
         Assert.Equal("hosted", db.PackageOrigin("nuget", nuget, "1.0.0"));
         db.UpsertPackage("nuget", nuget, "1.0.0", "do-not-overwrite", "mirror");
         Assert.Equal("hosted", db.PackageOrigin("nuget", nuget, "1.0.0"));
