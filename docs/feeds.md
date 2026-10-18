@@ -1,6 +1,6 @@
-# Feed control plane — experimental metadata inventory and disabled drafts
+# Feed control plane — V4 private NuGet hosted feeds (experimental)
 
-Packory now exposes an admin-only, versioned **feed metadata inventory with disabled-only draft lifecycle**. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
+Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and the first explicitly activated, private NuGet hosted feed adapter. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
 
 | ID | Kind | Mode | Wire behavior |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Packory now exposes an admin-only, versioned **feed metadata inventory with disa
 
 `GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `{apiVersion:"v1",items:[...],nextCursor, isolationSupported:false}`. Valid limits are 1–100; invalid cursors or IDs fail closed. `GET /api/v1/admin/feeds/{id}` returns one descriptor or 404. Admin API tokens or correctly scoped OIDC admin access are required; a read or publish credential is forbidden. Responses use `Cache-Control: no-store`.
 
-## Staged administrative drafts (no runtime routing)
+## Staged administrative drafts (only reviewed private NuGet hosted feeds can be activated)
 
 Admins may **prepare disabled, private** feed descriptors for review. This
 capability is a database-backed metadata staging step, **not** hosted/proxy
@@ -49,7 +49,7 @@ for an operating feed.
 
 ## Non-goals and pending MS2 gates
 
-This implementation is **not** operational hosted/proxy feeds, tenant separation or full feed-CRUD. Despite empty prepared tables for namespace/policy/upstream, **no cross-feed isolation exists yet**. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
+This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet hosted slice is documented below; all other kinds/modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
 
 
 ## V4 experimental private hosted NuGet feeds — first operational slice
@@ -77,9 +77,8 @@ drafts for npm/Cargo/PyPI/OCI/Skills and all proxy feeds remain
    Reactivation requires an explicit administrative call. A feed
    containing published revisions cannot be deleted as an unused draft.
 
-These endpoints are **never anonymously readable**, even if
-`PACKORY_ANONYUS_READ` (the actual setting is
-`PACKORY_ANONYMOUS_READ`) permits public legacy registry reads.
+These endpoints are **never anonymously readable**, even if `PACKORY_ANONYMOUS_READ`
+permits public legacy registry reads.
 Unrecognized or disabled feeds return 404 **after feed authorization**,
 so credentials lacking a feed grant receive a uniform 403.
 
