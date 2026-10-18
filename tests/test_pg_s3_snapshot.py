@@ -167,6 +167,7 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(3, mod.verify(root)["postgres"]["database_schema_version"])
             # Losing the NuGet digest ledger is catastrophic even when the rest
             # of the backup is self-consistent.
+            checksum_fingerprint = manifest["postgres"]["table_fingerprints"]["nuget_digests"].copy()
             manifest["postgres"]["table_fingerprints"].pop("nuget_digests")
             manifest["postgres"]["table_counts"].pop("nuget_digests")
             manifest_path.write_text(json.dumps(manifest))
@@ -174,7 +175,7 @@ class SnapshotTests(unittest.TestCase):
                 mod.verify(root)
             # Pretending v2 with extra v3 rows must also fail strict coverage.
             manifest["postgres"]["database_schema_version"] = 2
-            manifest["postgres"]["table_fingerprints"]["nuget_digests"] = fingerprints["nuget_digests"]
+            manifest["postgres"]["table_fingerprints"]["nuget_digests"] = checksum_fingerprint
             manifest["postgres"]["table_counts"]["nuget_digests"] = 0
             manifest_path.write_text(json.dumps(manifest))
             with self.assertRaises(mod.SnapshotError):
