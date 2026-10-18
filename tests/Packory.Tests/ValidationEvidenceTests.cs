@@ -270,4 +270,13 @@ public sealed class ValidationEvidenceTests
         Assert.Null(store.Get("approved-run")); // Reloading the replacement key would have accepted it.
     }
 
+    [Fact]
+    public void ValidationMcpRequestsHaveBoundedNonBlockingQuota()
+    {
+        using var quota = new ValidationMcpQuota();
+        for (var i = 0; i < 60; i++)
+            Assert.True(quota.TryAcquire());
+        Assert.False(quota.TryAcquire());
+    }
+
 }
