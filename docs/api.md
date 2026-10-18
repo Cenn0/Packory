@@ -121,7 +121,9 @@ Administrators may inspect catalog references **only** while
 of checksum comparisons and explicit missing/unverifiable states. Valid
 `after` is a nonnegative offset and `limit` is 1–10. The endpoint rejects
 anonymous, read-only and publisher credentials; ordinary running instances
-return 409. The response is `Cache-Control: no-store` and rate limited,
-never an automatic production certification. See
+return 409. The response is `Cache-Control: no-store` and rate limited.
+For S3 it hashes bytes streamed directly from the configured remote object,
+bypassing the potentially stale artifact cache. This is a best-effort
+point-in-time observation, never an automatic production certification. See
 [operations](operations.md#offline-catalog-reference-integrity-inspection-ms16-experimental)
 for interpretation, caveats and a redacted invocation example.
