@@ -11,6 +11,13 @@ public interface IPackageDatabase
     FeedDefinition? Feed(string id);
     bool TryCreateDraftFeed(FeedDefinition feed, string actor);
     bool TryDeleteDraftFeed(string id, string actor);
+    bool TryActivateHostedNugetFeed(string id, string actor);
+    bool TryDeactivateHostedNugetFeed(string id, string actor);
+    IReadOnlyList<string> FeedNugetVersions(string feedId, string name);
+    FeedNugetRevision? GetFeedNugetRevision(string feedId, string name, string version);
+    IReadOnlyList<FeedNugetRevision> FeedNugetRevisions();
+    bool PublishFeedNuget(string feedId, string name, string version,
+        string description, string sha512, long size, string actor);
     void BeginPublication(string key, string kind, string name, string version);
     void CompletePublication(string key);
     IReadOnlyList<PendingPublication> PendingPublications();
