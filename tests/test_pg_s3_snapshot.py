@@ -142,6 +142,44 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(mod.SnapshotError):
                 mod.verify(root)
 
+    def test_schema_three_snapshot_requires_checksum_table_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "metadata.dump").write_bytes(b"synthetic")
+            required = (*mod.CORE_TABLES, "packory_schema_version",
+                        *mod.FEED_TABLES, *mod.DIGEST_TABLES)
+            fingerprints = {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                            for name in required}
+            manifest = {
+                "schema": 2, "profile": "postgresql-s3-offline",
+                "source": {"bucket": "synthetic-bucket", "prefix": "synthetic/", "database": "source"},
+                "postgres": {
+                    "path": "metadata.dump", "size": 9,
+                    "sha256": hashlib.sha256(b"synthetic").hexdigest(),
+                    "table_counts": {name: 0 for name in fingerprints},
+                    "table_fingerprints": fingerprints,
+                    "database_schema_version": 3
+                },
+                "objects": [], "delete_markers": []
+            }
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            self.assertEqual(3, mod.verify(root)["postgres"]["database_schema_version"])
+            # Losing the NuGet digest ledger is catastrophic even when the rest
+            # of the backup is self-consistent.
+            manifest["postgres"]["table_fingerprints"].pop("nuget_digests")
+            manifest["postgres"]["table_counts"].pop("nuget_digests")
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify(root)
+            # Pretending v2 with extra v3 rows must also fail strict coverage.
+            manifest["postgres"]["database_schema_version"] = 2
+            manifest["postgres"]["table_fingerprints"]["nuget_digests"] = fingerprints["nuget_digests"]
+            manifest["postgres"]["table_counts"]["nuget_digests"] = 0
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify(root)
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")
