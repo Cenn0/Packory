@@ -30,19 +30,20 @@ def decode(content):
 class Session:
     def __init__(self, token):
         self.token = token
-        self.session_id = None
-        result = self.post("initialize", {
-            "protocolVersion": "2026-07-28",
-            "capabilities": {},
-            "clientInfo": {"name": "packory-validation-security-smoke", "version": "1.0.0"},
-        }, 1)
-        assert result["result"]["serverInfo"]["name"]
-        self.post("notifications/initialized", None, None)
+        # MCP 2026-07-28 is stateless: there is no initialize handshake.
+        # Every request carries version/client metadata and mirrored headers.
 
     def post(self, method, params, id_number):
         payload = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            payload["params"] = params
+        request_params = dict(params or {})
+        request_params["_meta"] = {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "packory-validation-security-smoke", "version": "1.0.0"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {},
+        }
+        payload["params"] = request_params
         if id_number is not None:
             payload["id"] = id_number
         headers = {
@@ -50,17 +51,16 @@ class Session:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "Mcp-Protocol-Version": "2026-07-28",
+            "Mcp-Method": method,
         }
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
+        if method == "tools/call":
+            headers["Mcp-Name"] = request_params["name"]
         request = urllib.request.Request(
             BASE + "/mcp", json.dumps(payload).encode("utf-8"),
             headers=headers, method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
-                if response.headers.get("Mcp-Session-Id"):
-                    self.session_id = response.headers["Mcp-Session-Id"]
                 body = response.read(128 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             # Never include HTTP header dump or request details (contains token).
