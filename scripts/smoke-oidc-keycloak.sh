@@ -153,7 +153,10 @@ with open(sys.argv[1], "w", encoding="utf-8") as out:
 PY
 openssl dgst -sha256 -sign "$WORK/validation/signer-private.pem" \
   -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest \
-  -out "$WORK/validation/synthetic-run.sig" "$WORK/validation/synthetic-run.json"
+  -out "$WORK/validation/signature.bin" "$WORK/validation/synthetic-run.json"
+# Packory's detached signature contract is Base64 TEXT, not raw OpenSSL bytes.
+base64 -w 0 "$WORK/validation/signature.bin" > "$WORK/validation/synthetic-run.sig"
+rm "$WORK/validation/signature.bin"
 VALIDATION_DIGEST="$(sha256sum "$WORK/validation/synthetic-run.json" | cut -d' ' -f1)"
 
 BASE="http://127.0.0.1:18083"
