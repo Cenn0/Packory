@@ -1,13 +1,13 @@
 # Agent Skill Security Scanning — NVIDIA SkillSpector implementation roadmap
 
-**Status:** planned, not implemented. **Baseline:** 2026-10-17, Packory main branch.  
+**Status:** historical implementation plan, **partially delivered** as of 2026-10-18; not a verified per-task completion ledger. **Baseline:** 2026-10-17, Packory main branch. See the [current status checkpoint](roadmap-status-2026-10-18.md) and [MCP/SkillSpector integration](mcp-security-integration.md) for implemented behavior.  
 **Owner:** Packory contributors and coding agents. **Primary scanner:** [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) (Apache-2.0, with transitive-license verification required).  
 **Parent:** [Packory V3 roadmap](roadmap.md), especially M4 (identity/dashboard) and M5 (skills/MCP).  
 **Purpose:** actionable, sequential implementation backlog with objective acceptance gates. The completion of a task does **not** constitute a claim that Packory or NVIDIA certifies a skill as safe.
 
 ## 0. Context, constraints, and non-goals
 
-On main, src/Packory/SkillEndpoints.cs accepts a ZIP containing SKILL.md and makes it available through /api/skills/{name}/{version}/download and /skill.md immediately after publishing. It validates the archive shape but performs no security assessment or approval. The web UI currently lives in src/Packory/wwwroot (plain JS/CSS, **not React**) and does not yet have a browser BFF/session suitable for privileged security administration. There is no production Packory MCP service in the current main runtime. SQLite/filesystem and PostgreSQL/S3 are supported in different experimental profiles; neither is a cross-store ACID transaction.
+At the 2026-10-17 design baseline, the skill ZIP importer made revisions immediately available and there was no scanner release gate. **This is no longer the current release behavior:** a staged approval pipeline, experimental offline SkillSpector worker and read-only MCP endpoint are now implemented. See [MCP/SkillSpector integration](mcp-security-integration.md) for the runtime contract. The web UI still lives in src/Packory/wwwroot (plain JS/CSS, **not React**) and lacks a production-qualified browser BFF/session for privileged security administration. The MCP endpoint is **experimental, not a production-certified standalone MCP service**. SQLite/filesystem and PostgreSQL/S3 are supported in different experimental profiles; neither is a cross-store ACID transaction.
 
 The security feature must first harden the existing artifact lifecycle. It must **not** introduce a required message broker, Kubernetes, uncontrolled remote LLM calls, a new registry protocol, or a generic "execute arbitrary agents" facility. Do not migrate the entire frontend as part of scanner integration. Do not start a downloaded skill, run an install script, or launch an untrusted MCP server.
 
