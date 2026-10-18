@@ -102,11 +102,13 @@ def decision(action, digest, reason):
                 data, "application/json")
 
 
-def jsonrpc_payload(response):
+def jsonrpc_payload(response, request_id):
     """The Streamable HTTP transport can return JSON or an SSE event stream."""
     text = response.decode("utf-8")
     if text.lstrip().startswith("{"):
-        return json.loads(text)
+        data = json.loads(text)
+        require(data.get("id") == request_id, "MCP response ID mismatch")
+        return data
     for line in text.splitlines():
         if not line.startswith("data:"):
             continue
@@ -114,7 +116,7 @@ def jsonrpc_payload(response):
         if not data or data == "[DONE]":
             continue
         payload = json.loads(data)
-        if isinstance(payload, dict) and payload.get("id") in (3, 4):
+        if isinstance(payload, dict) and payload.get("id") == request_id:
             return payload
     raise ValueError("MCP returned no JSON-RPC response event")
 
@@ -130,13 +132,32 @@ def check_mcp():
     }
     code, response = http("POST", "/mcp", json.dumps(request).encode(), "application/json", mcp_method="skills/list")
     require(code == 200, "MCP skills/list failed")
-    payload = jsonrpc_payload(response)
+    payload = jsonrpc_payload(response, 3)
     skills = payload.get("result", {}).get("skills", [])
     entry = next((x for x in skills if x.get("frontmatter", {}).get("name") == NAME), None)
     require(entry is not None, "Approved Skill missing from MCP discovery")
     manifest = next((x for x in entry["resources"] if x["uri"] == entry["uri"]), None)
     require(manifest is not None and manifest["digest"].startswith("sha256:"),
             "Skill manifest missing SHA-256")
+
+    # Verify the dedicated Skills Extension lookup independently of listing.
+    get_request = {
+        "jsonrpc": "2.0", "id": 5, "method": "skills/get",
+        "params": {"uri": entry["uri"], "_meta": request["params"]["_meta"]},
+    }
+    code, get_bytes = http("POST", "/mcp", json.dumps(get_request).encode(),
+                           "application/json", mcp_method="skills/get",
+                           mcp_name=entry["uri"])
+    require(code == 200, "MCP skills/get HTTP " + str(code))
+    get = jsonrpc_payload(get_bytes, 5).get("result", {})
+    skill = get.get("skill")
+    require(skill is not None and skill["uri"] == entry["uri"],
+            "skills/get did not return exact identity")
+    require(skill["resources"] == entry["resources"] and
+            skill["frontmatter"] == entry["frontmatter"],
+            "skills/get metadata differs from listing")
+    require(get.get("ttlMs") == 0 and get.get("cacheScope") == "private",
+            "Skill metadata cache must be revocation-safe")
 
     read_request = {
         "jsonrpc": "2.0", "id": 4, "method": "resources/read",
@@ -154,7 +175,7 @@ def check_mcp():
         "application/json", mcp_method="resources/read", mcp_name=entry["uri"]
     )
     require(code == 200, "MCP resources/read HTTP " + str(code) + ", response: " + result_bytes[:350].decode("utf-8", "replace"))
-    result = jsonrpc_payload(result_bytes)
+    result = jsonrpc_payload(result_bytes, 4)
     contents = result.get("result", {}).get("contents", [])
     item = next((x for x in contents if x.get("uri") == entry["uri"]), None)
     require(item is not None and isinstance(item.get("text"), str),
@@ -162,6 +183,32 @@ def check_mcp():
     read_digest = "sha256:" + hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
     require(read_digest == manifest["digest"],
             "MCP resources/read bytes do not match Skill manifest digest")
+
+
+
+def check_mcp_revocation():
+    metadata = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "SyntheticCheck", "version": "1.0"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    def query(method, ident, params, uri=None):
+        request = {"jsonrpc": "2.0", "id": ident, "method": method,
+                   "params": {"_meta": metadata, **params}}
+        code, data = http("POST", "/mcp", json.dumps(request).encode(),
+                          "application/json", mcp_method=method, mcp_name=uri)
+        require(code == 200, "Unexpected HTTP status after revocation: " + str(code))
+        return jsonrpc_payload(data, ident)
+
+    listed = query("skills/list", 6, {})
+    require(all(item.get("frontmatter", {}).get("name") != NAME
+                for item in listed.get("result", {}).get("skills", [])),
+            "Revoked Skill remains in MCP listing")
+    uri = "skill://packory/" + VERSION + "/" + NAME + "/SKILL.md"
+    for method, ident in (("skills/get", 7), ("resources/read", 8)):
+        answer = query(method, ident, {"uri": uri}, uri)
+        require("error" in answer and "result" not in answer,
+                "Revoked Skill metadata/bytes available via " + method)
 
 
 def main():
@@ -187,7 +234,8 @@ def main():
     require(code == 200, "Revocation was not accepted")
     code, _ = http("GET", "/api/skills/" + NAME + "/" + VERSION + "/download")
     require(code == 404, "Revoked Skill remained downloadable")
-    print("Compose end-to-end: staged, scanned, approved, MCP-discovered, revoked")
+    check_mcp_revocation()
+    print("Compose end-to-end: staged, scanned, approved, MCP-list/get/read checked, revoked")
 
 
 if __name__ == "__main__":
