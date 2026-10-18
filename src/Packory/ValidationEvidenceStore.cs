@@ -15,7 +15,7 @@ public sealed class ValidationEvidenceStore(Settings settings,
 {
     private Run? Reject(string reason)
     {
-        diagnostics?.LogDebug("validation-export rejected category={Category}", reason);
+        diagnostics?.LogWarning("validation-export rejected category={Category}", reason);
         return null;
     }
     // Capture the verifier trust anchor at service construction; rotating a
@@ -138,7 +138,7 @@ public sealed class ValidationEvidenceStore(Settings settings,
             or KeyNotFoundException)
         {
             // Only enum-like exception categories at debug level, never payloads or paths.
-            diagnostics?.LogDebug("validation-export rejected exception={ExceptionType}",
+            diagnostics?.LogWarning("validation-export rejected exception={ExceptionType}",
                 e.GetType().Name);
             return null;
         }
