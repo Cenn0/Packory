@@ -54,6 +54,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Cargo & PyPI (experimentell)** | Cargo als gehostete Alternate Registry (Sparse Index und Upload), PyPI Simple API (HTML/JSON) und grundlegender Upload; keine vollständige Unterstützung |
 | **Agent Skills (experimentell)** | Versionierter ZIP-Import mit Quarantäne, offline statischer SkillSpector-Prüfung, expliziter Freigabe vor REST-/MCP-Auslieferung sowie Widerruf/erneuter Prüfung |
 | **Packory MCP (experimentell)** | Authentifizierter, nur lesender Streamable-HTTP-Endpunkt `/mcp` mit Tools, Ressourcen, Prompts und Skills Extension; keine Ausführung fremder Skills |
+| **MCP-Serververzeichnis (experimentell)** | Versionierte Remote-`server.json`-Metadaten, administrative Prüfung/Freigabe/Widerruf, nur lesende MCP-Tools und Dashboard-Suche. Keine externe Serverausführung und **keine verifizierte Herausgeberidentität**; [Details](docs/mcp-registry-catalog.md). |
 | **Dashboard/API** | Durchsuchbarer Katalog gecachter/gehosteter Artefakte sowie Liveness-/Readiness-Endpunkte |
 | **Zugriff** | Statische Read-/Write-/Admin-Tokens sowie optionale OIDC-JWT-Prüfung mit expliziten `packory.read`-, `packory.write`- und `packory.admin`-Scopes; noch kein Browser-SSO/BFF |
 | **Speicher** | SQLite und Dateisystem standardmäßig; optional PostgreSQL-Metadaten und S3-kompatible Blobs für neue Einzelinstanz-Installationen |
