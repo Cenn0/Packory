@@ -330,3 +330,72 @@ unsupported. This is a static, deployment-defined policy, not user self-service,
 per-token revocation or database-managed token lifecycle. Be aware that clients
 may upload metadata before the package identifier is parsed; the server checks
 authorization before the first persisted blob write.
+
+## Offline catalog-reference integrity inspection (MS1.6, experimental)
+
+The **maintenance-only**, administrator-authenticated `GET /api/admin/integrity/scan`
+allows an operator to inspect up to **10 referenced artifacts per request**. The
+endpoint cannot run during ordinary production service; start Packory in the
+existing PostgreSQL/S3 `PACKORY_RECOVERY_MAINTENANCE=true` mode, with all
+other writers stopped, a compatible initialized database schema and the
+exclusive single-writer lease. Normal package traffic stays blocked.
+
+Example for a **private** maintenance environment (never paste credentials or
+responses into public issues):
+
+```sh
+curl --fail --header "Authorization: Bearer ${PACKORY_ADMIN_TOKEN}" \
+  'http://127.0.0.1:8080/api/admin/integrity/scan?after=0&limit=5'
+```
+
+`after` is a **zero-based scan offset**, not a cryptographic snapshot
+watermark. The JSON includes `offset`, `totalReferences`, `checked`,
+`nextOffset` and `pendingPublicationIntents`, plus matching `items`.
+Continue from `nextOffset` until it is null. No individual request or
+collection of paged responses proves a consistent distributed snapshot:
+an external stale writer, bucket lifecycle or changed metadata can invalidate
+the observations. The response includes only the configured backend type
+and explicit coverage limitations; no remote hosts, credentials or bucket names
+are returned.
+
+The scanner checks indexed **NuGet, npm, Cargo, PyPI, OCI blobs/manifests and
+approved Skills** against independently recorded metadata where available.
+`digest_match` means bytes currently materialized from the configured store
+match an **existing recorded** SHA-256 or SHA-512 digest. It is not signed
+provenance, malware scanning, remote S3 version certification or a claim that
+the recorded reference itself was authentic.
+
+Result states:
+
+| State | Meaning and required action |
+| --- | --- |
+| `digest_match` | Bytes match recorded SHA-256/SHA-512, within this bounded observation |
+| `weak_digest_match` | Only legacy SHA-1 is present; **not** sufficient for high-assurance release |
+| `unverifiable` | Stored reference lacks a trustworthy recorded digest (currently includes most NuGet hosted data); do **not** infer success |
+| `missing` | A committed catalog reference points to an absent object |
+| `digest_mismatch` | Size/hash mismatch or an object rejected by storage-integrity validation; **stop release** |
+| `invalid_reference` | Malformed catalog identity, unsupported origin or unsafe key |
+| `size_limit` | Object exceeds configured verification bound; independently inspect offline |
+| `storage_unavailable` | Provider, filesystem or permission failure; treat as inconclusive |
+
+The scanner uses bounded per-request pages, a shared **two requests/minute**
+zero-queue limiter and a 45-second application cancellation budget. Provider
+methods that synchronously materialize local S3 cache files may have their own
+network timeouts and do not provide a guaranteed wall-clock limit. The auditor
+does **not** mutate registry metadata, quarantine, delete, publish, garbage
+collect or automatically repair any object. S3 inspection can populate the
+**local** cache. Some objects (notably NuGet) have no durable publisher-time
+digests; checking that a file exists does not validate its bytes.
+
+Treat any nonzero `pendingPublicationIntents` as an outstanding recovery
+blocker and separately inspect `/api/admin/publications/pending`. Even when
+all scanned rows are `digest_match`, the result does not cover **unreferenced
+S3 versions, bucket retention, historical object versions, orphan recovery
+copies, source authenticity or metadata consistency during a scan**.
+Independent real-provider restore and native client acceptance are still
+required by [MS1 and release gates](release-gates.md).
+
+CI exercises actual SQLite/filesystem references across six ecosystem
+families and PostgreSQL/S3 maintenance authorization (S3 emulated). This
+improves preflight observability, **not** acceptance of M1.6 or MS1 as a
+whole.
