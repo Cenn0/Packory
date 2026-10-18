@@ -97,7 +97,7 @@ public sealed class McpRegistryTests
     [InlineData("https://mcp.example.org/mcp", "https://127.0.0.1/mcp")]
     [InlineData("https://mcp.example.org/mcp", "https://localhost/mcp")]
     [InlineData("https://mcp.example.org/mcp", "https://host.internal/mcp")]
-    [InlineData("https://mcp.example.org/mcp", "https://user:pass@mcp.example.org/mcp")]
+    [InlineData("https://mcp.example.org/mcp", "https://user:pass@example.com/mcp")]
     [InlineData("https://mcp.example.org/mcp", "https://mcp.example.org/mcp?token=synthetic")]
     public void RejectsUnsafeRemoteDescriptors(string original, string replacement)
     {
@@ -121,7 +121,7 @@ public sealed class McpRegistryTests
                 StringComparison.Ordinal))));
         Assert.Throws<InvalidDataException>(() =>
             McpRegistryManifest.Parse(Payload(ValidJson.Replace(
-                McpRegistryManifest.Schema, "https://example.org/unpinned")));
+                McpRegistryManifest.Schema, "https://example.org/unpinned"))));
     }
 
     [Fact]
