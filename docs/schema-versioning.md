@@ -9,3 +9,28 @@ Migrations reject unknown future versions before initialization and atomically s
 Security: the read-only `GET /api/v1/admin/feeds` and `GET /api/v1/admin/feeds/{id}` inventory require full admin authorization, even if anonymous registry reads are enabled. Cursor pagination is bounded and inputs validated. Feed mutation, namespace enforcement, provisioning, per-feed quota/audit and multiple namesake packages are *not* implemented by this PR.
 
 This is an increment toward MS0.4 / M2.1 and M2.6, **not** completion of MS2 or a supported production migration. Full rollback and PostgreSQL/S3 real-provider restore drills must precede upgrades of production data. See [release gates](release-gates.md) and [roadmap](roadmap.md).
+
+
+## V3 NuGet checksum ledger and migrations
+
+Version **3** adds `nuget_digests(name,version,sha512,size,origin)` on SQLite
+and PostgreSQL. The SHA-512 value is strict canonical Base64, 64 decoded
+bytes, and the recorded byte count is nonnegative. New hosted NuGet publications
+write their checksum **in the same metadata transaction** as the immutable
+package row and publish audit. Newly downloaded, independently upstream-verified
+mirrors persist the digest and metadata together without overwriting a hosted
+revision or changing an existing checksum.
+
+Previously published/cached V1/V2 NuGet packages have **no trusted historical
+publication-time checksum**, remain readable for compatibility, and are
+deliberately classified `unverifiable` by the maintenance scanner. Do not
+retroactively fill missing references by hashing potentially corrupted bytes.
+Exporting a NuGet `.sha512` calculated from a legacy blob is only a legacy
+format response, **not** an independent storage-integrity assertion.
+
+Upgrade paths V1→V3 and V2→V3 are forward-only; empty V3 digest tables
+are created without fabricating entries for existing rows. Back up and
+freeze writers before migration; previous binaries reject V3. The offline
+PostgreSQL/S3 snapshot verifier now includes `nuget_digests` in version-3
+row fingerprints and rejects incomplete V3 manifests. Older version-2 backup
+manifests retain their own strictly bounded table selection.
