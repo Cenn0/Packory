@@ -259,11 +259,18 @@ app.Use(async (ctx, next) =>
             .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            ctx.Response.Headers.WWWAuthenticate = "Bearer realm=\"Packory MCP\"";
+            ctx.Response.Headers.WWWAuthenticate = McpOAuthResourceMetadata.Challenge(activeSettings);
             return;
         }
         if (Access.RequireGlobalMcp(ctx, activeSettings) is { } denied)
         {
+            // Invalid Bearer tokens require the same OAuth discovery hint as
+            // absent credentials. Scoped-token 403 must not be misreported
+            // as a challenge to obtain broader permissions.
+            if (denied is Microsoft.AspNetCore.Http.IStatusCodeHttpResult
+                { StatusCode: StatusCodes.Status401Unauthorized })
+                ctx.Response.Headers.WWWAuthenticate =
+                    McpOAuthResourceMetadata.Challenge(activeSettings);
             await denied.ExecuteAsync(ctx);
             return;
         }
@@ -480,6 +487,7 @@ NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
+McpOAuthResourceMetadata.Map(app);
 if (settings.McpEnabled) app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
 
