@@ -150,3 +150,10 @@ or the analogous `write/publish` grant. Never check issued tokens into
 source files. Generic `packory.read`, legacy static read/write
 credentials and tokens for other feeds do not grant private feed access.
 See [feed operations](feeds.md) for precise limitations.
+
+
+## MCP Registry metadata (experimental)
+
+Packory provides a versioned, **remote-only** MCP server.json catalog separate from its own Streamable HTTP MCP service. For operator staging and digest-bound approval/revocation, use `POST /api/v1/admin/mcp/servers/stage` (raw 16 KiB server.json) and `POST /api/v1/admin/mcp/servers/decide` (name, version, sha256, action and reason). Both require an administrator; publish/revoke decisions are immutable-key and auditable.
+
+Read-only `GET /api/v1/mcp/servers?q=...&limit=25&offset=0`, `GET /api/v1/mcp/server?name=...&version=...`, and `/mcp` tools `search_mcp_servers` / `get_mcp_server` expose **only approved-for-discovery records**. Responses explicitly set `publisherVerified=false` and `safeToConnect=false`; Packory never connects to remote MCP servers or executes their tools. These paths are **not** the official MCP Registry `/v0.1` API. Complete supported fields, threat model, examples and restrictions are described in [MCP registry catalog](mcp-registry-catalog.md).
