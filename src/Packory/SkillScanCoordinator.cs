@@ -23,7 +23,8 @@ public sealed class SkillScanCoordinator(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!settings.SkillSecurityEnforced || settings.InstanceRole == "reader") return;
+        if (!settings.SkillSecurityEnforced || settings.InstanceRole == "reader" ||
+            settings.RecoveryMaintenance) return;
         Directory.CreateDirectory(Incoming);
         Directory.CreateDirectory(Outgoing);
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
@@ -37,6 +38,8 @@ public sealed class SkillScanCoordinator(
 
     internal async Task TickAsync(CancellationToken ct)
     {
+        // Defense in depth for direct callers as well as the hosted dispatcher.
+        if (settings.RecoveryMaintenance) return;
         // Complete results first; each result is matched to an immutable digest and job id.
         foreach (var entry in store.List(1000))
         {
@@ -113,6 +116,8 @@ public sealed class SkillScanCoordinator(
     public async Task<bool> ApproveAsync(string name, string version, string digest,
         string actor, string reason, CancellationToken ct)
     {
+        if (settings.RecoveryMaintenance)
+            throw new InvalidOperationException("Skill approval is disabled during offline recovery maintenance.");
         if (!store.TryTransition(name, version, digest, "NEEDS_REVIEW", "PUBLISHING", actor, reason))
             return false;
         var rev = store.Get(name, version)!;
