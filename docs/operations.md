@@ -197,6 +197,15 @@ visible. Resolve it only through this procedure:
    `PACKORY_RECOVERY_MAINTENANCE=true`. This explicitly blocks normal package
    traffic, including all normal publish and cache writes. Readiness returns
    HTTP 503 on purpose; the admin reconciliation endpoints remain available.
+   **Startup now requires an existing, compatible PostgreSQL schema and must
+   not run automatic schema initialization/migration, orphan reconciliation,
+   publication-journal cleanup or the Skill scan background dispatcher.**
+   If schema validation fails, repair/migrate separately under an approved
+   offline procedure rather than allowing recovery startup to mutate metadata.
+   Explicitly requested administrative reconciliation remains an intentional,
+   authorized mutation; this is not a universally read-only process.
+   S3 client setup may create a local cache directory but must not publish
+   or delete authoritative objects without the operator's explicit action.
 3. Authenticate as administrator and inspect
    `GET /api/admin/publications/pending`. It now returns the observed
    `state` and any existing recovery-copy location for each intent.

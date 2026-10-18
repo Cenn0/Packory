@@ -185,9 +185,23 @@ if (!readerInstance) startupLease.Acquire();
 app.Lifetime.ApplicationStopped.Register(startupLease.Dispose);
 if (!readerInstance)
 {
-    app.Services.GetRequiredService<IPackageDatabase>().Initialize();
-    app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
-    app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+    var metadata = app.Services.GetRequiredService<IPackageDatabase>();
+    if (activeSettings.RecoveryMaintenance)
+    {
+        // The maintenance process must never create/migrate tables or
+        // automatically clear publication intents / move orphan bytes.
+        // Operators repair incompatible schemas through a separate reviewed
+        // offline procedure, not implicit application startup.
+        if (!metadata.IsHealthy())
+            throw new InvalidOperationException(
+                "Recovery maintenance requires an initialized compatible metadata schema.");
+    }
+    else
+    {
+        metadata.Initialize();
+        app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
+        app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
+    }
 }
 else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
 {
