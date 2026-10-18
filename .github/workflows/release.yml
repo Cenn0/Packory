@@ -30,7 +30,8 @@ jobs:
     timeout-minutes: 90
     # Configure required reviewers here for public promotion. This alone is NOT
     # the sign-off: the signed eight-gate evidence below is mandatory as well.
-    environment: release-approval
+    # Draft candidates have no access to public-promotion approval secrets.
+    environment: ${{ inputs.channel == 'public' && 'release-approval' || 'release-candidate' }}
     permissions:
       contents: write
       packages: write
