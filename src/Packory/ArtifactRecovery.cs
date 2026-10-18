@@ -24,6 +24,14 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             };
             if (key is null || !blobs.Contains(key)) missing++;
         }
+        foreach (var revision in database.FeedNugetRevisions())
+        {
+            if (!FeedDefinition.ValidId(revision.FeedId) || !Names.Nuget(revision.Name) ||
+                !Names.Version(revision.Version) ||
+                !blobs.Contains(FeedNugetEndpoints.BlobKey(
+                    revision.FeedId, revision.Name, revision.Version)))
+                missing++;
+        }
         foreach (var file in database.PyFiles())
         {
             if (!blobs.Contains(PyPiEndpoints.Key(file.Name, file.Filename))) missing++;
@@ -37,12 +45,27 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
 
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
+        "feed-nuget" => FeedPublicationCommitted(pending),
         "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
         "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
         "pypi" => database.PyFiles(pending.Name).Any(
             file => PyPiEndpoints.Key(file.Name, file.Filename) == pending.Key),
         _ => database.PackageOrigin(pending.Kind, pending.Name, pending.Version) == "hosted"
     };
+
+    private bool FeedPublicationCommitted(PendingPublication pending)
+    {
+        var sep = pending.Name.IndexOf('|');
+        if (sep <= 0 || sep == pending.Name.Length - 1) return false;
+        var feedId = pending.Name[..sep];
+        var name = pending.Name[(sep + 1)..];
+        return FeedDefinition.ValidId(feedId) && Names.Nuget(name) &&
+            Names.Version(pending.Version) &&
+            string.Equals(pending.Key,
+                FeedNugetEndpoints.BlobKey(feedId, name, pending.Version),
+                StringComparison.Ordinal) &&
+            database.GetFeedNugetRevision(feedId, name, pending.Version) is not null;
+    }
 
     public string State(PendingPublication pending)
     {
@@ -107,6 +130,25 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             }
         }
 
+        foreach (var revision in database.FeedNugetRevisions())
+        {
+            if (!FeedDefinition.ValidId(revision.FeedId) ||
+                !Names.Nuget(revision.Name) || !Names.Version(revision.Version))
+            {
+                missingHosted++;
+                logger.LogError("Invalid indexed private feed NuGet revision.");
+                continue;
+            }
+            var key = FeedNugetEndpoints.BlobKey(revision.FeedId,
+                revision.Name, revision.Version);
+            known.Add(key);
+            if (!blobs.Contains(key))
+            {
+                missingHosted++;
+                logger.LogError("Private feed NuGet artifact missing from blob store.");
+            }
+        }
+
         foreach (var file in database.PyFiles())
         {
             var key = PyPiEndpoints.Key(file.Name, file.Filename);
@@ -134,7 +176,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
             {
                 var key = Path.GetRelativePath(root, path).Replace('\\', '/');
-                var immutable = key.StartsWith("nuget/", StringComparison.Ordinal) && key.EndsWith(".nupkg", StringComparison.Ordinal) ||
+                var immutable = key.StartsWith("feeds/", StringComparison.Ordinal) &&
+                    key.EndsWith(".nupkg", StringComparison.Ordinal) ||
+                    key.StartsWith("nuget/", StringComparison.Ordinal) && key.EndsWith(".nupkg", StringComparison.Ordinal) ||
                     key.StartsWith("npm/", StringComparison.Ordinal) && key.EndsWith(".tgz", StringComparison.Ordinal) ||
                     key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal) ||
                     key.StartsWith("cargo/", StringComparison.Ordinal) && key.EndsWith(".crate", StringComparison.Ordinal) ||
