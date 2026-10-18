@@ -238,6 +238,16 @@ app.Use(async (ctx, next) =>
                 return;
             }
         }
+        // NuGet Basic credentials and X-NuGet-ApiKey are intentionally
+        // supported elsewhere, but must never authenticate the remote MCP
+        // endpoint. MCP always needs an explicit Bearer access token.
+        if (!ctx.Request.Headers.Authorization.ToString()
+            .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            ctx.Response.Headers.WWWAuthenticate = "Bearer realm=\"Packory MCP\"";
+            return;
+        }
         if (Access.RequireMcp(ctx, activeSettings) is { } denied)
         {
             await denied.ExecuteAsync(ctx);

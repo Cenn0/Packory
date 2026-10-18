@@ -102,11 +102,13 @@ def decision(action, digest, reason):
                 data, "application/json")
 
 
-def jsonrpc_payload(response):
+def jsonrpc_payload(response, request_id):
     """The Streamable HTTP transport can return JSON or an SSE event stream."""
     text = response.decode("utf-8")
     if text.lstrip().startswith("{"):
-        return json.loads(text)
+        data = json.loads(text)
+        require(data.get("id") == request_id, "MCP response ID mismatch")
+        return data
     for line in text.splitlines():
         if not line.startswith("data:"):
             continue
@@ -114,29 +116,43 @@ def jsonrpc_payload(response):
         if not data or data == "[DONE]":
             continue
         payload = json.loads(data)
-        if isinstance(payload, dict) and payload.get("id") in range(3, 11):
+        if isinstance(payload, dict) and payload.get("id") == request_id:
             return payload
     raise ValueError("MCP returned no JSON-RPC response event")
 
 
-def mcp_request(method, rpc_id, arguments=None, *, resource=None):
+def verify_skill_integrity_over_mcp(rpc_id, *, expected_to_pass):
     meta = {
         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-        "io.modelcontextprotocol/clientInfo": {
-            "name": "SyntheticCheck", "version": "1.0"
-        },
+        "io.modelcontextprotocol/clientInfo": {"name": "SyntheticCheck", "version": "1.0"},
         "io.modelcontextprotocol/clientCapabilities": {},
     }
-    params = {"_meta": meta, **(arguments or {})}
-    query = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
-    # The 2026-07-28 transport requires a method-specific MCP-Name
-    # declaration for named tool calls in addition to the JSON-RPC params.
-    if method == "tools/call" and resource is None:
-        resource = (arguments or {}).get("name")
-    code, response = http("POST", "/mcp", json.dumps(query).encode(),
-                          "application/json", mcp_method=method, mcp_name=resource)
-    require(code in (200, 400), "MCP " + method + " unexpected HTTP " + str(code))
-    return jsonrpc_payload(response)
+    message = {
+        "jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+        "params": {
+            "_meta": meta, "name": "verify_skill_integrity",
+            "arguments": {"name": NAME, "version": VERSION},
+        },
+    }
+    # Named 2026-07-28 tool calls carry Mcp-Name alongside MCP method and
+    # the ordinary JSON-RPC parameters.
+    code, response = http("POST", "/mcp", json.dumps(message).encode(),
+                          "application/json", mcp_method="tools/call",
+                          mcp_name="verify_skill_integrity")
+    require(code == 200, "MCP verification tool unexpected HTTP status " + str(code))
+    result = jsonrpc_payload(response, rpc_id)
+    require("error" not in result,
+            "MCP verification tool JSON-RPC error code " +
+            str(result.get("error", {}).get("code")))
+    payload = json.dumps(result.get("result", {}))
+    if expected_to_pass:
+        require("digest_verified" in payload,
+                "MCP integrity tool did not confirm the approved archive digest")
+        require("safeToExecute" in payload and "false" in payload,
+                "MCP integrity tool must never declare arbitrary Skill execution safe")
+    else:
+        require("unavailable" in payload and "digest_verified" not in payload,
+                "MCP integrity tool allowed a revoked or missing Skill")
 
 
 def check_mcp():
@@ -150,13 +166,32 @@ def check_mcp():
     }
     code, response = http("POST", "/mcp", json.dumps(request).encode(), "application/json", mcp_method="skills/list")
     require(code == 200, "MCP skills/list failed")
-    payload = jsonrpc_payload(response)
+    payload = jsonrpc_payload(response, 3)
     skills = payload.get("result", {}).get("skills", [])
     entry = next((x for x in skills if x.get("frontmatter", {}).get("name") == NAME), None)
     require(entry is not None, "Approved Skill missing from MCP discovery")
     manifest = next((x for x in entry["resources"] if x["uri"] == entry["uri"]), None)
     require(manifest is not None and manifest["digest"].startswith("sha256:"),
             "Skill manifest missing SHA-256")
+
+    # Verify the dedicated Skills Extension lookup independently of listing.
+    get_request = {
+        "jsonrpc": "2.0", "id": 5, "method": "skills/get",
+        "params": {"uri": entry["uri"], "_meta": request["params"]["_meta"]},
+    }
+    code, get_bytes = http("POST", "/mcp", json.dumps(get_request).encode(),
+                           "application/json", mcp_method="skills/get",
+                           mcp_name=entry["uri"])
+    require(code == 200, "MCP skills/get HTTP " + str(code))
+    get = jsonrpc_payload(get_bytes, 5).get("result", {})
+    skill = get.get("skill")
+    require(skill is not None and skill["uri"] == entry["uri"],
+            "skills/get did not return exact identity")
+    require(skill["resources"] == entry["resources"] and
+            skill["frontmatter"] == entry["frontmatter"],
+            "skills/get metadata differs from listing")
+    require(get.get("ttlMs") == 0 and get.get("cacheScope") == "private",
+            "Skill metadata cache must be revocation-safe")
 
     read_request = {
         "jsonrpc": "2.0", "id": 4, "method": "resources/read",
@@ -174,7 +209,7 @@ def check_mcp():
         "application/json", mcp_method="resources/read", mcp_name=entry["uri"]
     )
     require(code == 200, "MCP resources/read HTTP " + str(code) + ", response: " + result_bytes[:350].decode("utf-8", "replace"))
-    result = jsonrpc_payload(result_bytes)
+    result = jsonrpc_payload(result_bytes, 4)
     contents = result.get("result", {}).get("contents", [])
     item = next((x for x in contents if x.get("uri") == entry["uri"]), None)
     require(item is not None and isinstance(item.get("text"), str),
@@ -182,39 +217,34 @@ def check_mcp():
     read_digest = "sha256:" + hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
     require(read_digest == manifest["digest"],
             "MCP resources/read bytes do not match Skill manifest digest")
-
-    fetched = mcp_request("skills/get", 5, {"uri": entry["uri"]})
-    require(fetched.get("result", {}).get("skill") == entry,
-            "MCP skills/get differs from skills/list for the same approved revision")
-    require(fetched.get("result", {}).get("ttlMs") == 0,
-            "MCP skills/get must not cache a revocable approval")
-    integrity = mcp_request("tools/call", 6, {
-        "name": "verify_skill_integrity",
-        "arguments": {"name": NAME, "version": VERSION}
-    })
-    require("error" not in integrity, "MCP verification tool JSON-RPC error code " +
-            str(integrity.get("error", {}).get("code")))
-    require("digest_verified" in json.dumps(integrity.get("result", {})),
-            "MCP verification tool failed to verify approved archive")
+    verify_skill_integrity_over_mcp(9, expected_to_pass=True)
 
 
-def check_mcp_revoked():
-    listing = mcp_request("skills/list", 7)
-    require(all(skill.get("frontmatter", {}).get("name") != NAME
-                for skill in listing.get("result", {}).get("skills", [])),
-            "Revoked Skill leaked into MCP skills/list")
+
+def check_mcp_revocation():
+    metadata = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "SyntheticCheck", "version": "1.0"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    def query(method, ident, params, uri=None):
+        request = {"jsonrpc": "2.0", "id": ident, "method": method,
+                   "params": {"_meta": metadata, **params}}
+        code, data = http("POST", "/mcp", json.dumps(request).encode(),
+                          "application/json", mcp_method=method, mcp_name=uri)
+        require(code == 200, "Unexpected HTTP status after revocation: " + str(code))
+        return jsonrpc_payload(data, ident)
+
+    listed = query("skills/list", 6, {})
+    require(all(item.get("frontmatter", {}).get("name") != NAME
+                for item in listed.get("result", {}).get("skills", [])),
+            "Revoked Skill remains in MCP listing")
     uri = "skill://packory/" + VERSION + "/" + NAME + "/SKILL.md"
-    entry = mcp_request("skills/get", 8, {"uri": uri})
-    require("error" in entry, "Revoked Skill remained accessible through skills/get")
-    resource = mcp_request("resources/read", 9, {"uri": uri}, resource=uri)
-    require("error" in resource, "Revoked Skill remained accessible through resources/read")
-    verified = mcp_request("tools/call", 10, {
-        "name": "verify_skill_integrity",
-        "arguments": {"name": NAME, "version": VERSION}
-    })
-    require("unavailable" in json.dumps(verified.get("result", {})) and
-            "digest_verified" not in json.dumps(verified.get("result", {})),
-            "Revoked Skill verification did not fail closed")
+    for method, ident in (("skills/get", 7), ("resources/read", 8)):
+        answer = query(method, ident, {"uri": uri}, uri)
+        require("error" in answer and "result" not in answer,
+                "Revoked Skill metadata/bytes available via " + method)
+    verify_skill_integrity_over_mcp(10, expected_to_pass=False)
 
 
 def main():
@@ -240,8 +270,8 @@ def main():
     require(code == 200, "Revocation was not accepted")
     code, _ = http("GET", "/api/skills/" + NAME + "/" + VERSION + "/download")
     require(code == 404, "Revoked Skill remained downloadable")
-    check_mcp_revoked()
-    print("Compose end-to-end: staged, scanned, approved, MCP get/read verified, revoked")
+    check_mcp_revocation()
+    print("Compose end-to-end: staged, scanned, approved, MCP-list/get/read checked, revoked")
 
 
 if __name__ == "__main__":

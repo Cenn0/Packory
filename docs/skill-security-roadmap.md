@@ -269,3 +269,20 @@ For **each** task:
 - [Packory architecture](architecture.md), [API](api.md), [V3 roadmap](roadmap.md), [release gates](release-gates.md) — canonical integration constraints.
 
 **Decision:** Start with SS-001 through SS-004, then integrate pinned NVIDIA SkillSpector. A security scanner is not a substitute for provenance, authorization, content integrity, sandboxing and human review.
+
+## SkillSpector verification and repeat-scan hardening (19 October 2026)
+
+Packory's deterministic scanner policy now requires consistent, fully inspected
+coverage, not merely the aggregate `analysis_completeness.is_complete=true`.
+Any nonzero partial/entirely-uninspected/skipped/failed file counter, a nonempty
+scope exclusion or ledger exception, a known analysis limitation, or an explicitly
+reported coverage under 100% yields `SCAN_FAILED` and remains unavailable for
+MCP/REST distribution. Duplicate JSON property names and incompatible LLM
+usage metadata are rejected as ambiguous/untrusted scan results.
+
+Each persistent QUEUED attempt has a result identity tied to its immutable
+artifact digest **and** the revision transition timestamp. Rescanning the same
+bytes cannot consume a leftover sidecar report from an earlier attempt.
+This does not make the queue distributed, prove scanner completeness beyond
+the pinned version's JSON contract, or certify Skill safety. A user/administrator
+must still review any eligible report and explicitly approve the exact digest.

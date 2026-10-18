@@ -51,13 +51,16 @@ See [ADR 0002](adr/0002-validation-evidence-boundary.md) for the threat model.
 
 The dedicated [Keycloak integration workflow](../.github/workflows/keycloak.yml) now starts a disposable TLS-enabled Keycloak with two machine clients: a regular package reader/writer and a separate `packory.validation.read` reader. It publishes only a synthetic RSA-PSS-signed, SHA-256-pinned validation export to a disposable Packory process. The Streamable HTTP MCP smoke test negotiates sessions and verifies regular-token denial, scoped-token list/findings access and unknown-alias denial. It does **not** substitute for the independent external evaluator, the target deployment's access policy review or any real private test data.
 
-## MCP Skills Extension negative interoperability (October 2026)
+## Dedicated MCP tool verification (October 2026)
 
-The network-isolated Compose smoke additionally checks
-`skills/get` returns the same immutable manifest as `skills/list`,
-`verify_skill_integrity` succeeds on the exact approved ZIP, and no
-revoked revision remains available via `skills/list`, `skills/get`,
-`resources/read` or the integrity tool. These checks run against the
-real MCP Streamable HTTP server with authenticated JSON-RPC calls.
-They do not execute any skill instructions or establish official
-certification by MCP client vendors.
+The network-isolated Compose test now invokes the authenticated,
+read-only `verify_skill_integrity` MCP tool over Streamable HTTP using
+`Mcp-Method: tools/call` and the named tool header. For an approved
+Skill it checks the digest-verification verdict while explicitly
+rejecting any safe-to-execute certification. After revocation it checks
+that the same tool no longer reports a verified artifact.
+
+The existing `skills/list`, `skills/get`, `resources/read` and
+revocation tests remain unchanged. The tests prove only this exact
+self-hosted deployment and pinned protocol version; there is no broad
+external-client or production-security certification.
