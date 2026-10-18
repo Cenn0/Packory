@@ -20,7 +20,7 @@ public static class PackoryMcpCatalog
 {
     public sealed record SkillFile(string Path, byte[] Bytes);
     public sealed record SkillSnapshot(string Name, string Version, JsonObject Frontmatter,
-        IReadOnlyList<SkillFile> Files);
+        IReadOnlyList<SkillFile> Files, IReadOnlyList<string> Directories);
 
     public static IReadOnlyList<SkillEntry> Approved(IPackageDatabase db, SkillSecurityStore security,
         Settings settings) =>
@@ -63,37 +63,62 @@ public static class PackoryMcpCatalog
             using var archive = new ZipArchive(
                 new MemoryStream(publishedBytes, writable: false), ZipArchiveMode.Read);
             var files = new List<SkillFile>();
+            var directories = new HashSet<string>(StringComparer.Ordinal);
             long total = 0;
             var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var prefix = archive.Entries.Any(e => e.FullName == name + "/SKILL.md")
+                ? name + "/" : "";
             foreach (var entry in archive.Entries)
             {
-                var path = entry.FullName;
-                if (path.EndsWith('/')) continue;
-                var prefix = archive.Entries.Any(e => e.FullName == name + "/SKILL.md")
-                    ? name + "/" : "";
-                if (!path.StartsWith(prefix, StringComparison.Ordinal)) return null;
-                path = path[prefix.Length..];
+                var original = entry.FullName;
+                if (!original.StartsWith(prefix, StringComparison.Ordinal)) return null;
+                var isDirectory = original.EndsWith('/');
+                // Many ZIP producers include the enclosing skill folder as
+                // an explicit entry. It represents this skill's own root,
+                // not a child directory and must not invalidate the archive.
+                if (isDirectory && prefix.Length > 0 && original == prefix)
+                    continue;
+                var path = original[prefix.Length..];
+                if (isDirectory) path = path[..^1];
                 if (path.Length == 0 || path.Length > 512 ||
                     path.StartsWith('/') || path.Contains('\\') || path.Contains(':') ||
+                    path.Any(char.IsControl) ||
                     path.Split('/').Any(s => s is "." or ".." or "") ||
                     !unique.Add(path) ||
-                    ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000 ||
-                    entry.Length > 16 * 1024 * 1024) return null;
-                total += entry.Length;
-                if (total > 16 * 1024 * 1024 || files.Count >= 512) return null;
-                using var stream = entry.Open();
-                using var buffer = new MemoryStream();
-                stream.CopyTo(buffer);
-                if (buffer.Length != entry.Length) return null;
-                files.Add(new SkillFile(path, buffer.ToArray()));
+                    ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000)
+                    return null;
+                // An explicit directory is significant even when it has no
+                // files. Implicit ancestors of all files are directories too.
+                if (isDirectory)
+                {
+                    if (entry.Length != 0) return null;
+                    directories.Add(path);
+                }
+                else
+                {
+                    if (entry.Length > 16 * 1024 * 1024) return null;
+                    total += entry.Length;
+                    if (total > 16 * 1024 * 1024 || files.Count >= 512) return null;
+                    using var stream = entry.Open();
+                    using var buffer = new MemoryStream();
+                    stream.CopyTo(buffer);
+                    if (buffer.Length != entry.Length) return null;
+                    files.Add(new SkillFile(path, buffer.ToArray()));
+                }
+                for (var end = path.LastIndexOf('/'); end > 0; end = path.LastIndexOf('/', end - 1))
+                    directories.Add(path[..end]);
+                if (directories.Count > 4096) return null;
             }
+            // File/directory name collisions have no portable semantics.
+            if (files.Any(f => directories.Contains(f.Path))) return null;
             var manifest = files.SingleOrDefault(f => f.Path == "SKILL.md");
             if (manifest is null) return null;
             var frontmatter = ReadFrontmatter(Encoding.UTF8.GetString(manifest.Bytes));
             if (frontmatter["name"]?.GetValue<string>() != name ||
                 frontmatter["description"]?.GetValue<string>() is not { Length: > 0 })
                 return null;
-            return new SkillSnapshot(name, version, frontmatter, files);
+            return new SkillSnapshot(name, version, frontmatter, files,
+                directories.OrderBy(x => x, StringComparer.Ordinal).ToArray());
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or FormatException
             or ArgumentException or InvalidOperationException or YamlDotNet.Core.YamlException)
@@ -180,6 +205,98 @@ public static class PackoryMcpCatalog
             ["resources"] = files
         };
     }
+
+    /// <summary>
+    /// The optional Skills Extension directory method returns only direct
+    /// children of a verified approved archive. Reject malformed or encoded
+    /// path separators, traversal, URI suffixes and nonexistent directories.
+    /// </summary>
+    public static JsonObject? ReadDirectory(string? uri, IPackageDatabase db,
+        BlobStore blobs, SkillSecurityStore security, Settings settings)
+    {
+        const string origin = "skill://packory/";
+        if (uri is null || uri.Length > 2048 ||
+            !uri.StartsWith(origin, StringComparison.Ordinal) ||
+            uri.EndsWith("/", StringComparison.Ordinal) ||
+            uri.Contains('?') || uri.Contains('#') || uri.Contains('\\') ||
+            uri.Any(char.IsControl))
+            return null;
+
+        // Split BEFORE percent-unescaping: %2f and %5c must not create
+        // synthetic directory levels, and encoded dot-segments must be denied.
+        var raw = uri[origin.Length..].Split('/');
+        if (raw.Length < 2 || raw.Length > 256 ||
+            !Names.Version(raw[0]) || !Names.Skill(raw[1]))
+            return null;
+        var decoded = new List<string>();
+        foreach (var item in raw.Skip(2))
+        {
+            var part = Uri.UnescapeDataString(item);
+            if (string.IsNullOrEmpty(part) || part is "." or ".." ||
+                part.Any(char.IsControl) || part.Contains('/') ||
+                part.Contains('\\') || part.Contains(':') ||
+                part.Contains('?') || part.Contains('#'))
+                return null;
+            // URI encoding may be used for spaces/unicode in archive names,
+            // but only canonical escaped path segments may contain '%'.
+            if (item.Contains('%') &&
+                !string.Equals(Uri.EscapeDataString(part), item,
+                    StringComparison.OrdinalIgnoreCase))
+                return null;
+            decoded.Add(part);
+        }
+        var directory = string.Join("/", decoded);
+        if (directory.Length > 512) return null;
+        var snapshot = Get(raw[1], raw[0], db, blobs, security, settings);
+        if (snapshot is null ||
+            (directory.Length > 0 && !snapshot.Directories.Contains(directory,
+                StringComparer.Ordinal))) return null;
+
+        var prefix = directory.Length == 0 ? "" : directory + "/";
+        var children = new SortedDictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var folder in snapshot.Directories)
+        {
+            if (!folder.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var relative = folder[prefix.Length..];
+            if (relative.Length > 0 && !relative.Contains('/'))
+                children[relative] = true;
+        }
+        foreach (var file in snapshot.Files)
+        {
+            if (!file.Path.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var relative = file.Path[prefix.Length..];
+            if (relative.Length > 0 && !relative.Contains('/'))
+            {
+                if (!children.TryAdd(relative, false)) return null;
+            }
+        }
+        var resources = new JsonArray();
+        var baseUri = origin + raw[0] + "/" + raw[1] +
+            (directory.Length == 0 ? "" : "/" + string.Join("/",
+                decoded.Select(Uri.EscapeDataString)));
+        foreach (var (child, isDirectory) in children)
+        {
+            var mime = isDirectory ? "inode/directory" :
+                child.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? "text/markdown" :
+                child.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? "application/json" :
+                child.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ? "text/plain" :
+                "application/octet-stream";
+            resources.Add(new JsonObject
+            {
+                ["uri"] = baseUri + "/" + Uri.EscapeDataString(child),
+                ["name"] = child,
+                ["mimeType"] = mime
+            });
+        }
+        return new JsonObject
+        {
+            ["resultType"] = "complete",
+            ["resources"] = resources,
+            ["cacheScope"] = "private",
+            ["ttlMs"] = 0
+        };
+    }
+
 }
 
 /// <summary>Explicit MCP Skills Extension handlers, with native C# SDK serving
@@ -196,7 +313,7 @@ public sealed class PackoryMcpOptionsConfigurator(
         // The SDK's source-generated protocol serializer cannot serialize arbitrary anonymous objects.
         // A JsonElement is a supported DOM value and produces the exact advertised extension shape.
         options.Capabilities.Extensions["io.modelcontextprotocol/skills"] =
-            JsonSerializer.SerializeToElement(new Dictionary<string, bool> { ["directoryRead"] = false });
+            JsonSerializer.SerializeToElement(new Dictionary<string, bool> { ["directoryRead"] = true });
         options.RequestHandlers ??= new List<McpServerRequestHandler>();
         options.RequestHandlers.Add(new McpServerRequestHandler
         {
@@ -244,6 +361,21 @@ public sealed class PackoryMcpOptionsConfigurator(
                     ["cacheScope"] = "private",
                     ["ttlMs"] = 0
                 });
+            }
+        });
+        options.RequestHandlers.Add(new McpServerRequestHandler
+        {
+            Method = "resources/directory/read",
+            Handler = (request, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                // The method applies to real directories only. A revoked
+                // Skill or file URI must never yield listing metadata.
+                var uri = request.Params?["uri"]?.GetValue<string>();
+                var directory = PackoryMcpCatalog.ReadDirectory(
+                    uri, db, blobs, security, settings)
+                    ?? throw new ArgumentException("Unknown or unavailable skill directory.");
+                return ValueTask.FromResult<JsonNode?>(directory);
             }
         });
     }

@@ -58,12 +58,16 @@ def wait_ready(deadline):
 def zip_data():
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(NAME + "/", "")
         archive.writestr(
             NAME + "/SKILL.md",
             "---\nname: " + NAME +
             "\ndescription: Synthetic inert Compose smoke fixture\n---\n"
             "# Test skill\nThis document is an inert integration-test fixture.\n",
         )
+        archive.writestr(NAME + "/references/guide.md", "# Synthetic reference only\n")
+        archive.writestr(NAME + "/references/nested/detail.txt", "Synthetic detail only\n")
+        archive.writestr(NAME + "/empty/", "")
     return buffer.getvalue()
 
 
@@ -193,6 +197,34 @@ def check_mcp():
     require(get.get("ttlMs") == 0 and get.get("cacheScope") == "private",
             "Skill metadata cache must be revocation-safe")
 
+
+    # Exercise optional Skills Extension directory reads through the actual
+    # Streamable HTTP transport, not just an in-process function.
+    root_uri = entry["uri"].removesuffix("/SKILL.md")
+    def read_dir(path, ident):
+        call = {"jsonrpc": "2.0", "id": ident, "method": "resources/directory/read",
+                "params": {"uri": path, "_meta": request["params"]["_meta"]}}
+        code, body = http("POST", "/mcp", json.dumps(call).encode(),
+                          "application/json", mcp_method="resources/directory/read",
+                          mcp_name=path)
+        require(code == 200, "MCP directory/read HTTP " + str(code))
+        return jsonrpc_payload(body, ident).get("result", {})
+    root_directory = read_dir(root_uri, 9)
+    root_children = root_directory.get("resources", [])
+    require(root_directory.get("resultType") == "complete" and
+            root_directory.get("cacheScope") == "private" and
+            root_directory.get("ttlMs") == 0,
+            "Directory listing lacks revocation-safe cache metadata")
+    require({item["name"] for item in root_children} ==
+            {"SKILL.md", "references", "empty"}, "Root direct children incorrect")
+    require(next(x for x in root_children if x["name"] == "references")["mimeType"]
+            == "inode/directory", "Subdirectory MIME is not inode/directory")
+    refs = read_dir(root_uri + "/references", 10)
+    require({item["name"] for item in refs["resources"]} == {"guide.md", "nested"},
+            "Directory read must return direct children, not recursive files")
+    require(read_dir(root_uri + "/empty", 11).get("resources") == [],
+            "Explicit empty directory should enumerate as empty")
+
     read_request = {
         "jsonrpc": "2.0", "id": 4, "method": "resources/read",
         "params": {
@@ -240,8 +272,12 @@ def check_mcp_revocation():
                 for item in listed.get("result", {}).get("skills", [])),
             "Revoked Skill remains in MCP listing")
     uri = "skill://packory/" + VERSION + "/" + NAME + "/SKILL.md"
-    for method, ident in (("skills/get", 7), ("resources/read", 8)):
-        answer = query(method, ident, {"uri": uri}, uri)
+    for method, ident, target in (
+        ("skills/get", 7, uri),
+        ("resources/read", 8, uri),
+        ("resources/directory/read", 12, uri.removesuffix("/SKILL.md")),
+    ):
+        answer = query(method, ident, {"uri": target}, target)
         require("error" in answer and "result" not in answer,
                 "Revoked Skill metadata/bytes available via " + method)
     verify_skill_integrity_over_mcp(10, expected_to_pass=False)

@@ -51,7 +51,6 @@ public static class Access
         return null;
     }
 
-
     /// <summary>
     /// Packory MCP exposes the global artifact catalog, not a single hosted
     /// feed. A managed credential restricted to one feed or publishing
