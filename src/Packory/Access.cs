@@ -51,6 +51,20 @@ public static class Access
         return null;
     }
 
+    // Validation is never authorized by static catalog credentials or general packory.read.
+    // The authenticated OIDC token must carry both the ordinary MCP entry scope
+    // and the additional, dedicated validation scope.
+    public static bool HasValidationMcpAccess(HttpContext? context, Settings settings)
+    {
+        if (!settings.ValidationEnabled || !settings.OidcEnabled ||
+            context?.User.Identity?.IsAuthenticated != true) return false;
+        var scopes = context.User.FindAll("scope").Concat(context.User.FindAll("scp"))
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.Ordinal);
+        return scopes.Contains("packory.validation.read") &&
+               (scopes.Contains("packory.read") || scopes.Contains("packory.admin"));
+    }
+
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
