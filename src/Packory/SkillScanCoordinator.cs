@@ -17,9 +17,12 @@ public sealed class SkillScanCoordinator(
     public string Incoming => Path.Combine(Root, "in");
     public string Outgoing => Path.Combine(Root, "out");
 
+    // A rescan must never accept a stale response from a prior attempt for
+    // the same immutable bytes. UpdatedAt changes on QUEUED transitions.
     public static string JobId(SkillSecurityStore.Revision rev) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            rev.Name + "\n" + rev.Version + "\n" + rev.Sha256)));
+            rev.Name + "\n" + rev.Version + "\n" + rev.Sha256 +
+            "\n" + rev.UpdatedAt)));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -163,6 +166,53 @@ public static class SkillScanResult
     private static readonly (string State, int? Risk, string? Recommendation, string? Report) Failed =
         ("SCAN_FAILED", null, null, null);
 
+    private static bool Unambiguous(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+                if (!seen.Add(property.Name) || !Unambiguous(property.Value))
+                    return false;
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in element.EnumerateArray())
+                if (!Unambiguous(entry)) return false;
+        }
+        return true;
+    }
+
+    private static bool CompleteCoverage(JsonElement coverage)
+    {
+        // In some scanner versions the aggregate is_complete flag can coexist
+        // with per-file failures or scope exclusions. Trust the entire record,
+        // not its most optimistic member.
+        foreach (var field in new[]
+        {
+            "partially_inspected_files", "entirely_uninspected_files",
+            "failed_files", "skipped_files"
+        })
+        {
+            if (!coverage.TryGetProperty(field, out var count)) continue;
+            if (count.ValueKind != JsonValueKind.Number ||
+                !count.TryGetInt32(out var n) || n != 0)
+                return false;
+        }
+        foreach (var field in new[] { "ledger_exceptions", "scope_exclusions", "limitations" })
+        {
+            if (!coverage.TryGetProperty(field, out var record)) continue;
+            if (record.ValueKind != JsonValueKind.Array || record.GetArrayLength() != 0)
+                return false;
+        }
+        if (coverage.TryGetProperty("coverage_percent", out var percent) &&
+            (percent.ValueKind != JsonValueKind.Number ||
+             !percent.TryGetDouble(out var value) ||
+             !double.IsFinite(value) || value != 100.0))
+            return false;
+        return true;
+    }
+
     /// <summary>
     /// The scanner's aggregate risk may be lower than an individual HIGH/CRITICAL
     /// finding. Evaluate every finding and never interpret missing/malformed fields as
@@ -175,7 +225,7 @@ public static class SkillScanResult
             throw new InvalidDataException("Oversized scanner response.");
         using var envelope = JsonDocument.Parse(serialized);
         var root = envelope.RootElement;
-        if (root.ValueKind != JsonValueKind.Object ||
+        if (root.ValueKind != JsonValueKind.Object || !Unambiguous(root) ||
             !root.TryGetProperty("sha256", out var providedDigest) ||
             providedDigest.ValueKind != JsonValueKind.String ||
             !string.Equals(providedDigest.GetString(), requiredDigest, StringComparison.Ordinal))
@@ -196,7 +246,8 @@ public static class SkillScanResult
             if (!report.TryGetProperty("analysis_completeness", out var completeness) ||
                 completeness.ValueKind != JsonValueKind.Object ||
                 !completeness.TryGetProperty("is_complete", out var complete) ||
-                complete.ValueKind != JsonValueKind.True)
+                complete.ValueKind != JsonValueKind.True ||
+                !CompleteCoverage(completeness))
                 return Failed;
             if (completeness.TryGetProperty("status", out var completionStatus) &&
                 (completionStatus.ValueKind != JsonValueKind.String ||
@@ -206,6 +257,11 @@ public static class SkillScanResult
                 metadata.ValueKind != JsonValueKind.Object ||
                 !metadata.TryGetProperty("llm_requested", out var llm) ||
                 llm.ValueKind != JsonValueKind.False)
+                return Failed;
+            // A request claiming static mode cannot advertise an LLM-backed
+            // analysis result, even if the risk score looks acceptable.
+            if (metadata.TryGetProperty("llm_used", out var used) &&
+                used.ValueKind != JsonValueKind.False)
                 return Failed;
 
             if (!report.TryGetProperty("risk_assessment", out var assessment) ||
