@@ -166,3 +166,14 @@ Recommended reviewable PR series: (1) baseline, support and ADRs; (2) real S3 co
 - **Distributed release (optional):** only after MS7 operational proof.
 
 Open decisions: first real S3 provider/PG topology; hosted+proxy before any group feed; feed and namespace isolation vs future tenancy; TypeScript UI framework; native client version/OS pins; exact MCP Registry schema; OCI/AI retention; economic justification for active-active.
+
+
+## Delivery note — MS1.6 inspection slice (18 October 2026)
+
+A maintenance-only, admin-scoped bounded catalog-reference integrity audit
+has been implemented with per-family digest comparisons, negative cases and
+a real PostgreSQL/S3-emulator authorization check. This covers an **inspection
+subset**, not M1.6 exit: NuGet lacks durable publication-time digests, remote
+S3 object versions/retention and unreferenced objects are not exhaustively
+inventoried, and the scan is not an atomic cross-store snapshot. The existing
+real-provider restore, migration/rollback and release gates remain open.
