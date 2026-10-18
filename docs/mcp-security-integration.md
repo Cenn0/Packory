@@ -80,3 +80,18 @@ MCP hosts must still compare resource digests to the Skills Extension manifest
 and apply their own user-approval and sandbox policies. Enabling compatibility
 mode by setting `PACKORY_SKILL_SECURITY_ENFORCED=false` disables this policy
 check and is not recommended for untrusted registries.
+
+## MCP bearer credentials and scanner report parsing (19 October 2026)
+
+`/mcp` now requires an explicit `Authorization: Bearer ...` credential.
+NuGet's separate legacy Basic and `X-NuGet-ApiKey` authentication mechanisms
+are not accepted on the MCP transport. Synthetic API tests exercise these
+negative paths without exposing credentials.
+
+The offline SkillSpector bridge rejects duplicate/ambiguous JSON properties,
+non-finite numeric values, unexpected queue-manifest fields and non-object
+scanner reports. Scanner stdout is spooled to bounded local scratch storage
+rather than unbounded Python memory; any output exceeding 1 MiB fails closed.
+These are parser and isolation hardening measures, not proof of scanner accuracy
+against unknown malicious skills. The pinned container smoke remains a separate
+integration test.

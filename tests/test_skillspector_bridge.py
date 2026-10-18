@@ -49,7 +49,11 @@ class SkillSpectorBridgeTests(unittest.TestCase):
                              "analysis_completeness": {"is_complete": True},
                              "risk_assessment": {"score": 0}})
         completed = subprocess.CompletedProcess(["skillspector"], 0, report, "")
-        with mock.patch.object(worker.subprocess, "run", return_value=completed) as called:
+        def fake_scan(_command, **kwargs):
+            kwargs["stdout"].write(report.encode("utf-8"))
+            return completed
+
+        with mock.patch.object(worker.subprocess, "run", side_effect=fake_scan) as called:
             worker.process(manifest)
         payload = json.loads((self.output / (identity + ".json")).read_text())
         self.assertEqual(digest, payload["sha256"])
@@ -68,6 +72,48 @@ class SkillSpectorBridgeTests(unittest.TestCase):
         called.assert_not_called()
         payload = json.loads((self.output / (identity + ".json")).read_text())
         self.assertEqual(2, payload["exit_code"])
+
+
+    def test_duplicate_manifest_fields_or_invalid_shape_never_scan(self):
+        manifest, identity, digest = self.job()
+        for content in (
+            '{"id":"' + identity + '","sha256":"' + digest +
+            '","sha256":"' + digest + '"}',
+            '["not a queue object"]',
+            '{"id":"' + identity + '","sha256":"' + digest + '","extra":true}',
+            '{"id":"' + identity + '","sha256":"' + digest + '","extra":NaN}',
+        ):
+            with self.subTest(payload=content):
+                (self.output / (identity + ".json")).unlink(missing_ok=True)
+                manifest.write_text(content, encoding="utf-8")
+                with mock.patch.object(worker.subprocess, "run") as called:
+                    worker.process(manifest)
+                called.assert_not_called()
+                data = json.loads((self.output / (identity + ".json")).read_text())
+                self.assertEqual(2, data["exit_code"])
+                self.assertIsNone(data["report"])
+
+    def test_duplicate_scanner_findings_and_oversized_stdout_fail_closed(self):
+        manifest, identity, digest = self.job()
+        for content in (
+            b'{"execution_successful":true,"risk_assessment":{"score":0,"score":100}}',
+            b'{"execution_successful":true,"risk_assessment":{"score":NaN}}',
+            b"X" * (worker.MAX_REPORT + 1),
+        ):
+            with self.subTest(bytes=len(content)):
+                (self.output / (identity + ".json")).unlink(missing_ok=True)
+
+                def fake_scan(_command, **kwargs):
+                    kwargs["stdout"].write(content)
+                    return subprocess.CompletedProcess(["skillspector"], 0)
+
+                with mock.patch.object(worker.subprocess, "run",
+                                       side_effect=fake_scan):
+                    worker.process(manifest)
+                data = json.loads((self.output / (identity + ".json")).read_text())
+                self.assertEqual(digest, data["sha256"])
+                self.assertEqual(2, data["exit_code"])
+                self.assertIsNone(data["report"])
 
     def test_timeout_is_a_failure_not_an_approval(self):
         manifest, identity, _ = self.job()
