@@ -90,7 +90,9 @@ public sealed class SkillVerificationTests
         var duplicate = good.Replace("\"is_complete\":true",
             "\"is_complete\":true,\"is_complete\":true", StringComparison.Ordinal);
         Assert.NotEqual(good, duplicate);
-        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(duplicate, Digest).State);
+        // A duplicate property is rejected at the envelope boundary. The
+        // coordinator records this as SCAN_FAILED and never allows approval.
+        Assert.Throws<InvalidDataException>(() => SkillScanResult.Parse(duplicate, Digest));
     }
 
     [Fact]
