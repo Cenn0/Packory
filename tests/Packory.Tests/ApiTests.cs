@@ -864,6 +864,73 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(bearer)).StatusCode);
     }
 
+
+    [Fact]
+    public async Task Mcp_DeniesFeedScopedAndPublisherCredentialsOutsideTheirScope()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string feed = "mcp-scope-test";
+        using var draft = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/v1/admin/feeds/drafts", JsonContent.Create(new
+            {
+                id = feed, kind = "nuget", mode = "hosted",
+                displayName = "Synthetic scope test"
+            })));
+        Assert.Equal(HttpStatusCode.Created, draft.StatusCode);
+        using var activated = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/v1/admin/feeds/" + feed + "/activate"));
+        Assert.Equal(HttpStatusCode.OK, activated.StatusCode);
+
+        async Task<string> Managed(string role, string? scope)
+        {
+            using var created = await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/admin/tokens", JsonContent.Create(new
+                {
+                    role, @namespace = scope, expiresInHours = 1
+                })));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            using var response = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+            return response.RootElement.GetProperty("token").GetString()!;
+        }
+        var globalReader = await Managed("read", null);
+        var scopedReader = await Managed("read", "feed:" + feed + ":read");
+        var scopedWriter = await Managed("write", "feed:" + feed + ":publish");
+        var namespacePublisher = await Managed("write", "nuget:approved.*");
+
+        async Task<HttpStatusCode> McpCall(string credential)
+        {
+            const string payload = """
+                {"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"_meta":{
+                  "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                  "io.modelcontextprotocol/clientInfo":{"name":"scope-test","version":"1"},
+                  "io.modelcontextprotocol/clientCapabilities":{}
+                }}}
+                """;
+            using var req = WithToken(HttpMethod.Post, "/mcp",
+                new StringContent(payload, Encoding.UTF8, "application/json"), credential);
+            req.Headers.TryAddWithoutValidation("Mcp-Protocol-Version", "2026-07-28");
+            req.Headers.TryAddWithoutValidation("Mcp-Method", "tools/list");
+            req.Headers.Accept.ParseAdd("application/json");
+            req.Headers.Accept.ParseAdd("text/event-stream");
+            using var result = await client.SendAsync(req);
+            return result.StatusCode;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, await McpCall(globalReader));
+        foreach (var restricted in new[] { scopedReader, scopedWriter, namespacePublisher })
+            Assert.Equal(HttpStatusCode.Forbidden, await McpCall(restricted));
+
+        // The same exact feed-scoped credentials still work at their native
+        // registry source; global MCP restrictions must not break feed access.
+        using var allowedReader = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/feeds/" + feed + "/nuget/v3/index.json", token: scopedReader));
+        Assert.Equal(HttpStatusCode.OK, allowedReader.StatusCode);
+        using var allowedWriter = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/feeds/" + feed + "/nuget/v3/index.json", token: scopedWriter));
+        Assert.Equal(HttpStatusCode.OK, allowedWriter.StatusCode);
+    }
+
     [Fact]
     public async Task Mcp_SkillsExtensionListsOnlyApprovedRevisions()
     {

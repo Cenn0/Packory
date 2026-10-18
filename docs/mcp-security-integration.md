@@ -95,3 +95,14 @@ rather than unbounded Python memory; any output exceeding 1 MiB fails closed.
 These are parser and isolation hardening measures, not proof of scanner accuracy
 against unknown malicious skills. The pinned container smoke remains a separate
 integration test.
+
+## Global MCP grants and private-feed tokens
+
+MCP exposes a registry-wide artifact and approved-Skill catalog. Therefore,
+a revocable **managed token with a feed or publication namespace grant**
+is **not** a general MCP credential: MCP returns HTTP 403 even if the token
+is otherwise valid for its native private NuGet feed. Unscoped managed read
+tokens and explicit global read/admin access remain supported. This boundary
+prevents a narrowly granted feed publisher/reader from gaining visibility
+through the global MCP search or Skills tools. Feed-scoped tokens continue
+to authenticate exclusively against their intended native feed routes.

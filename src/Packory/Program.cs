@@ -248,7 +248,7 @@ app.Use(async (ctx, next) =>
             ctx.Response.Headers.WWWAuthenticate = "Bearer realm=\"Packory MCP\"";
             return;
         }
-        if (Access.RequireMcp(ctx, activeSettings) is { } denied)
+        if (Access.RequireGlobalMcp(ctx, activeSettings) is { } denied)
         {
             await denied.ExecuteAsync(ctx);
             return;
