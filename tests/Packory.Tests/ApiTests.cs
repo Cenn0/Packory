@@ -282,6 +282,12 @@ public sealed class ApiTests
         Assert.Contains("1.2.3", await versions.Content.ReadAsStringAsync());
         var location = "/nuget/v3/flatcontainer/example.package/1.2.3/example.package.1.2.3.nupkg";
         Assert.Equal(bytes, await (await client.SendAsync(WithToken(HttpMethod.Get, location))).Content.ReadAsByteArrayAsync());
+        var ledger = host.Services.GetRequiredService<IPackageDatabase>()
+            .GetNugetDigest("example.package", "1.2.3");
+        Assert.NotNull(ledger);
+        Assert.Equal("mirror", ledger.Origin);
+        Assert.Equal(bytes.LongLength, ledger.Size);
+        Assert.Equal(Convert.ToBase64String(SHA512.HashData(bytes)), ledger.Sha512);
         online = false;
         Assert.Equal(bytes, await (await client.SendAsync(WithToken(HttpMethod.Get, location))).Content.ReadAsByteArrayAsync());
         var sha = await (await client.SendAsync(WithToken(HttpMethod.Get, location + ".sha512"))).Content.ReadAsStringAsync();
@@ -289,6 +295,16 @@ public sealed class ApiTests
         Assert.Contains("<id>Example.Package</id>", await (await client.SendAsync(WithToken(HttpMethod.Get,
             "/nuget/v3/flatcontainer/example.package/1.2.3/example.package.nuspec"))).Content.ReadAsStringAsync());
         Assert.Contains("example.package", await (await client.SendAsync(WithToken(HttpMethod.Get, "/api/packages?q=example"))).Content.ReadAsStringAsync());
+        // Corrupted offline mirror bytes may remain on disk, but must never be
+        // served as a revision whose authoritative checksum no longer matches.
+        var cache = host.Services.GetRequiredService<BlobStore>().Existing(
+            NuGetEndpoints.NugetKey("example.package", "1.2.3"));
+        Assert.NotNull(cache);
+        await File.WriteAllBytesAsync(cache, "tampered cached package"u8.ToArray());
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await client.SendAsync(WithToken(HttpMethod.Get, location))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await client.SendAsync(WithToken(HttpMethod.Get, location + ".sha512"))).StatusCode);
     }
 
     [Fact]
@@ -321,10 +337,11 @@ public sealed class ApiTests
     {
         using var host = new Host();
         using var client = host.CreateClient();
-        static MultipartFormDataContent Form()
+        var published = Nupkg("Custom.Package", "0.1.0");
+        MultipartFormDataContent Form()
         {
             var form = new MultipartFormDataContent();
-            form.Add(new ByteArrayContent(Nupkg("Custom.Package", "0.1.0")), "package", "custom.package.0.1.0.nupkg");
+            form.Add(new ByteArrayContent(published), "package", "custom.package.0.1.0.nupkg");
             return form;
         }
         var unauthenticated = new HttpRequestMessage(HttpMethod.Put, "/nuget/v3/push") { Content = Form() };
@@ -333,7 +350,21 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push", Form()))).StatusCode);
         var artifact = await client.SendAsync(WithToken(HttpMethod.Get,
             "/nuget/v3/flatcontainer/custom.package/0.1.0/custom.package.0.1.0.nupkg"));
-        Assert.Equal(Nupkg("Custom.Package", "0.1.0").Length, (await artifact.Content.ReadAsByteArrayAsync()).Length);
+        Assert.Equal(published.Length, (await artifact.Content.ReadAsByteArrayAsync()).Length);
+        var revision = host.Services.GetRequiredService<IPackageDatabase>()
+            .GetNugetDigest("custom.package", "0.1.0");
+        Assert.NotNull(revision);
+        Assert.Equal("hosted", revision.Origin);
+        Assert.Equal(published.LongLength, revision.Size);
+        Assert.Equal(Convert.ToBase64String(SHA512.HashData(published)), revision.Sha512);
+        var local = host.Services.GetRequiredService<BlobStore>()
+            .Existing(NuGetEndpoints.NugetKey("custom.package", "0.1.0"));
+        Assert.NotNull(local);
+        await File.WriteAllBytesAsync(local, "tampered hosted blob"u8.ToArray());
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/nuget/v3/flatcontainer/custom.package/0.1.0/custom.package.0.1.0.nupkg")))
+                .StatusCode);
     }
 
     [Fact]

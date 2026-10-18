@@ -87,3 +87,15 @@ the real-provider, retention, restore, safety or full M1.6 gates. The release
 reviewer must treat `unverifiable`, `weak_digest_match`, `missing`,
 `digest_mismatch`, `storage_unavailable`, `size_limit` and
 `invalid_reference` as blocking or independently resolvable findings.
+
+
+## NuGet V3 integrity migration gate
+
+The new durable `nuget_digests` table must survive PostgreSQL/S3 snapshot
+fingerprints and isolated restores together with immutable package bytes.
+For newly published NuGet revisions, a missing/invalid SHA-512 or mismatched
+byte count/hash is a **release blocker**, not an invitation to recompute a
+trusted checksum from the bytes being inspected. Historical V1/V2 packages
+without this ledger remain explicitly unverified; they are not accepted as
+proof of an all-six-ecosystem integrity pass. Independently test historical
+upgrade/rollback and real-provider restore before production deployment.

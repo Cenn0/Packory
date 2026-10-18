@@ -178,3 +178,16 @@ subset**, not M1.6 exit: NuGet lacks durable publication-time digests, remote
 S3 object versions/retention and unreferenced objects are not exhaustively
 inventoried, and the scan is not an atomic cross-store snapshot. The existing
 real-provider restore, migration/rollback and release gates remain open.
+
+
+## Incremental MS1.6 delivery — publisher-time NuGet digests (18 October 2026)
+
+A V3 SQLite/PostgreSQL schema and immutable NuGet checksum ledger now
+record canonical SHA-512 and exact bytes for **newly hosted and
+upstream-verified mirrored** revisions. Downloads, the maintenance integrity
+scanner, snapshots and isolated database restore use the immutable metadata.
+V1/V2 legacy revisions intentionally remain `unverifiable` rather than
+receiving invented checksums. This addresses a concrete MS1.6 integrity
+gap, **not** full MS1 completion: old releases, real S3 provider conditions,
+coordinated cross-store recovery, retention, operator sign-off and RPO/RTO
+remain open.

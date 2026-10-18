@@ -22,7 +22,7 @@ public sealed class SchemaVersionTests
             using var connection = db.Open();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(2, Convert.ToInt32(cmd.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
             Assert.Equal("hosted", db.PackageOrigin("nuget", "version.test", "1.0.0"));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
@@ -49,7 +49,39 @@ public sealed class SchemaVersionTests
             using var connection = db.Open();
             using var read = connection.CreateCommand();
             read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(2, Convert.ToInt32(read.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(read.ExecuteScalar()));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void SqliteVersionTwoUpgradePreservesExistingPackageButDoesNotInventChecksum()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v2-upgrade-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            Assert.True(db.PublishNuget("legacy.package", "1.0.0", "legacy",
+                "fixture"));
+            using (var con = db.Open())
+            using (var command = con.CreateCommand())
+            {
+                command.CommandText = "DROP TABLE nuget_digests";
+                command.ExecuteNonQuery();
+                command.CommandText = "UPDATE packory_schema_version SET version=2 WHERE slot=1";
+                Assert.Equal(1, command.ExecuteNonQuery());
+            }
+            db.Initialize();
+            Assert.Equal("hosted", db.PackageOrigin("nuget", "legacy.package", "1.0.0"));
+            Assert.Null(db.GetNugetDigest("legacy.package", "1.0.0"));
+            using var check = db.Open();
+            using var read = check.CreateCommand();
+            read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(read.ExecuteScalar()));
+            read.CommandText = "SELECT COUNT(*) FROM nuget_digests";
+            Assert.Equal(0, Convert.ToInt32(read.ExecuteScalar()));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
@@ -91,6 +123,6 @@ public sealed class SchemaVersionTests
         Assert.Equal(6, database.Feeds(null, 20).Count);
         Assert.Equal("oci", database.Feed("default-oci")?.Kind);
         using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", connection);
-        Assert.Equal(2, Convert.ToInt32(cmd.ExecuteScalar()));
+        Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
     }
 }

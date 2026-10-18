@@ -74,3 +74,14 @@ See [release gates](release-gates.md) for the remaining acceptance requirements.
 
 Primary API contracts: [S3 ListObjectVersions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html)
 and [S3 GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html).
+
+
+## Database schema V3 acceptance
+
+The offline PostgreSQL/S3 snapshot remains **file format 2**, but now
+understands Packory **database schema 3**, including the `nuget_digests`
+table of published SHA-512 checksums. For V3 databases the table must be
+present in the captured counts and row-value fingerprints. Its absence or
+unexpected presence in a legacy schema 2 manifest is rejected; no silent
+"restore without checksums" downgrade is allowed. Schema 1/2 snapshots
+remain identifiable and do not claim missing V3 checksum evidence.

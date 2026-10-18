@@ -22,7 +22,7 @@ spec.loader.exec_module(mod)
     os.getenv("PACKORY_TEST_S3") and os.getenv("PACKORY_TEST_POSTGRES"),
     "requires disposable PostgreSQL service and local S3 emulator")
 class CoordinatedRestoreIntegrationTests(unittest.TestCase):
-    def test_versioned_s3_and_schema_v2_postgres_restore_with_exact_row_hashes(self):
+    def test_versioned_s3_and_schema_v3_postgres_restore_with_exact_row_hashes(self):
         import boto3
         import psycopg
         from botocore.config import Config
@@ -49,7 +49,7 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                     databases_created.append(name)
 
             with psycopg.connect("dbname=" + source_db, autocommit=True) as source:
-                for name in (*mod.CORE_TABLES, *mod.FEED_TABLES):
+                for name in (*mod.CORE_TABLES, *mod.FEED_TABLES, *mod.DIGEST_TABLES):
                     source.execute(
                         "CREATE TABLE " + name + " (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
                     source.execute(
@@ -58,11 +58,12 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                 source.execute(
                     "CREATE TABLE packory_schema_version (slot INTEGER PRIMARY KEY, version INTEGER)")
                 source.execute(
-                    "INSERT INTO packory_schema_version (slot,version) VALUES (1,2)")
+                    "INSERT INTO packory_schema_version (slot,version) VALUES (1,3)")
                 before = mod.metadata_fingerprints(source)
                 self.assertEqual(
                     set(before),
-                    set((*mod.CORE_TABLES, "packory_schema_version", *mod.FEED_TABLES)))
+                    set((*mod.CORE_TABLES, "packory_schema_version",
+                         *mod.FEED_TABLES, *mod.DIGEST_TABLES)))
                 self.assertEqual(1, before["feeds"]["count"])
 
             for bucket in (source_bucket, target_bucket):
@@ -90,7 +91,7 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                 self.assertEqual(4, len(saved["objects"]))
                 self.assertEqual(1, len(saved["delete_markers"]))
                 self.assertEqual(before, saved["postgres"]["table_fingerprints"])
-                self.assertEqual(2, saved["postgres"]["database_schema_version"])
+                self.assertEqual(3, saved["postgres"]["database_schema_version"])
                 self.assertEqual(saved, mod.verify(archive))
 
                 os.environ["PGDATABASE"] = target_db

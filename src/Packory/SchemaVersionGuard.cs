@@ -5,13 +5,13 @@ namespace Packory;
 
 /// <summary>
 /// Explicit forward-only database versions. V1 is the historical global-catalog
-/// schema; V2 adds an inventory of default legacy feeds without changing any
-/// native registry routes or claiming cross-feed isolation.
+/// schema; V2 adds legacy feed inventory; V3 adds immutable NuGet SHA-512
+/// publication-time records. No native routes or feed isolation change.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 2;
+    public const int Current = 3;
 
     private static int RequireKnown(object? value)
     {
@@ -55,6 +55,15 @@ public static class SchemaVersionGuard
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
             PRIMARY KEY(feed_id,upstream_id),
             UNIQUE(feed_id,priority)
+        );
+        """;
+
+    private const string NugetDigestSchema = """
+        CREATE TABLE IF NOT EXISTS nuget_digests (
+            name TEXT NOT NULL, version TEXT NOT NULL,
+            sha512 TEXT NOT NULL, size BIGINT NOT NULL CHECK(size>=0),
+            origin TEXT NOT NULL CHECK(origin IN ('hosted','mirror')),
+            PRIMARY KEY(name,version)
         );
         """;
 
@@ -103,14 +112,15 @@ public static class SchemaVersionGuard
         read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
         var version = RequireKnown(read.ExecuteScalar());
         if (version == Current) { tx.Commit(); return; }
-        using (var schema = connection.CreateCommand())
+        if (version < 2)
         {
+            using var schema = connection.CreateCommand();
             schema.Transaction = tx;
             schema.CommandText = FeedSchema;
             schema.ExecuteNonQuery();
         }
         var at = DateTimeOffset.UtcNow.ToString("O");
-        foreach (var feed in Defaults)
+        if (version < 2) foreach (var feed in Defaults)
         {
             using var insert = connection.CreateCommand();
             insert.Transaction = tx;
@@ -124,6 +134,13 @@ public static class SchemaVersionGuard
             insert.Parameters.AddWithValue("$name", feed.Name);
             insert.Parameters.AddWithValue("$at", at);
             insert.ExecuteNonQuery();
+        }
+        if (version < 3)
+        {
+            using var digestSchema = connection.CreateCommand();
+            digestSchema.Transaction = tx;
+            digestSchema.CommandText = NugetDigestSchema;
+            digestSchema.ExecuteNonQuery();
         }
         using (var stamp = connection.CreateCommand())
         {
@@ -171,10 +188,13 @@ public static class SchemaVersionGuard
             "SELECT version FROM packory_schema_version WHERE slot=1 FOR UPDATE", connection, tx);
         var version = RequireKnown(read.ExecuteScalar());
         if (version == Current) { tx.Commit(); return; }
-        using (var schema = new NpgsqlCommand(FeedSchema, connection, tx))
+        if (version < 2)
+        {
+            using var schema = new NpgsqlCommand(FeedSchema, connection, tx);
             schema.ExecuteNonQuery();
+        }
         var at = DateTimeOffset.UtcNow.ToString("O");
-        foreach (var feed in Defaults)
+        if (version < 2) foreach (var feed in Defaults)
         {
             using var insert = new NpgsqlCommand("""
                 INSERT INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
@@ -186,6 +206,11 @@ public static class SchemaVersionGuard
             insert.Parameters.AddWithValue("name", feed.Name);
             insert.Parameters.AddWithValue("at", at);
             insert.ExecuteNonQuery();
+        }
+        if (version < 3)
+        {
+            using var digestSchema = new NpgsqlCommand(NugetDigestSchema, connection, tx);
+            digestSchema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
