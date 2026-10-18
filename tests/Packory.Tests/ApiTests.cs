@@ -883,6 +883,7 @@ public sealed class ApiTests
                 Add(zip, "directory-fixture/references/guide.md", "# Reference\n");
                 Add(zip, "directory-fixture/references/deep/detail.txt", "Nested.\n");
                 Add(zip, "directory-fixture/scripts/example.sh", "# inert test file\n");
+                zip.CreateEntry("directory-fixture/");
                 zip.CreateEntry("directory-fixture/empty/");
             }
             return data.ToArray();
