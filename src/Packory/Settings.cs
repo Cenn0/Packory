@@ -43,6 +43,10 @@ public sealed class Settings
     public string ValidationAudience { get; set; } = "packory-validation";
     public string ValidationTenant { get; set; } = "local";
     public string[] ValidationApprovedAliases { get; set; } = [];
+    // Operator pins each alias to one exact signed export byte digest.
+    // Prevents replacement with an older but still validly signed export.
+    public string[] ValidationApprovedExports { get; set; } = [];
+
     public string[] ValidationRevokedKeyIds { get; set; } = [];
 
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
@@ -104,6 +108,14 @@ public sealed class Settings
                 ValidationApprovedAliases.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x,
                     @"\A[a-z][a-z0-9-]{0,63}\z", RegexOptions.CultureInvariant)) ||
                 ValidationApprovedAliases.Distinct(StringComparer.Ordinal).Count() != ValidationApprovedAliases.Length ||
+                ValidationApprovedExports.Length != ValidationApprovedAliases.Length ||
+                ValidationApprovedExports.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x,
+                    @"\A[a-z][a-z0-9-]{0,63}=sha256:[0-9a-f]{64}\z", RegexOptions.CultureInvariant)) ||
+                ValidationApprovedExports.Select(x => x.Split('=')[0]).Distinct(StringComparer.Ordinal).Count()
+                    != ValidationApprovedExports.Length ||
+                !ValidationApprovedAliases.Order(StringComparer.Ordinal).SequenceEqual(
+                    ValidationApprovedExports.Select(x => x.Split('=')[0]).Order(StringComparer.Ordinal)) ||
+
                 ValidationRevokedKeyIds.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x,
                     @"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant)) ||
                 ValidationRevokedKeyIds.Contains(ValidationVerifierKeyId, StringComparer.Ordinal))
