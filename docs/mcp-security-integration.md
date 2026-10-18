@@ -10,6 +10,18 @@ The new MCP Streamable HTTP endpoint at /mcp uses the official MCP C# SDK and pr
 
 This is a distribution server, not a remote tool-execution gateway. It does not launch untrusted Skill scripts or remote MCP servers. Mutations are intentionally excluded from the MCP attack surface.
 
+## OAuth Protected Resource Metadata (OIDC/HTTPS only)
+
+For an HTTPS public origin with a configured OIDC authority/audience, the Packory MCP resource identifier is the configured public origin plus `/mcp`. Packory exposes the public RFC 9728 metadata document at `GET /.well-known/oauth-protected-resource/mcp` with the exact resource URL, configured OIDC issuer (`authorization_servers`), `bearer_methods_supported=["header"]` and minimum `scopes_supported=["packory.read"]`.
+
+An MCP HTTP 401 response for missing or invalid Bearer credentials includes an absolute `resource_metadata` URL in `WWW-Authenticate`, with `scope="packory.read"`. A 403 for missing scope or restricted managed credentials is not an OAuth challenge.
+
+**Static tokens are not OAuth:** without OIDC or without an HTTPS public origin, Packory does not advertise an OAuth authorization server or expose a protected-resource document. Static Bearer token access can still function, but cannot be called an OAuth-conformant profile.
+
+Resource metadata only provides discovery; the external identity provider is responsible for OAuth 2.1 token issuance, registration, authorization-code/PKCE flow and client interoperability. Packory validates JWT issuer, audience, signature, expiry and explicit scope, but does not implement the authorization server or interactive browser SSO. Independently qualify the identity-provider flow before claiming end-to-end compliance.
+
+References: [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) and [MCP Authorization, 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
+
 ## Security pipeline
 
 New ZIP imports are staged under a content-derived SHA-256 key and enter a persistent QUEUED state. They cannot be publicly listed, downloaded or used as MCP resources before approval. A background coordinator writes an immutable scan snapshot to the sidecar's input volume and waits for machine-readable JSON results on a separate output volume.
