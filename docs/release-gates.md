@@ -73,3 +73,16 @@ python3 scripts/verify_release_evidence.py --evidence-dir <EVIDENCE_DIR> --publi
 The command returns nonzero and prints `BLOCKED` for a missing, unsigned, tampered, expired, inconsistent or incomplete set of evidence. Never publish raw evidence, actual endpoint names, signer private keys, internal logs or operator identities. It performs **no network access and no infrastructure mutations**.
 
 **Important:** An operator can sign misleading reports. Cryptographic envelope authentication and file integrity are necessary but **not sufficient** for independent validation of test provenance, realistic coverage, achieved RPO/RTO/SLO or production safety. Without real-provider acceptance and independently reviewed records, issue #36 remains open. The CI job executes **synthetic negative tests of the verifier**, not an actual release acceptance.
+
+
+### Catalog-reference verification is not a production restore
+
+The optional maintenance-only `/api/admin/integrity/scan` endpoint
+cross-checks indexed references against recorded SHA-256/SHA-512 metadata
+where available, and reports absent or unverifiable objects. It is a
+**bounded observation**, not an atomic PostgreSQL/S3 snapshot and not a
+garbage-collection reachability proof. A successful subset does not clear
+the real-provider, retention, restore, safety or full M1.6 gates. The release
+reviewer must treat `unverifiable`, `weak_digest_match`, `missing`,
+`digest_mismatch`, `storage_unavailable`, `size_limit` and
+`invalid_reference` as blocking or independently resolvable findings.
