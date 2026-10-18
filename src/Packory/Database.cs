@@ -175,7 +175,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return true;
     }
 
-    public NugetDigest? NugetDigest(string name, string version)
+    public NugetDigest? GetNugetDigest(string name, string version)
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
