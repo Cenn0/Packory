@@ -12,6 +12,8 @@ public sealed record QuarantineEvidence(string Key, string RecoveryKey, string S
     string SourceEtag, string CreatedAt, bool Completed);
 public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
+public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
+    string Description, string Sha512, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
 public sealed record OciReferrerEntry(string Digest, string MediaType, long Size, string ArtifactType);
 
@@ -310,10 +312,123 @@ public sealed class Database(Settings settings) : IPackageDatabase
                 AND NOT EXISTS (SELECT 1 FROM feed_namespaces WHERE feed_id=$id)
                 AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=$id)
                 AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=$id)
+                AND NOT EXISTS (SELECT 1 FROM feed_nuget_versions WHERE feed_id=$id)
             """;
         delete.Parameters.AddWithValue("$id", id);
         if (delete.ExecuteNonQuery() != 1) return false;
         InsertAudit(db, tx, "feed-draft-delete", "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public bool TryActivateHostedNugetFeed(string id, string actor) =>
+        ChangeHostedNugetState(id, true, actor);
+
+    public bool TryDeactivateHostedNugetFeed(string id, string actor) =>
+        ChangeHostedNugetState(id, false, actor);
+
+    private bool ChangeHostedNugetState(string id, bool enabled, string actor)
+    {
+        if (!FeedDefinition.ValidId(id)) return false;
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            UPDATE feeds SET enabled=$next, updated_at=$at
+            WHERE id=$id AND kind='nuget' AND mode='hosted'
+              AND visibility='private' AND enabled=$previous
+            """;
+        cmd.Parameters.AddWithValue("$next", enabled ? 1 : 0);
+        cmd.Parameters.AddWithValue("$previous", enabled ? 0 : 1);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("$id", id);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, enabled ? "feed-hosted-activate" : "feed-hosted-deactivate",
+            "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public IReadOnlyList<string> FeedNugetVersions(string feedId, string name)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT version FROM feed_nuget_versions
+            WHERE feed_id=$feed AND name=$name ORDER BY version
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public FeedNugetRevision? GetFeedNugetRevision(string feedId, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions
+            WHERE feed_id=$feed AND name=$name AND version=$version
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)) : null;
+    }
+
+    public IReadOnlyList<FeedNugetRevision> FeedNugetRevisions()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions ORDER BY feed_id,name,version
+            """;
+        using var reader = cmd.ExecuteReader();
+        var items = new List<FeedNugetRevision>();
+        while (reader.Read()) items.Add(new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)));
+        return items;
+    }
+
+    public bool PublishFeedNuget(string feedId, string name, string version,
+        string description, string sha512, long size, string actor)
+    {
+        NugetDigest.Validate(sha512, size);
+        if (!FeedDefinition.ValidId(feedId) || !Names.Nuget(name) || !Names.Version(version))
+            throw new ArgumentException("Invalid private NuGet feed reference.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO feed_nuget_versions
+                (feed_id,name,version,description,sha512,size,created_at)
+            SELECT $feed,$name,$version,$description,$sha512,$size,$at
+            WHERE EXISTS (
+                SELECT 1 FROM feeds
+                WHERE id=$feed AND kind='nuget' AND mode='hosted'
+                  AND visibility='private' AND enabled=1)
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$description", description);
+        cmd.Parameters.AddWithValue("$sha512", sha512);
+        cmd.Parameters.AddWithValue("$size", size);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "publish", "feed-nuget", feedId + "/" + name,
+            version, actor);
         tx.Commit();
         return true;
     }

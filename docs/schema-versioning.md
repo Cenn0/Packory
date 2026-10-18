@@ -34,3 +34,22 @@ freeze writers before migration; previous binaries reject V3. The offline
 PostgreSQL/S3 snapshot verifier now includes `nuget_digests` in version-3
 row fingerprints and rejects incomplete V3 manifests. Older version-2 backup
 manifests retain their own strictly bounded table selection.
+
+
+## V4: private hosted feed revisions
+
+Version **4** adds `feed_nuget_versions` keyed by
+`(feed_id,name,version)`, referencing the V2 feed inventory,
+with SHA-512, size, description and immutable timestamp. It does **not**
+rewrite or migrate legacy package keys and does not replace the V3
+`nuget_digests` ledger. Activated NuGet-hosted feeds are
+explicitly private; metadata-only drafts for all other modes/kinds
+remain disabled. A private feed cannot be deleted if any referenced
+revision exists, including after deactivation.
+
+Upgrades V1→V4, V2→V4 and V3→V4 are forward-only. The offline
+PostgreSQL/S3 snapshot tool fingerprints `feed_nuget_versions` for
+database schema V4, and strict verification refuses a V4 snapshot
+without it. Previous schema-version-specific snapshot formats remain
+separately recognized. No rollback is supported without a pre-upgrade
+coordinated offline database+object restore.

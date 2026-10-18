@@ -213,6 +213,190 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task PrivateHostedNugetFeedsAreIsolatedAndSupportRevocableLeastPrivilegeTokens()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+
+        async Task CreateAndActivateAsync(string id)
+        {
+            using var created = await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/v1/admin/feeds/drafts", JsonContent.Create(new
+                {
+                    id, kind = "nuget", mode = "hosted", displayName = "Synthetic Private Feed"
+                })));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await client.SendAsync(WithToken(HttpMethod.Post,
+                    "/api/v1/admin/feeds/" + id + "/activate"))).StatusCode);
+        }
+
+        async Task<(string Id, string Secret)> TokenAsync(string role, string grant)
+        {
+            using var created = await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/admin/tokens", JsonContent.Create(new
+                {
+                    role, @namespace = grant, expiresInHours = 24
+                })));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            using var doc = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+            return (doc.RootElement.GetProperty("id").GetString()!,
+                    doc.RootElement.GetProperty("token").GetString()!);
+        }
+
+        static MultipartFormDataContent Package(byte[] data)
+        {
+            var content = new MultipartFormDataContent();
+            content.Add(new ByteArrayContent(data), "package", "private.package.1.0.0.nupkg");
+            return content;
+        }
+
+        static byte[] NugetWithDescription(string description)
+        {
+            using var content = new MemoryStream();
+            using (var archive = new ZipArchive(content, ZipArchiveMode.Create, true))
+            {
+                using var writer = new StreamWriter(
+                    archive.CreateEntry("Private.Package.nuspec").Open());
+                writer.Write("<package><metadata><id>Private.Package</id><version>1.0.0</version>" +
+                    "<authors>Example</authors><description>" + description +
+                    "</description></metadata></package>");
+            }
+            return content.ToArray();
+        }
+
+        await CreateAndActivateAsync("alpha-feed");
+        await CreateAndActivateAsync("beta-feed");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "read", @namespace = "feed:alpha-feed:publish",
+                    expiresInHours = 1
+                })))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "write", @namespace = "feed:alpha-feed:read",
+                    expiresInHours = 1
+                })))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(WithToken(HttpMethod.Post, "/api/admin/tokens",
+                JsonContent.Create(new
+                {
+                    role = "write", @namespace = "feed:future-feed:publish",
+                    expiresInHours = 1
+                })))).StatusCode);
+        var writer = await TokenAsync("write", "feed:alpha-feed:publish");
+        var alphaReader = await TokenAsync("read", "feed:alpha-feed:read");
+        var betaReader = await TokenAsync("read", "feed:beta-feed:read");
+        var alpha = NugetWithDescription("alpha-private");
+        var beta = NugetWithDescription("beta-private");
+        var alphaIndex = "/feeds/alpha-feed/nuget/v3/index.json";
+        var betaIndex = "/feeds/beta-feed/nuget/v3/index.json";
+        var alphaFile = "/feeds/alpha-feed/nuget/v3/flatcontainer/private.package/1.0.0/private.package.1.0.0.nupkg";
+        var betaFile = "/feeds/beta-feed/nuget/v3/flatcontainer/private.package/1.0.0/private.package.1.0.0.nupkg";
+
+        using (var challenge = await client.GetAsync(alphaIndex))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, challenge.StatusCode);
+            Assert.Contains(challenge.Headers.WwwAuthenticate,
+                value => value.Scheme == "Basic" &&
+                    value.Parameter == "realm=\"Packory private feed\"");
+        }
+        using (var basicIndex = new HttpRequestMessage(HttpMethod.Get, alphaIndex))
+        {
+            basicIndex.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes("synthetic:" + alphaReader.Secret)));
+            Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(basicIndex)).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaIndex, token: ReadToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaIndex, token: WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, betaIndex, token: alphaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaIndex, token: betaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaIndex, token: alphaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get, betaIndex, token: betaReader.Secret))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/beta-feed/nuget/v3/push", Package(beta), writer.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/alpha-feed/nuget/v3/push", Package(alpha), alphaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/alpha-feed/nuget/v3/push", Package(alpha), writer.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/alpha-feed/nuget/v3/push", Package(alpha), writer.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/beta-feed/nuget/v3/push", Package(beta)))).StatusCode);
+
+        Assert.Equal(alpha,
+            await (await client.SendAsync(WithToken(HttpMethod.Get, alphaFile,
+                token: alphaReader.Secret))).Content.ReadAsByteArrayAsync());
+        Assert.Equal(beta,
+            await (await client.SendAsync(WithToken(HttpMethod.Get, betaFile,
+                token: betaReader.Secret))).Content.ReadAsByteArrayAsync());
+        Assert.NotEqual(Convert.ToBase64String(SHA512.HashData(alpha)),
+            Convert.ToBase64String(SHA512.HashData(beta)));
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, betaFile,
+                token: alphaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/nuget/v3/flatcontainer/private.package/index.json"))).StatusCode);
+        Assert.DoesNotContain("private.package",
+            await (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/api/packages?kind=nuget"))).Content.ReadAsStringAsync());
+
+        var database = host.Services.GetRequiredService<IPackageDatabase>();
+        Assert.Equal(2, database.FeedNugetRevisions().Count);
+        Assert.Empty(database.PendingPublications());
+        Assert.NotEqual(FeedNugetEndpoints.BlobKey("alpha-feed", "private.package", "1.0.0"),
+            FeedNugetEndpoints.BlobKey("beta-feed", "private.package", "1.0.0"));
+
+        // A disabled feed retains bytes, but cannot serve or accept uploads.
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/v1/admin/feeds/alpha-feed/deactivate"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaFile,
+                token: alphaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get, betaFile,
+                token: betaReader.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await client.SendAsync(WithToken(HttpMethod.Delete,
+                "/api/v1/admin/feeds/drafts/alpha-feed"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/v1/admin/feeds/alpha-feed/activate"))).StatusCode);
+        Assert.Equal(alpha,
+            await (await client.SendAsync(WithToken(HttpMethod.Get, alphaFile,
+                token: alphaReader.Secret))).Content.ReadAsByteArrayAsync());
+
+        // Managed feed tokens are revocable without affecting other tenants.
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.SendAsync(WithToken(HttpMethod.Delete,
+                "/api/admin/tokens/" + writer.Id))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.SendAsync(WithToken(HttpMethod.Put,
+                "/feeds/alpha-feed/nuget/v3/push", Package(alpha), writer.Secret))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get, betaFile,
+                token: betaReader.Secret))).StatusCode);
+    }
+
+    [Fact]
     public async Task IntegrityInspectionRequiresAdminAndExplicitOfflineMaintenance()
     {
         using var host = new Host();

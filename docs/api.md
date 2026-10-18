@@ -127,3 +127,26 @@ bypassing the potentially stale artifact cache. This is a best-effort
 point-in-time observation, never an automatic production certification. See
 [operations](operations.md#offline-catalog-reference-integrity-inspection-ms16-experimental)
 for interpretation, caveats and a redacted invocation example.
+
+
+## Hosted NuGet feed API (V4 experimental)
+
+`POST /api/v1/admin/feeds/{id}/activate` enables a reviewed **private
+NuGet hosted** draft only. `POST .../{id}/deactivate` disables client
+traffic while retaining immutable package bytes and metadata. Both are
+admin-only, audited and rate-limited. Other feed kinds remain drafts.
+
+Under `/feeds/{id}/nuget/v3/` the supported native operations are:
+`GET index.json`, `GET flatcontainer/{package}/index.json`,
+`GET flatcontainer/{package}/{version}/{file}` for exact
+`.nupkg`, `.nupkg.sha512` and `.nuspec`, plus
+`PUT/POST push` with the existing multipart NuGet package contract.
+There is **no** mirror fetch, public anonymous read, cross-feed
+fallback or generic catalog exposure.
+
+Use revocable tokens via `POST /api/admin/tokens` with
+`{"role":"read","namespace":"feed:alpha-feed:read","expiresInHours":1}`
+or the analogous `write/publish` grant. Never check issued tokens into
+source files. Generic `packory.read`, legacy static read/write
+credentials and tokens for other feeds do not grant private feed access.
+See [feed operations](feeds.md) for precise limitations.

@@ -336,4 +336,73 @@ public sealed class PostgresS3RecoveryTests
         }
     }
 
+    [Fact]
+    public async Task PrivateFeedNugetPublicationIntentPersistsAndRecoversUsingPostgresAndS3()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-feed-journal-" +
+            Guid.NewGuid().ToString("N"));
+        var cfg = Configure(root, "feed-journal-" + Guid.NewGuid().ToString("N")[..12]);
+        if (cfg is null) return;
+        // Integration suites share the PostgreSQL service. A global integrity
+        // count includes unrelated fixtures stored under other S3 prefixes;
+        // isolate this test's metadata as well as its S3 object namespace.
+        var schema = "packory_feedjournal_" + Guid.NewGuid().ToString("N")[..12];
+        using var administrator = new NpgsqlConnection(cfg.PostgresConnectionString);
+        administrator.Open();
+        using (var command = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            command.ExecuteNonQuery();
+        cfg.PostgresConnectionString = new NpgsqlConnectionStringBuilder(cfg.PostgresConnectionString)
+            { SearchPath = schema }.ConnectionString;
+        try
+        {
+            using (var s3Client = new AmazonS3Client(new BasicAWSCredentials("test", "test"),
+                new AmazonS3Config
+                {
+                    ServiceURL = cfg.S3Endpoint,
+                    AuthenticationRegion = "us-east-1",
+                    ForcePathStyle = true
+                }))
+                await s3Client.PutBucketAsync(new PutBucketRequest { BucketName = cfg.S3Bucket });
+
+            var db = new PostgresDatabase(cfg);
+            db.Initialize();
+            var created = DateTimeOffset.UtcNow.ToString("O");
+            var feedId = "feed-journal-" + Guid.NewGuid().ToString("N")[..12];
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(
+                feedId, "nuget", "hosted", "private", "Synthetic",
+                false, created, created), "integration-admin"));
+            Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
+            var name = "feed." + Guid.NewGuid().ToString("N")[..10];
+            const string version = "1.0.0";
+            var key = FeedNugetEndpoints.BlobKey(feedId, name, version);
+            var bytes = Encoding.UTF8.GetBytes("synthetic private NuGet revision");
+            var sha = Convert.ToBase64String(
+                System.Security.Cryptography.SHA512.HashData(bytes));
+            using var storage = new S3BlobStore(cfg);
+            var recovery = new ArtifactRecovery(cfg, db, storage,
+                NullLogger<ArtifactRecovery>.Instance);
+            db.BeginPublication(key, "feed-nuget", feedId + "|" + name, version);
+            Assert.True(await storage.PutAsync(key, new MemoryStream(bytes),
+                4096, CancellationToken.None));
+            var pending = Assert.Single(db.PendingPublications(), item => item.Key == key);
+            Assert.Equal("uncommitted-object", recovery.State(pending));
+            Assert.True(db.PublishFeedNuget(feedId, name, version, "synthetic",
+                sha, bytes.LongLength, "integration-writer"));
+            Assert.Equal("committed", recovery.State(pending));
+            recovery.Reconcile();
+            Assert.DoesNotContain(db.PendingPublications(), item => item.Key == key);
+            Assert.Equal(0, recovery.MissingHostedCount());
+            Assert.Equal(sha, db.GetFeedNugetRevision(feedId, name, version)?.Sha512);
+            Assert.True(db.TryDeactivateHostedNugetFeed(feedId, "integration-admin"));
+            recovery.Reconcile();
+            Assert.True(storage.Contains(key)); // Disable must not GC immutable bytes.
+        }
+        finally
+        {
+            using (var command = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator))
+                command.ExecuteNonQuery();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
 }

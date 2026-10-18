@@ -69,6 +69,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_policies') IS NOT NULL
                     AND to_regclass('feed_upstreams') IS NOT NULL
                     AND to_regclass('nuget_digests') IS NOT NULL
+                    AND to_regclass('feed_nuget_versions') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -318,9 +319,102 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                 AND NOT EXISTS (SELECT 1 FROM feed_namespaces WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=@id)
+                AND NOT EXISTS (SELECT 1 FROM feed_nuget_versions WHERE feed_id=@id)
             """, tx, ("id", id));
         if (delete.ExecuteNonQuery() != 1) return false;
         Audit(db, tx, "feed-draft-delete", "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public bool TryActivateHostedNugetFeed(string id, string actor) =>
+        ChangeHostedNugetState(id, true, actor);
+
+    public bool TryDeactivateHostedNugetFeed(string id, string actor) =>
+        ChangeHostedNugetState(id, false, actor);
+
+    private bool ChangeHostedNugetState(string id, bool enabled, string actor)
+    {
+        if (!FeedDefinition.ValidId(id)) return false;
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            UPDATE feeds SET enabled=@next,updated_at=@at
+            WHERE id=@id AND kind='nuget' AND mode='hosted'
+              AND visibility='private' AND enabled=@previous
+            """, tx, ("next", enabled ? 1 : 0), ("previous", enabled ? 0 : 1),
+            ("at", DateTimeOffset.UtcNow.ToString("O")), ("id", id));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, enabled ? "feed-hosted-activate" : "feed-hosted-deactivate",
+            "feed", id, "", actor);
+        tx.Commit();
+        return true;
+    }
+
+    public IReadOnlyList<string> FeedNugetVersions(string feedId, string name)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT version FROM feed_nuget_versions
+            WHERE feed_id=@feed AND name=@name ORDER BY version
+            """, null, ("feed", feedId), ("name", name));
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public FeedNugetRevision? GetFeedNugetRevision(string feedId, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions
+            WHERE feed_id=@feed AND name=@name AND version=@version
+            """, null, ("feed", feedId), ("name", name), ("version", version));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)) : null;
+    }
+
+    public IReadOnlyList<FeedNugetRevision> FeedNugetRevisions()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions ORDER BY feed_id,name,version
+            """);
+        using var reader = cmd.ExecuteReader();
+        var items = new List<FeedNugetRevision>();
+        while (reader.Read()) items.Add(new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)));
+        return items;
+    }
+
+    public bool PublishFeedNuget(string feedId, string name, string version,
+        string description, string sha512, long size, string actor)
+    {
+        NugetDigest.Validate(sha512, size);
+        if (!FeedDefinition.ValidId(feedId) || !Names.Nuget(name) || !Names.Version(version))
+            throw new ArgumentException("Invalid private NuGet feed reference.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            INSERT INTO feed_nuget_versions
+                (feed_id,name,version,description,sha512,size,created_at)
+            SELECT @feed,@name,@version,@description,@sha512,@size,@at
+            WHERE EXISTS (
+                SELECT 1 FROM feeds
+                WHERE id=@feed AND kind='nuget' AND mode='hosted'
+                  AND visibility='private' AND enabled=1)
+            ON CONFLICT(feed_id,name,version) DO NOTHING
+            """, tx, ("feed", feedId), ("name", name), ("version", version),
+            ("description", description), ("sha512", sha512), ("size", size),
+            ("at", DateTimeOffset.UtcNow.ToString("O")));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, "publish", "feed-nuget", feedId + "/" + name, version, actor);
         tx.Commit();
         return true;
     }

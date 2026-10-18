@@ -368,9 +368,20 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     catch (System.Text.Json.JsonException) { return Results.BadRequest(new { error = "Invalid token request" }); }
     if (input is null || input.Role is not ("read" or "write") || input.ExpiresInHours is < 1 or > 2160 ||
         (input.Role == "write" && (input.Namespace is null ||
-                                   !Access.ValidNamespaceGrant(input.Namespace))) ||
-        (input.Role == "read" && input.Namespace is not null))
+                                   !(Access.ValidNamespaceGrant(input.Namespace) ||
+                                     (Access.ValidFeedGrant(input.Namespace) &&
+                                      input.Namespace.EndsWith(":publish", StringComparison.Ordinal))))) ||
+        (input.Role == "read" && input.Namespace is not null &&
+         !(Access.ValidFeedGrant(input.Namespace) &&
+           input.Namespace.EndsWith(":read", StringComparison.Ordinal))))
         return Results.BadRequest(new { error = "Role, namespace or expiry is invalid" });
+    if (input.Namespace is { } feedGrant && Access.ValidFeedGrant(feedGrant))
+    {
+        var feedId = feedGrant.Split(':')[1];
+        if (db.Feed(feedId) is not
+            { Kind: "nuget", Mode: "hosted", Visibility: "private", Enabled: true })
+            return Results.BadRequest(new { error = "Feed grants require an active private hosted NuGet feed" });
+    }
     var id = Guid.NewGuid().ToString("N");
     var secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
     var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
@@ -436,6 +447,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
     catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
 }).RequireRateLimiting("publish");
 FeedEndpoints.Map(app);
+FeedNugetEndpoints.Map(app);
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);

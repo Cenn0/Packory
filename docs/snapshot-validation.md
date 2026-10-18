@@ -85,3 +85,16 @@ present in the captured counts and row-value fingerprints. Its absence or
 unexpected presence in a legacy schema 2 manifest is rejected; no silent
 "restore without checksums" downgrade is allowed. Schema 1/2 snapshots
 remain identifiable and do not claim missing V3 checksum evidence.
+
+
+## V4 private feed coverage
+
+Database schema V4 introduces `feed_nuget_versions`. The existing
+file-format-2 PostgreSQL/S3 snapshot requires an exact row-value
+fingerprint and count for this table whenever
+`database_schema_version=4`. Missing or extra table entries are
+rejected. Restore into an isolated fresh database must preserve the
+per-feed SHA-512, feed linkage and revision identity, not merely global
+NuGet artifacts. This still does **not** provide real S3 provider
+certification, consistent hot snapshots or independent publisher
+provenance.

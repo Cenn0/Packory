@@ -37,7 +37,7 @@ public sealed class PostgresProviderTests
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.False(database.IsHealthy()); // Fail closed on future writer schema.
             using (var version = new NpgsqlCommand(
-                "UPDATE packory_schema_version SET version=3 WHERE slot=1", isolated))
+                "UPDATE packory_schema_version SET version=4 WHERE slot=1", isolated))
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.True(database.IsHealthy());
             using (var drop = new NpgsqlCommand("DROP TABLE feeds CASCADE", isolated))
@@ -104,6 +104,27 @@ public sealed class PostgresProviderTests
         Assert.Equal("hosted", db.PackageOrigin("nuget", nuget, "1.0.0"));
         Assert.Contains("1.0.0", db.Versions("nuget", nuget));
         Assert.Single(db.Search(nuget, "nuget", 50));
+
+        var feedId = "isolated-" + suffix;
+        var created = DateTimeOffset.UtcNow.ToString("O");
+        Assert.True(db.TryCreateDraftFeed(new FeedDefinition(feedId, "nuget", "hosted",
+            "private", "Synthetic isolated NuGet", false, created, created), "integration-admin"));
+        Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
+        var scopedDigest = Convert.ToBase64String(
+            System.Security.Cryptography.SHA512.HashData("feed-only"u8.ToArray()));
+        Assert.True(db.PublishFeedNuget(feedId, nuget, "1.0.0", "only-in-feed",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.False(db.PublishFeedNuget(feedId, nuget, "1.0.0", "overwrite",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.Single(db.FeedNugetVersions(feedId, nuget));
+        Assert.Equal(scopedDigest, db.GetFeedNugetRevision(feedId, nuget, "1.0.0")?.Sha512);
+        Assert.Null(db.GetFeedNugetRevision("default-nuget", nuget, "1.0.0"));
+        Assert.True(db.TryDeactivateHostedNugetFeed(feedId, "integration-admin"));
+        Assert.False(db.PublishFeedNuget(feedId, "disabled", "1.0.0", "deny",
+            scopedDigest, "feed-only"u8.Length, "integration-writer"));
+        Assert.False(db.TryDeleteDraftFeed(feedId, "integration-admin"));
+        Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
+        Assert.Equal(scopedDigest, db.GetFeedNugetRevision(feedId, nuget, "1.0.0")?.Sha512);
 
         var npm = "pg-" + suffix;
         Assert.True(db.PutNpmVersion(npm, "1.0.0", "{\"name\":\"test\"}",

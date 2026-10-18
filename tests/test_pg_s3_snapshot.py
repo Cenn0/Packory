@@ -181,6 +181,34 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(mod.SnapshotError):
                 mod.verify(root)
 
+    def test_schema_four_requires_per_feed_nuget_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "metadata.dump").write_bytes(b"synthetic")
+            tables = (*mod.CORE_TABLES, "packory_schema_version",
+                      *mod.FEED_TABLES, *mod.DIGEST_TABLES,
+                      *mod.ISOLATED_FEED_TABLES)
+            hashes = {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                      for name in tables}
+            record = {
+                "schema": 2, "profile": "postgresql-s3-offline",
+                "source": {"bucket": "synthetic", "prefix": "synthetic/", "database": "source"},
+                "postgres": {"path": "metadata.dump", "size": 9,
+                    "sha256": hashlib.sha256(b"synthetic").hexdigest(),
+                    "table_counts": {name: 0 for name in hashes},
+                    "table_fingerprints": hashes,
+                    "database_schema_version": 4},
+                "objects": [], "delete_markers": []
+            }
+            destination = root / "manifest.json"
+            destination.write_text(json.dumps(record))
+            self.assertEqual(4, mod.verify(root)["postgres"]["database_schema_version"])
+            record["postgres"]["table_counts"].pop("feed_nuget_versions")
+            record["postgres"]["table_fingerprints"].pop("feed_nuget_versions")
+            destination.write_text(json.dumps(record))
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify(root)
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")

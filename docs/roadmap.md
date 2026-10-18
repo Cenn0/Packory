@@ -191,3 +191,19 @@ receiving invented checksums. This addresses a concrete MS1.6 integrity
 gap, **not** full MS1 completion: old releases, real S3 provider conditions,
 coordinated cross-store recovery, retention, operator sign-off and RPO/RTO
 remain open.
+
+
+## MS2 hosted-feed delivery note (18 October 2026)
+
+An initial **operational private hosted NuGet feed** adapter has been
+implemented, not simply staged metadata: admin-controlled activation
+and reversible disable, per-feed version/immutable byte storage,
+separate scoped managed/OIDC authorization, strong SHA-512, recovered
+publication-intent journal, private listing isolation, a native
+dotnet client test and V4 PostgreSQL/S3 snapshot fingerprints.
+
+**MS2 remains incomplete:** other ecosystems, proxy/group semantics,
+tenant-wide control plane, quotas, cross-feed search policy,
+declarative import/export, full migration, compatibility and
+independent security/provider acceptance are still open. Do not
+describe this first NuGet slice as complete cross-protocol isolation.

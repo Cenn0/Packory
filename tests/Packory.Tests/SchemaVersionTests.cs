@@ -87,6 +87,40 @@ public sealed class SchemaVersionTests
     }
 
     [Fact]
+    public void SqliteV3UpgradeAddsIsolatedFeedSchemaWithoutLosingChecksums()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v3-upgrade-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var digest = Convert.ToBase64String(
+                System.Security.Cryptography.SHA512.HashData("synthetic"u8.ToArray()));
+            Assert.True(db.PublishNuget("original", "1.0.0", "legacy", "fixture",
+                digest, "synthetic"u8.Length));
+            using (var con = db.Open())
+            using (var cmd = con.CreateCommand())
+            {
+                cmd.CommandText = "DROP TABLE feed_nuget_versions";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = "UPDATE packory_schema_version SET version=3 WHERE slot=1";
+                Assert.Equal(1, cmd.ExecuteNonQuery());
+            }
+            db.Initialize();
+            Assert.Equal(digest, db.GetNugetDigest("original", "1.0.0")?.Sha512);
+            Assert.Empty(db.FeedNugetRevisions());
+            using var check = db.Open();
+            using var stmt = check.CreateCommand();
+            stmt.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(stmt.ExecuteScalar()));
+            stmt.CommandText = "SELECT COUNT(*) FROM feed_nuget_versions";
+            Assert.Equal(0, Convert.ToInt32(stmt.ExecuteScalar()));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void SqliteRejectsFutureVersionWithoutOverwritingMarker()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-schema-" + Guid.NewGuid().ToString("N"));
