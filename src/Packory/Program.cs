@@ -116,6 +116,7 @@ if (settings.OidcEnabled)
 builder.Services.AddSingleton(settings);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ValidationEvidenceStore>();
+builder.Services.AddSingleton<ValidationMcpQuota>();
 builder.Services.AddSingleton<IPackageDatabase>(provider =>
 {
     var effective = provider.GetRequiredService<Settings>();
