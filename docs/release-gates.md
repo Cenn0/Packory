@@ -79,7 +79,8 @@ The command returns nonzero and prints `BLOCKED` for a missing, unsigned, tamper
 
 The optional maintenance-only `/api/admin/integrity/scan` endpoint
 cross-checks indexed references against recorded SHA-256/SHA-512 metadata
-where available, and reports absent or unverifiable objects. It is a
+where available, using direct bounded S3 remote GET/HEAD instead of trusting
+the local artifact cache, and reports absent or unverifiable objects. It is a
 **bounded observation**, not an atomic PostgreSQL/S3 snapshot and not a
 garbage-collection reachability proof. A successful subset does not clear
 the real-provider, retention, restore, safety or full M1.6 gates. The release
