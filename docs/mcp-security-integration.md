@@ -6,7 +6,7 @@
 
 Packory remains a single-writer ASP.NET Core / .NET 10 modular monolith.
 
-The new MCP Streamable HTTP endpoint at /mcp uses the official MCP C# SDK and provides read-only tools (search_artifacts, artifact_versions, list_approved_skills, skill_metadata), resources (skill files and catalog information), prompts (review_skill, discover_packages), and MCP Skills Extension methods (skills/list, skills/get). The Skills extension advertises directoryRead=false. Skill files are served as resources with SHA-256 digests, bounded file counts and content sizes. The URI format is skill://packory/VERSION/NAME/SKILL.md.
+The new MCP Streamable HTTP endpoint at /mcp uses the official MCP C# SDK and provides read-only tools (search_artifacts, artifact_versions, list_approved_skills, skill_metadata), resources (skill files and catalog information), prompts (review_skill, discover_packages), and MCP Skills Extension methods (skills/list, skills/get). The Skills extension advertises `directoryRead=true` and implements `resources/directory/read` for the approved ZIP's root and nested directories, including explicitly empty directories. Listings contain direct child names, URIs and MIME types (`inode/directory` for subdirectories), with `cacheScope=private` and `ttlMs=0` so revocation is not masked by advertised freshness. Skill files are served as resources with SHA-256 digests, bounded file counts and content sizes. The URI format is skill://packory/VERSION/NAME/SKILL.md.
 
 This is a distribution server, not a remote tool-execution gateway. It does not launch untrusted Skill scripts or remote MCP servers. Mutations are intentionally excluded from the MCP attack surface.
 
@@ -95,3 +95,15 @@ rather than unbounded Python memory; any output exceeding 1 MiB fails closed.
 These are parser and isolation hardening measures, not proof of scanner accuracy
 against unknown malicious skills. The pinned container smoke remains a separate
 integration test.
+
+## Skills directory navigation
+
+For a security-approved Skill whose manifest URI is
+`skill://packory/1.0.0/example/SKILL.md`, MCP clients can send
+`resources/directory/read` for `skill://packory/1.0.0/example`
+or an existing directory such as `.../references`. Only immediate
+children are listed. Exact approved ZIP bytes are reverified before
+any directory response. File URIs, traversal and nonexistent directories
+fail closed. The capability is optional in the Skills Extension; this
+implementation is covered by synthetic .NET tests and a real scanner
+Compose/MCP smoke but is **not** general production protocol certification.
