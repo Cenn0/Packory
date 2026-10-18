@@ -129,6 +129,10 @@ def mcp_request(method, rpc_id, arguments=None, *, resource=None):
     }
     params = {"_meta": meta, **(arguments or {})}
     query = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+    # The 2026-07-28 transport requires a method-specific MCP-Name
+    # declaration for named tool calls in addition to the JSON-RPC params.
+    if method == "tools/call" and resource is None:
+        resource = (arguments or {}).get("name")
     code, response = http("POST", "/mcp", json.dumps(query).encode(),
                           "application/json", mcp_method=method, mcp_name=resource)
     require(code in (200, 400), "MCP " + method + " unexpected HTTP " + str(code))
@@ -188,7 +192,8 @@ def check_mcp():
         "name": "verify_skill_integrity",
         "arguments": {"name": NAME, "version": VERSION}
     })
-    require("error" not in integrity, "MCP verification tool returned protocol error")
+    require("error" not in integrity, "MCP verification tool JSON-RPC error code " +
+            str(integrity.get("error", {}).get("code")))
     require("digest_verified" in json.dumps(integrity.get("result", {})),
             "MCP verification tool failed to verify approved archive")
 
