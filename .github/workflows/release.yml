@@ -140,7 +140,7 @@ jobs:
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --tag packory:release .
           docker run --rm --entrypoint dotnet packory:release --list-runtimes
-          sha256sum -c release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum -c SHA256SUMS.txt)
       - name: Publish versioned image only after public acceptance
         if: inputs.channel == 'public'
         shell: bash
