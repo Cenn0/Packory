@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 3;
+    public const int Current = 4;
 
     private static int RequireKnown(object? value)
     {
@@ -65,6 +65,21 @@ public static class SchemaVersionGuard
             origin TEXT NOT NULL CHECK(origin IN ('hosted','mirror')),
             PRIMARY KEY(name,version)
         );
+        """;
+
+    // V4: isolated NuGet private hosted feeds. No global package rows, no
+    // implicit proxy fallback, no mutable artifact revisions.
+    private const string HostedFeedNugetSchema = """
+        CREATE TABLE IF NOT EXISTS feed_nuget_versions (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL, version TEXT NOT NULL,
+            description TEXT NOT NULL, sha512 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size >= 0),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,name,version)
+        );
+        CREATE INDEX IF NOT EXISTS feed_nuget_names
+            ON feed_nuget_versions(feed_id,name,version);
         """;
 
     private static readonly (string Id, string Kind, string Name)[] Defaults =
@@ -142,6 +157,13 @@ public static class SchemaVersionGuard
             digestSchema.CommandText = NugetDigestSchema;
             digestSchema.ExecuteNonQuery();
         }
+        if (version < 4)
+        {
+            using var feedVersions = connection.CreateCommand();
+            feedVersions.Transaction = tx;
+            feedVersions.CommandText = HostedFeedNugetSchema;
+            feedVersions.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -211,6 +233,11 @@ public static class SchemaVersionGuard
         {
             using var digestSchema = new NpgsqlCommand(NugetDigestSchema, connection, tx);
             digestSchema.ExecuteNonQuery();
+        }
+        if (version < 4)
+        {
+            using var feedVersions = new NpgsqlCommand(HostedFeedNugetSchema, connection, tx);
+            feedVersions.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
