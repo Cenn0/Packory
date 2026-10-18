@@ -229,4 +229,30 @@ public sealed class PostgresS3RecoveryTests
         second.Acquire();
         Assert.True(second.IsHeld());
     }
+    [Fact]
+    public void ConnectedBackendWithoutAdvisoryLockMustNotPassWriterLeaseCheck()
+    {
+        var pg = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(pg)) return;
+        var cfg = new Settings { MetadataProvider = "postgresql", PostgresConnectionString = pg };
+        using var first = new PostgresSingleWriterLease(cfg);
+        first.Acquire();
+        Assert.True(first.IsHeld());
+
+        // Emulate an operator-side/session lock release WITHOUT disconnecting
+        // PostgreSQL. The old SELECT 1 check incorrectly reported success here.
+        var field = typeof(PostgresSingleWriterLease).GetField("_connection",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var connection = Assert.IsType<Npgsql.NpgsqlConnection>(field!.GetValue(first));
+        using (var unlock = new Npgsql.NpgsqlCommand("SELECT pg_advisory_unlock_all()", connection))
+            unlock.ExecuteScalar();
+        Assert.Equal(System.Data.ConnectionState.Open, connection.State);
+        Assert.False(first.IsHeld());
+
+        using var second = new PostgresSingleWriterLease(cfg);
+        second.Acquire();
+        Assert.True(second.IsHeld());
+        Assert.False(first.IsHeld());
+    }
+
 }

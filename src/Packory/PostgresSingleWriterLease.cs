@@ -40,8 +40,22 @@ public sealed class PostgresSingleWriterLease(Settings settings) : IDisposable
         try
         {
             if (_connection?.State != System.Data.ConnectionState.Open) return false;
-            using var command = new NpgsqlCommand("SELECT 1", _connection);
-            return Convert.ToInt32(command.ExecuteScalar()) == 1;
+            // A healthy backend session alone is not evidence of owning the
+            // advisory lock: confirm it is still granted to THIS PostgreSQL PID.
+            // PostgreSQL exposes a 64-bit advisory key as classid/objid, objsubid=1.
+            const string sql = """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_locks
+                    WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted
+                      AND objsubid = 1
+                      AND classid::text = @high AND objid::text = @low
+                )
+                """;
+            using var command = new NpgsqlCommand(sql, _connection);
+            var key = (ulong)LockId;
+            command.Parameters.AddWithValue("high", (key >> 32).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("low", (key & 0xffffffffUL).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return command.ExecuteScalar() is true;
         }
         catch { return false; }
     }
