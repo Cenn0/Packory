@@ -88,7 +88,7 @@ PROJECT
   if [ "$name" = alpha ]; then credential="$ALPHA_PUBLISH"; else credential="$BETA_PUBLISH"; fi
   dotnet nuget push "$dir/packages/Packory.Private.Sample.1.0.0.nupkg" \
     --source "$BASE/feeds/$name-feed/nuget/v3/index.json" \
-    --api-key "$credential" --skip-duplicate --no-symbols
+    --api-key "$credential" --skip-duplicate
 done
 
 # Different bytes for an IDENTICAL package identity stay feed-local.
