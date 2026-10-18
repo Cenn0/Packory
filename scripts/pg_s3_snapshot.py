@@ -28,7 +28,8 @@ CORE_TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_f
                "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers",
                "publication_intents", "recovery_quarantines", "audit_events", "managed_tokens")
 FEED_TABLES = ("feeds", "feed_namespaces", "feed_policies", "feed_upstreams")
-ALLOWED_TABLES = frozenset((*CORE_TABLES, "packory_schema_version", *FEED_TABLES))
+DIGEST_TABLES = ("nuget_digests",)
+ALLOWED_TABLES = frozenset((*CORE_TABLES, "packory_schema_version", *FEED_TABLES, *DIGEST_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -92,10 +93,11 @@ def metadata_tables(connection):
         return CORE_TABLES
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or row[0] not in (1, 2):
+    if not row or type(row[0]) is not int or row[0] not in (1, 2, 3):
         raise SnapshotError("Unknown Packory database schema version")
     return (CORE_TABLES + ("packory_schema_version",) +
-            (FEED_TABLES if row[0] == 2 else ()))
+            (FEED_TABLES if row[0] >= 2 else ()) +
+            (DIGEST_TABLES if row[0] >= 3 else ()))
 
 
 def counts(connection):
@@ -343,13 +345,15 @@ def verify(folder):
             raise SnapshotError("Invalid PostgreSQL row counts")
         if manifest["schema"] == SCHEMA:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in (0, 1, 2):
+            if type(db_version) is not int or db_version not in (0, 1, 2, 3):
                 raise SnapshotError("Unknown Packory database schema version")
             required = set(CORE_TABLES)
-            if db_version in (1, 2):
+            if db_version in (1, 2, 3):
                 required.add("packory_schema_version")
-            if db_version == 2:
+            if db_version >= 2:
                 required.update(FEED_TABLES)
+            if db_version >= 3:
+                required.update(DIGEST_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or
@@ -405,7 +409,8 @@ def backup(directory, s3, bucket, prefix, max_bytes):
                              "sha256": checksum(staged / "metadata.dump"),
                              "table_counts": {name: value["count"] for name, value in final.items()},
                              "table_fingerprints": final,
-                             "database_schema_version": (2 if "feeds" in tables else
+                             "database_schema_version": (3 if "nuget_digests" in tables else
+                                                         2 if "feeds" in tables else
                                                          1 if "packory_schema_version" in tables else 0)},
                 "objects": entries, "delete_markers": markers,
                 "snapshot_bytes": total,
