@@ -864,6 +864,99 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(bearer)).StatusCode);
     }
 
+
+    [Fact]
+    public async Task Mcp_SkillsDirectoryListsDirectChildrenAndFailsClosedAfterRevocation()
+    {
+        static byte[] Archive()
+        {
+            using var data = new MemoryStream();
+            using (var zip = new ZipArchive(data, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                static void Add(ZipArchive zip, string path, string content)
+                {
+                    using var output = new StreamWriter(zip.CreateEntry(path).Open());
+                    output.Write(content);
+                }
+                Add(zip, "directory-fixture/SKILL.md",
+                    "---\\nname: directory-fixture\\ndescription: Inert directory fixture\\n---\\n# Test\\n");
+                Add(zip, "directory-fixture/references/guide.md", "# Reference\\n");
+                Add(zip, "directory-fixture/references/deep/detail.txt", "Nested.\\n");
+                Add(zip, "directory-fixture/scripts/example.sh", "# inert test file\\n");
+                zip.CreateEntry("directory-fixture/empty/");
+            }
+            return data.ToArray();
+        }
+
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var bytes = Archive();
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent("1.0.0"), "version");
+        form.Add(new ByteArrayContent(bytes), "file", "directory-fixture.zip");
+        using var response = await client.SendAsync(
+            WithToken(HttpMethod.Post, "/api/skills", form));
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var digest = body.RootElement.GetProperty("sha256").GetString()!;
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var blobs = host.Services.GetRequiredService<BlobStore>();
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        var settings = host.Services.GetRequiredService<Settings>();
+        var rootUri = "skill://packory/1.0.0/directory-fixture";
+
+        Assert.Null(PackoryMcpCatalog.ReadDirectory(
+            rootUri, db, blobs, security, settings));
+        Assert.True(security.SaveResult("directory-fixture", "1.0.0", digest,
+            "NEEDS_REVIEW", 0, "SAFE", "{}"));
+        using var approve = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/directory-fixture/1.0.0/approve",
+            JsonContent.Create(new { sha256 = digest,
+                reason = "Reviewed synthetic directory navigation fixture" })));
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+
+        JsonObject Read(string uri) => Assert.IsType<JsonObject>(
+            PackoryMcpCatalog.ReadDirectory(uri, db, blobs, security, settings));
+        var root = Read(rootUri);
+        Assert.Equal("complete", root["resultType"]!.GetValue<string>());
+        Assert.Equal("private", root["cacheScope"]!.GetValue<string>());
+        Assert.Equal(0, root["ttlMs"]!.GetValue<int>());
+        var children = Assert.IsType<JsonArray>(root["resources"]);
+        Assert.Equal(4, children.Count);
+        Assert.Equal(new[] { "SKILL.md", "empty", "references", "scripts" },
+            children.Select(x => x!["name"]!.GetValue<string>()).ToArray());
+        Assert.Equal("inode/directory",
+            children[1]!["mimeType"]!.GetValue<string>());
+        var refs = Read(rootUri + "/references");
+        Assert.Equal(new[] { "deep", "guide.md" },
+            ((JsonArray)refs["resources"]!).Select(x => x!["name"]!.GetValue<string>()));
+        Assert.Equal("text/markdown",
+            ((JsonArray)refs["resources"]!)[1]!["mimeType"]!.GetValue<string>());
+        Assert.Single((JsonArray)Read(rootUri + "/references/deep")["resources"]!);
+        Assert.Empty((JsonArray)Read(rootUri + "/empty")["resources"]!);
+
+        foreach (var invalid in new[]
+        {
+            rootUri + "/SKILL.md", rootUri + "/missing", rootUri + "/references/",
+            rootUri + "/%2e%2e", rootUri + "/references/%2fsecret",
+            rootUri + "/references/%5csecret", rootUri + "/references/../scripts",
+            rootUri + "?q=1", rootUri + "#fragment",
+            "skill://other/1.0.0/directory-fixture"
+        })
+            Assert.Null(PackoryMcpCatalog.ReadDirectory(
+                invalid, db, blobs, security, settings));
+
+        using var revoke = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/directory-fixture/1.0.0/revoke",
+            JsonContent.Create(new { sha256 = digest,
+                reason = "Revoke synthetic directory Skill" })));
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+        Assert.Null(PackoryMcpCatalog.ReadDirectory(
+            rootUri, db, blobs, security, settings));
+        Assert.Null(PackoryMcpCatalog.ReadDirectory(
+            rootUri + "/references", db, blobs, security, settings));
+    }
+
     [Fact]
     public async Task Mcp_SkillsExtensionListsOnlyApprovedRevisions()
     {
