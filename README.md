@@ -120,3 +120,8 @@ bash scripts/smoke-ecosystems.sh
 [Documentation index](docs/README.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
+
+
+### MCP server metadata catalog (experimental)
+
+Packory can stage, review, publish, revoke and discover immutable remote MCP server.json descriptors without connecting to or executing the referenced servers. Only reviewed metadata is discoverable; **publisher ownership and runtime safety are not verified**. See [MCP Registry Catalog](docs/mcp-registry-catalog.md) for scoped schema support, REST and MCP tools, and security limits.
