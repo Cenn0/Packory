@@ -16,6 +16,7 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
 | Current merged scope, CI verification, and outstanding exit gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
 | MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
+| Reviewed remote MCP server.json metadata and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
 | Merged implementation slices and explicitly open gates | [Delivery evidence](delivery-evidence-2026-10-17.md) |
 | Agent Skill scanning and Security UI implementation backlog | [Skill Security Roadmap (NVIDIA SkillSpector)](skill-security-roadmap.md) |
 | Cargo and PyPI specifics | [Cargo / PyPI](cargo-pypi.md) |
