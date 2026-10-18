@@ -81,6 +81,8 @@ settings.ValidationAudience = Environment.GetEnvironmentVariable("PACKORY_VALIDA
 settings.ValidationTenant = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_TENANT") ?? settings.ValidationTenant;
 if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_APPROVED_ALIASES") is { } validationAliases)
     settings.ValidationApprovedAliases = validationAliases.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_APPROVED_EXPORTS") is { } validationExports)
+    settings.ValidationApprovedExports = validationExports.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_REVOKED_KEY_IDS") is { } revokedKeys)
     settings.ValidationRevokedKeyIds = revokedKeys.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 settings.Validate();
