@@ -26,9 +26,9 @@ class SnapshotFixture:
             "postgres": {"path": "metadata.dump", "size": 2,
                          "sha256": hashlib.sha256(b"pg").hexdigest(),
                          "database_schema_version": 2,
-                         "table_counts": {name: 0 for name in mod.ALLOWED_TABLES},
+                         "table_counts": {name: 0 for name in (*mod.CORE_TABLES, "packory_schema_version", *mod.FEED_TABLES)},
                          "table_fingerprints": {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
-                                                for name in mod.ALLOWED_TABLES}},
+                                                for name in (*mod.CORE_TABLES, "packory_schema_version", *mod.FEED_TABLES)}},
             "objects": [], "delete_markers": []
         }
         (root / "metadata.dump").write_bytes(b"pg")
