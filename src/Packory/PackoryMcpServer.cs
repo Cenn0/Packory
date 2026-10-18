@@ -212,7 +212,7 @@ public static class PackoryMcpCatalog
         const string origin = "skill://packory/";
         if (uri is null || uri.Length > 2048 ||
             !uri.StartsWith(origin, StringComparison.Ordinal) ||
-            uri.EndsWith('/', StringComparison.Ordinal) ||
+            uri.EndsWith("/", StringComparison.Ordinal) ||
             uri.Contains('?') || uri.Contains('#') || uri.Contains('\\') ||
             uri.Any(char.IsControl))
             return null;
