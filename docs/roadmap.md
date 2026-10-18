@@ -1,6 +1,6 @@
 # Packory roadmap V3 — evidence-based delivery plan
 
-**Baseline:** 17 October 2026; code review against [main at 5f0c6c44d0fba1de0ce41b292f06436aa5801687](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687). This is a delivery plan, not a statement that future features have shipped. The [support matrix](support-matrix.md) and [release gates](release-gates.md) are normative for support claims.
+**Baseline:** 17 October 2026; code review against [main at 5f0c6c44d0fba1de0ce41b292f06436aa5801687](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687). This is a delivery plan, not a statement that future features have shipped. The [support matrix](support-matrix.md) and [release gates](release-gates.md) are normative for support claims. The [18 October implementation checkpoint](roadmap-status-2026-10-18.md) records newer merged work and remaining gates; do not treat this historical baseline as the current implementation inventory.
 
 ## Product scope and architecture
 
