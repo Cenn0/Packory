@@ -337,10 +337,11 @@ public sealed class ApiTests
     {
         using var host = new Host();
         using var client = host.CreateClient();
-        static MultipartFormDataContent Form()
+        var published = Nupkg("Custom.Package", "0.1.0");
+        MultipartFormDataContent Form()
         {
             var form = new MultipartFormDataContent();
-            form.Add(new ByteArrayContent(Nupkg("Custom.Package", "0.1.0")), "package", "custom.package.0.1.0.nupkg");
+            form.Add(new ByteArrayContent(published), "package", "custom.package.0.1.0.nupkg");
             return form;
         }
         var unauthenticated = new HttpRequestMessage(HttpMethod.Put, "/nuget/v3/push") { Content = Form() };
@@ -349,7 +350,6 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push", Form()))).StatusCode);
         var artifact = await client.SendAsync(WithToken(HttpMethod.Get,
             "/nuget/v3/flatcontainer/custom.package/0.1.0/custom.package.0.1.0.nupkg"));
-        var published = Nupkg("Custom.Package", "0.1.0");
         Assert.Equal(published.Length, (await artifact.Content.ReadAsByteArrayAsync()).Length);
         var revision = host.Services.GetRequiredService<IPackageDatabase>()
             .GetNugetDigest("custom.package", "0.1.0");
