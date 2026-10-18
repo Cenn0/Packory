@@ -73,6 +73,11 @@ public static class PackoryMcpCatalog
                 var original = entry.FullName;
                 if (!original.StartsWith(prefix, StringComparison.Ordinal)) return null;
                 var isDirectory = original.EndsWith('/');
+                // Many ZIP producers include the enclosing skill folder as
+                // an explicit entry. It represents this skill's own root,
+                // not a child directory and must not invalidate the archive.
+                if (isDirectory && prefix.Length > 0 && original == prefix)
+                    continue;
                 var path = original[prefix.Length..];
                 if (isDirectory) path = path[..^1];
                 if (path.Length == 0 || path.Length > 512 ||
