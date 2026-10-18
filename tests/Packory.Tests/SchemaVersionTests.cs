@@ -22,7 +22,7 @@ public sealed class SchemaVersionTests
             using var connection = db.Open();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(2, Convert.ToInt32(cmd.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
             Assert.Equal("hosted", db.PackageOrigin("nuget", "version.test", "1.0.0"));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
@@ -49,7 +49,7 @@ public sealed class SchemaVersionTests
             using var connection = db.Open();
             using var read = connection.CreateCommand();
             read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(2, Convert.ToInt32(read.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(read.ExecuteScalar()));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
