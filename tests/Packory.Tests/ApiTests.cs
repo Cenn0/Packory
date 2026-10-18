@@ -830,6 +830,40 @@ public sealed class ApiTests
         Assert.DoesNotContain(tools, tool => tool.Name.StartsWith("approve_", StringComparison.OrdinalIgnoreCase));
     }
 
+
+    [Fact]
+    public async Task Mcp_RejectsNugetBasicAndApiKeyCredentialFallback()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string body = """
+            {"jsonrpc":"2.0","id":11,"method":"tools/list","params":{"_meta":{
+              "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+              "io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},
+              "io.modelcontextprotocol/clientCapabilities":{}
+            }}}
+            """;
+        using var basic = new HttpRequestMessage(HttpMethod.Post, "/mcp");
+        basic.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        basic.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes("synthetic:" + ReadToken)));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(basic)).StatusCode);
+
+        using var nugetHeader = new HttpRequestMessage(HttpMethod.Post, "/mcp");
+        nugetHeader.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        nugetHeader.Headers.TryAddWithoutValidation("X-NuGet-ApiKey", ReadToken);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.SendAsync(nugetHeader)).StatusCode);
+
+        using var bearer = WithToken(HttpMethod.Post, "/mcp",
+            new StringContent(body, Encoding.UTF8, "application/json"), ReadToken);
+        bearer.Headers.TryAddWithoutValidation("Mcp-Protocol-Version", "2026-07-28");
+        bearer.Headers.TryAddWithoutValidation("Mcp-Method", "tools/list");
+        bearer.Headers.Accept.ParseAdd("application/json");
+        bearer.Headers.Accept.ParseAdd("text/event-stream");
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(bearer)).StatusCode);
+    }
+
     [Fact]
     public async Task Mcp_SkillsExtensionListsOnlyApprovedRevisions()
     {

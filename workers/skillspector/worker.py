@@ -13,6 +13,25 @@ MAX_ARCHIVE = 20 * 1024 * 1024
 TIMEOUT_SECONDS = 180
 
 
+def unique_json_fields(pairs):
+    """Reject ambiguous scanner/queue JSON instead of trusting the last key."""
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON property")
+        value[key] = item
+    return value
+
+
+def reject_json_constant(_value):
+    raise ValueError("Non-finite JSON scanner value")
+
+
+def decode_json(payload):
+    return json.loads(payload, object_pairs_hook=unique_json_fields,
+                      parse_constant=reject_json_constant)
+
+
 def process(job_file: pathlib.Path) -> None:
     job_id = job_file.stem
     if len(job_id) != 64 or any(c not in "0123456789abcdef" for c in job_id):
@@ -25,9 +44,12 @@ def process(job_file: pathlib.Path) -> None:
     try:
         if job_file.stat().st_size > 1024:
             raise ValueError("Invalid queue manifest")
-        job = json.loads(job_file.read_text(encoding="utf-8"))
+        job = decode_json(job_file.read_text(encoding="utf-8"))
+        if not isinstance(job, dict) or set(job) != {"id", "sha256"}:
+            raise ValueError("Invalid queue manifest")
         digest = job.get("sha256")
-        if job.get("id") != job_id or not isinstance(digest, str) or len(digest) != 64:
+        if (job.get("id") != job_id or not isinstance(digest, str) or
+                len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
             raise ValueError("Invalid job identity")
         result["sha256"] = digest
         if zip_file.stat().st_size > MAX_ARCHIVE:
@@ -36,20 +58,32 @@ def process(job_file: pathlib.Path) -> None:
             hash_value = hashlib.file_digest(handle, "sha256").hexdigest()
         if hash_value != digest:
             raise ValueError("Snapshot digest differs from queue manifest")
-        completed = subprocess.run(
-            ["skillspector", "scan", str(zip_file), "--no-llm",
-             "--format", "json", "--fail-on-incomplete"],
-            check=False, capture_output=True, text=True,
-            timeout=TIMEOUT_SECONDS, cwd="/tmp", env={
-                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin"),
-                "HOME": "/tmp", "TMPDIR": "/tmp", "PYTHONDONTWRITEBYTECODE": "1"
-            },
-        )
-        result["exit_code"] = completed.returncode
-        if len(completed.stdout) > MAX_REPORT:
-            raise ValueError("Oversized scanner output")
+        # Do not capture potentially unbounded scanner stdout into Python RAM.
+        # An untrusted archive can trigger excessive diagnostic output; spool
+        # into the container's restricted scratch volume and enforce a hard
+        # byte limit before parsing any report JSON.
+        import tempfile
+        with tempfile.TemporaryFile(mode="w+b") as stdout:
+            completed = subprocess.run(
+                ["skillspector", "scan", str(zip_file), "--no-llm",
+                 "--format", "json", "--fail-on-incomplete"],
+                check=False, stdout=stdout, stderr=subprocess.DEVNULL,
+                timeout=TIMEOUT_SECONDS, cwd="/tmp", env={
+                    "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin"),
+                    "HOME": "/tmp", "TMPDIR": "/tmp", "PYTHONDONTWRITEBYTECODE": "1"
+                },
+            )
+            result["exit_code"] = completed.returncode
+            stdout.seek(0, os.SEEK_END)
+            if stdout.tell() > MAX_REPORT:
+                raise ValueError("Oversized scanner output")
+            stdout.seek(0)
+            payload = stdout.read(MAX_REPORT + 1).decode("utf-8", errors="strict")
         if completed.returncode in (0, 1):
-            result["report"] = json.loads(completed.stdout)
+            report = decode_json(payload)
+            if not isinstance(report, dict):
+                raise ValueError("Scanner report must be a JSON object")
+            result["report"] = report
     except (ValueError, OSError, TimeoutError, subprocess.TimeoutExpired, json.JSONDecodeError):
         # Never publish a traceback or stderr: attacker-controlled skill text may appear there.
         result["exit_code"] = 2
