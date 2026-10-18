@@ -125,6 +125,53 @@ public static class Access
                 statusCode: StatusCodes.Status403Forbidden);
     }
 
+    // Feed grants live in the existing revocable managed-token namespace field
+    // but NEVER grant access to legacy/global NuGet publishing. The grant only
+    // authorizes the matching private feed and one permission.
+    public static bool ValidFeedGrant(string? grant)
+    {
+        if (grant is null) return false;
+        var parts = grant.Split(':');
+        return parts.Length == 3 && parts[0] == "feed" &&
+            FeedDefinition.ValidId(parts[1]) &&
+            parts[2] is "read" or "publish";
+    }
+
+    public static IResult? RequireFeed(HttpContext ctx, Settings settings, string feedId,
+        bool publish = false)
+    {
+        if (!FeedDefinition.ValidId(feedId))
+            return Results.BadRequest(new { error = "Invalid feed ID" });
+        // Unlike generic package reads, private feeds must authenticate
+        // even when anonymous catalog reads are configured.
+        if (RequireMcp(ctx, settings) is { } denied) return denied;
+        var role = ctx.Items[RoleKey] as string;
+        if (role is "admin-token" or "oidc-admin") return null;
+        if (role is "managed-read" or "managed-write" &&
+            ctx.Items[ManagedNamespaceKey] is string grant && ValidFeedGrant(grant))
+        {
+            var required = "feed:" + feedId + ":" + (publish ? "publish" : "read");
+            if ((!publish || role == "managed-write") &&
+                (string.Equals(grant, required, StringComparison.Ordinal) ||
+                 (!publish && string.Equals(grant, "feed:" + feedId + ":publish",
+                     StringComparison.Ordinal))))
+                return null;
+        }
+        if (settings.OidcEnabled && ctx.User.Identity?.IsAuthenticated == true &&
+            role is "oidc-read" or "oidc-write")
+        {
+            var required = feedId + ":" + (publish ? "publish" : "read");
+            if ((!publish || role == "oidc-write") &&
+                ctx.User.FindAll("packory_feed").Any(c =>
+                    string.Equals(c.Value, required, StringComparison.Ordinal) ||
+                    (!publish && string.Equals(c.Value, feedId + ":publish",
+                        StringComparison.Ordinal))))
+                return null;
+        }
+        return Results.Json(new { error = "Feed permission required" },
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
     public static bool ValidNamespaceGrant(string grant)
     {
         var sep = grant.IndexOf(':');
