@@ -40,3 +40,28 @@ contract. Existing accepted case/normalization rules are otherwise unchanged.
 This advances M1.6 and MS3/MS6 only for the named cases. Global startup/readiness
 still lacks complete authoritative digest coverage across all six artifact
 families; do not mark the real-provider restore or production release gates done.
+
+
+## Persisted NuGet publication SHA-512 (MS1.6)
+
+NuGet packages **newly hosted or verified through nuget.org read-through**
+retain canonical SHA-512 plus exact size in PostgreSQL/SQLite schema V3.
+Hosted `nuget_digests` rows and audit metadata commit atomically; the
+source blob is written first under the existing recoverable publication intent.
+NuGet mirror bytes must first match the upstream `.nupkg.sha512` before the
+metadata/digest pair is recorded; mirrors cannot overwrite existing hosted
+metadata or an immutable recorded checksum.
+
+For revisions with stored metadata, reads now verify size and SHA-512 from
+the immutable ledger; corruption or a stale local cache fails closed with a
+gateway error, including download, `.sha512` and `.nuspec` paths. The
+maintenance-integrity scanner uses the same recorded SHA-512, and its S3
+inspection hashes the configured remote object rather than assuming the
+local cache is current.
+
+**Limitations:** Legacy V1/V2 NuGet revisions with no saved checksum are
+still readable but unverified; compatibility is not integrity assurance.
+An upstream package checksum authenticates agreement with upstream-declared
+data, not the true producer or malware safety. S3/metadata writes are not an
+ACID transaction; coordinated restore, immutable S3 policies and an
+independent verifier remain necessary.
