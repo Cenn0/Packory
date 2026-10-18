@@ -111,3 +111,17 @@ returned as artifact bytes. This does not add independent private-feed read
 permissions, a Bearer grant service, multi-node sessions or provider certification.
 Referrers honor `artifactType` before setting OCI-Filters-Applied. Accepted subject
 associations return OCI-Subject; `tags/list?n=0` returns an empty page.
+
+
+## Offline artifact integrity inspection
+
+Administrators may inspect catalog references **only** while
+`PACKORY_RECOVERY_MAINTENANCE=true` holds the single-writer lease.
+`GET /api/admin/integrity/scan?after=0&limit=5` returns a bounded page
+of checksum comparisons and explicit missing/unverifiable states. Valid
+`after` is a nonnegative offset and `limit` is 1–10. The endpoint rejects
+anonymous, read-only and publisher credentials; ordinary running instances
+return 409. The response is `Cache-Control: no-store` and rate limited,
+never an automatic production certification. See
+[operations](operations.md#offline-catalog-reference-integrity-inspection-ms16-experimental)
+for interpretation, caveats and a redacted invocation example.
