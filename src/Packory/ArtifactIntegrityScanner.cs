@@ -198,8 +198,15 @@ public sealed class ArtifactIntegrityScanner(
                 entry.Version, packument: entry.Origin == "mirror");
             return expected is null ? null : new Expected(expected.Algorithm, expected.Bytes);
         }
-        // NuGet currently has no durable publication-time digest in metadata.
-        // A hash recomputed from the downloaded package would NOT verify integrity.
+        if (entry.Kind == "nuget")
+        {
+            var digest = database.GetNugetDigest(entry.Name, entry.Version);
+            return digest is not null &&
+                   string.Equals(digest.Origin, entry.Origin, StringComparison.Ordinal) &&
+                   NugetDigest.Valid(digest.Sha512) && digest.Size >= 0
+                ? new Expected("sha512", Convert.FromBase64String(digest.Sha512), digest.Size)
+                : null; // Historical V1/V2 revisions are not retroactively trusted.
+        }
         return null;
     }
 }
