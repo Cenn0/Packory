@@ -74,6 +74,12 @@ public static class NuGetEndpoints
             if (path is null) return Results.NotFound();
             if (file.EndsWith(".sha512", StringComparison.OrdinalIgnoreCase))
             {
+                // SHA-512 is persisted for new revisions at publication time.
+                // Historical revisions without metadata preserve the legacy
+                // computed response but are explicitly NOT independently proven.
+                var recorded = db.GetNugetDigest(id, version);
+                if (recorded is not null)
+                    return Results.Text(recorded.Sha512, "text/plain");
                 await using var fs = File.OpenRead(path);
                 return Results.Text(Convert.ToBase64String(await SHA512.HashDataAsync(fs, ctx.RequestAborted)), "text/plain");
             }
@@ -149,7 +155,9 @@ public static class NuGetEndpoints
             db.BeginPublication(key, "nuget", id, version);
             using var content = new MemoryStream(bytes, writable: false);
             if (!await blobs.PutAsync(key, content, settings.MaxArtifactBytes, ctx.RequestAborted)) return Results.Conflict();
-            if (!db.PublishNuget(id, version, spec.Description, Access.Actor(ctx))) return Results.Conflict();
+            var digest = Convert.ToBase64String(SHA512.HashData(bytes));
+            if (!db.PublishNuget(id, version, spec.Description, Access.Actor(ctx),
+                digest, bytes.LongLength)) return Results.Conflict();
             db.CompletePublication(key);
             return Results.StatusCode(StatusCodes.Status201Created);
         }).RequireRateLimiting("publish");
@@ -165,8 +173,16 @@ public static class NuGetEndpoints
         var origin = db.PackageOrigin("nuget", id, version);
         if (blobs.Existing(key) is { } available)
         {
-            if (origin is not null) return available;
-            throw new InvalidDataException("Unindexed NuGet blob requires recovery");
+            if (origin is null)
+                throw new InvalidDataException("Unindexed NuGet blob requires recovery");
+            var digest = db.GetNugetDigest(id, version);
+            // V1/V2 legacy packages have no authoritative publication digest:
+            // preserve compatibility but NEVER classify these as verified.
+            if (digest is not null &&
+                (!string.Equals(digest.Origin, origin, StringComparison.Ordinal) ||
+                 !await NugetDigest.MatchesAsync(available, digest, ct)))
+                throw new InvalidDataException("Cached NuGet bytes conflict with recorded checksum");
+            return available;
         }
         // A missing hosted release must never be substituted with a package from an upstream.
         if (origin == "hosted") throw new InvalidDataException("Hosted NuGet blob is missing");
@@ -204,10 +220,16 @@ public static class NuGetEndpoints
                 !string.Equals(spec.Version, version, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("NuGet package identity does not match request");
         }
+        var verifiedHash = Convert.ToBase64String(SHA512.HashData(bytes));
+        if (db.GetNugetDigest(id, version) is { } prior &&
+            (!string.Equals(prior.Origin, "mirror", StringComparison.Ordinal) ||
+             !string.Equals(prior.Sha512, verifiedHash, StringComparison.Ordinal) ||
+             prior.Size != bytes.LongLength))
+            throw new InvalidDataException("Upstream NuGet bytes conflict with a persisted revision digest");
         using var package = new MemoryStream(bytes, writable: false);
         if (!await blobs.PutAsync(key, package, settings.MaxArtifactBytes, ct))
             throw new InvalidDataException("NuGet cache blob was concurrently replaced");
-        db.UpsertPackage("nuget", id, version, spec.Description, "mirror");
+        db.UpsertNugetMirror(id, version, spec.Description, verifiedHash, bytes.LongLength);
         return blobs.Existing(key);
     }
 
