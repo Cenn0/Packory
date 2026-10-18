@@ -114,9 +114,25 @@ def jsonrpc_payload(response):
         if not data or data == "[DONE]":
             continue
         payload = json.loads(data)
-        if isinstance(payload, dict) and payload.get("id") in (3, 4):
+        if isinstance(payload, dict) and payload.get("id") in range(3, 11):
             return payload
     raise ValueError("MCP returned no JSON-RPC response event")
+
+
+def mcp_request(method, rpc_id, arguments=None, *, resource=None):
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "SyntheticCheck", "version": "1.0"
+        },
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    params = {"_meta": meta, **(arguments or {})}
+    query = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+    code, response = http("POST", "/mcp", json.dumps(query).encode(),
+                          "application/json", mcp_method=method, mcp_name=resource)
+    require(code in (200, 400), "MCP " + method + " unexpected HTTP " + str(code))
+    return jsonrpc_payload(response)
 
 
 def check_mcp():
@@ -163,6 +179,38 @@ def check_mcp():
     require(read_digest == manifest["digest"],
             "MCP resources/read bytes do not match Skill manifest digest")
 
+    fetched = mcp_request("skills/get", 5, {"uri": entry["uri"]})
+    require(fetched.get("result", {}).get("skill") == entry,
+            "MCP skills/get differs from skills/list for the same approved revision")
+    require(fetched.get("result", {}).get("ttlMs") == 0,
+            "MCP skills/get must not cache a revocable approval")
+    integrity = mcp_request("tools/call", 6, {
+        "name": "verify_skill_integrity",
+        "arguments": {"name": NAME, "version": VERSION}
+    })
+    require("error" not in integrity, "MCP verification tool returned protocol error")
+    require("digest_verified" in json.dumps(integrity.get("result", {})),
+            "MCP verification tool failed to verify approved archive")
+
+
+def check_mcp_revoked():
+    listing = mcp_request("skills/list", 7)
+    require(all(skill.get("frontmatter", {}).get("name") != NAME
+                for skill in listing.get("result", {}).get("skills", [])),
+            "Revoked Skill leaked into MCP skills/list")
+    uri = "skill://packory/" + VERSION + "/" + NAME + "/SKILL.md"
+    entry = mcp_request("skills/get", 8, {"uri": uri})
+    require("error" in entry, "Revoked Skill remained accessible through skills/get")
+    resource = mcp_request("resources/read", 9, {"uri": uri}, resource=uri)
+    require("error" in resource, "Revoked Skill remained accessible through resources/read")
+    verified = mcp_request("tools/call", 10, {
+        "name": "verify_skill_integrity",
+        "arguments": {"name": NAME, "version": VERSION}
+    })
+    require("unavailable" in json.dumps(verified.get("result", {})) and
+            "digest_verified" not in json.dumps(verified.get("result", {})),
+            "Revoked Skill verification did not fail closed")
+
 
 def main():
     require(len(os.environ["PACKORY_ADMIN_TOKEN"]) >= 32, "Ephemeral admin token missing")
@@ -187,7 +235,8 @@ def main():
     require(code == 200, "Revocation was not accepted")
     code, _ = http("GET", "/api/skills/" + NAME + "/" + VERSION + "/download")
     require(code == 404, "Revoked Skill remained downloadable")
-    print("Compose end-to-end: staged, scanned, approved, MCP-discovered, revoked")
+    check_mcp_revoked()
+    print("Compose end-to-end: staged, scanned, approved, MCP get/read verified, revoked")
 
 
 if __name__ == "__main__":
