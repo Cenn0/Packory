@@ -90,6 +90,27 @@ class EvidenceGateTests(unittest.TestCase):
         with self.assertRaises(release.Rejected):
             self.verify()
 
+    def test_signed_report_must_be_unambiguous_valid_json_object(self):
+        gate = "real_s3_provider"
+        path = self.root / (gate + ".json")
+        for payload in (
+            b"not JSON", b"", b"[]", b"null",
+            b'{"duplicate":1,"duplicate":2}', b'{"result": NaN}',
+            b'{"result": Infinity}', b'{"message": "\\xff"}',
+        ):
+            with self.subTest(payload=payload):
+                path.write_bytes(payload)
+                self.doc["gates"][gate]["sha256"] = hashlib.sha256(payload).hexdigest()
+                self.publish()  # Signature and digest genuinely match bad bytes.
+                with self.assertRaises(release.Rejected):
+                    self.verify()
+
+    def test_signature_authenticates_the_bytes_parsed_by_verifier(self):
+        # Valid signed fixture survives the verifier's stdin-based OpenSSL
+        # invocation. The signature must authenticate exactly `raw`, not
+        # a second, potentially different file read.
+        self.assertEqual(self.verify(), len(release.GATES))
+
     def test_manifest_tampering_and_invalid_signature_fail(self):
         path = self.root / "release-manifest.json"
         path.write_bytes(path.read_bytes() + b" ")

@@ -47,3 +47,17 @@ and mixed tracked/untracked files. Only truly untracked objects are moved into
 `recovery/orphaned`. This narrow fix does not certify real-provider S3
 recovery or close MS1's deployment gates. See its PR CI result for test
 evidence; no production restore is claimed.
+
+## MS6 release evidence payload follow-up
+
+Release evidence verification now checks that **every digest-bound gate report**
+is a non-ambiguous UTF-8 JSON object, rejecting duplicate fields, non-finite
+numbers, malformed or empty payloads even when an authorized signer signed the
+containing manifest. Detached RSA-PSS verification uses the exact manifest
+bytes that were parsed, not a second read of a mutable manifest path.
+Synthetic positive/negative regressions exercise these acceptance rules.
+
+This is a **syntactic and cryptographic validation improvement only**:
+it cannot independently establish whether a real S3 provider, disaster
+restore, SLO/load workload, accessibility or incident drill actually passed.
+External independent review and private authentic evidence remain mandatory.

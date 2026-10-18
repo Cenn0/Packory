@@ -52,6 +52,10 @@ def no_duplicate_keys(pairs):
     return obj
 
 
+def reject_nonfinite_json(_value):
+    raise Rejected("report_invalid")
+
+
 def bounded_file(path, maximum):
     if path.is_symlink() or not path.is_file():
         raise Rejected("file_unavailable")
@@ -134,6 +138,17 @@ def validate(root, expected_sha, public_key, key_id, now=None):
         content = bounded_file(root / filename, MAX_REPORT)
         if hashlib.sha256(content).hexdigest() != entry["sha256"]:
             raise Rejected("evidence_digest_mismatch")
+        # A signed hash of arbitrary bytes is not an acceptable JSON report.
+        # Only validate syntax and object shape here: a reviewer must still
+        # inspect provenance, test coverage and truthful gate conclusions.
+        try:
+            report = json.loads(content.decode("utf-8", errors="strict"),
+                                object_pairs_hook=no_duplicate_keys,
+                                parse_constant=reject_nonfinite_json)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise Rejected("report_invalid") from exc
+        if type(report) is not dict:
+            raise Rejected("report_invalid")
 
     # Validate the detached signature over the EXACT manifest bytes.
     # No shell, no unsigned fallback, no network or agent-selected command.
@@ -141,8 +156,8 @@ def validate(root, expected_sha, public_key, key_id, now=None):
         completed = subprocess.run(
             ["openssl", "dgst", "-sha256", "-verify", str(public_key),
              "-signature", str(signature), "-sigopt", "rsa_padding_mode:pss",
-             "-sigopt", "rsa_pss_saltlen:-1", str(manifest)],
-            capture_output=True, timeout=5, check=False,
+             "-sigopt", "rsa_pss_saltlen:-1"],
+            input=raw, capture_output=True, timeout=5, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Rejected("signature_verification_unavailable") from exc
