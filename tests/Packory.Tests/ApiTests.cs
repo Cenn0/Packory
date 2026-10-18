@@ -218,12 +218,20 @@ public sealed class ApiTests
         using var host = new Host();
         using var client = host.CreateClient();
         const string route = "/api/admin/integrity/scan?limit=1";
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(route)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
-            WithToken(HttpMethod.Get, route, token: ReadToken))).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
-            WithToken(HttpMethod.Get, route, token: WriteToken))).StatusCode);
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(route)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
+                WithToken(HttpMethod.Get, route, token: ReadToken))).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(
+                WithToken(HttpMethod.Get, route, token: WriteToken))).StatusCode);
+        }
+        // Unauthorized requests must not consume the shared operator budget.
         Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(
+            WithToken(HttpMethod.Get, route))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(
+            WithToken(HttpMethod.Get, route))).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.SendAsync(
             WithToken(HttpMethod.Get, route))).StatusCode);
     }
 
