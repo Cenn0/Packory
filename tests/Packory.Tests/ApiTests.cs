@@ -879,10 +879,10 @@ public sealed class ApiTests
                     output.Write(content);
                 }
                 Add(zip, "directory-fixture/SKILL.md",
-                    "---\\nname: directory-fixture\\ndescription: Inert directory fixture\\n---\\n# Test\\n");
-                Add(zip, "directory-fixture/references/guide.md", "# Reference\\n");
-                Add(zip, "directory-fixture/references/deep/detail.txt", "Nested.\\n");
-                Add(zip, "directory-fixture/scripts/example.sh", "# inert test file\\n");
+                    "---\nname: directory-fixture\ndescription: Inert directory fixture\n---\n# Test\n");
+                Add(zip, "directory-fixture/references/guide.md", "# Reference\n");
+                Add(zip, "directory-fixture/references/deep/detail.txt", "Nested.\n");
+                Add(zip, "directory-fixture/scripts/example.sh", "# inert test file\n");
                 zip.CreateEntry("directory-fixture/empty/");
             }
             return data.ToArray();
