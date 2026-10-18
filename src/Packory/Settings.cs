@@ -35,6 +35,16 @@ public sealed class Settings
     // Security enforcement never trusts the mere existence of a staged ZIP.
     public bool SkillSecurityEnforced { get; set; } = true;
     public bool McpEnabled { get; set; } = true;
+    // Independent, opt-in validation evidence: never on by default.
+    public bool ValidationEnabled { get; set; }
+    public string? ValidationExportDirectory { get; set; }
+    public string? ValidationVerifierPublicKeyPath { get; set; }
+    public string? ValidationVerifierKeyId { get; set; }
+    public string ValidationAudience { get; set; } = "packory-validation";
+    public string ValidationTenant { get; set; } = "local";
+    public string[] ValidationApprovedAliases { get; set; } = [];
+    public string[] ValidationRevokedKeyIds { get; set; } = [];
+
     public long MaxArtifactBytes { get; set; } = 100 * 1024 * 1024;
     // Optional single-node filesystem capacity guard. Zero disables it.
     // This does not provide a distributed S3 usage quota.
@@ -75,6 +85,54 @@ public sealed class Settings
 
     public void Validate()
     {
+        if (ValidationEnabled)
+        {
+            // Validate all operator-provided selectors before an MCP tool can be registered.
+            // The verifier key is never provisioned from an agent request.
+            if (!McpEnabled || !OidcEnabled ||
+                string.IsNullOrWhiteSpace(ValidationExportDirectory) ||
+                string.IsNullOrWhiteSpace(ValidationVerifierPublicKeyPath) ||
+                !Path.IsPathFullyQualified(ValidationExportDirectory) ||
+                !Path.IsPathFullyQualified(ValidationVerifierPublicKeyPath) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(ValidationVerifierKeyId ?? "",
+                    @"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(ValidationAudience,
+                    @"\A[a-z][a-z0-9.-]{0,63}\z", RegexOptions.CultureInvariant) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(ValidationTenant,
+                    @"\A[a-z][a-z0-9.-]{0,63}\z", RegexOptions.CultureInvariant) ||
+                ValidationApprovedAliases.Length is < 1 or > 100 ||
+                ValidationApprovedAliases.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x,
+                    @"\A[a-z][a-z0-9-]{0,63}\z", RegexOptions.CultureInvariant)) ||
+                ValidationApprovedAliases.Distinct(StringComparer.Ordinal).Count() != ValidationApprovedAliases.Length ||
+                ValidationRevokedKeyIds.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x,
+                    @"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant)) ||
+                ValidationRevokedKeyIds.Contains(ValidationVerifierKeyId, StringComparer.Ordinal))
+                throw new InvalidOperationException("Invalid opt-in validation configuration.");
+            // Refuse startup with a missing/unsafe trust anchor or filesystem root.
+            // In particular, a private signing key must never be mounted into Packory.
+            try
+            {
+                var root = new DirectoryInfo(ValidationExportDirectory!);
+                var key = new FileInfo(ValidationVerifierPublicKeyPath!);
+                if (!root.Exists || (root.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                    !key.Exists || (key.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                    key.Length is < 100 or > 8192)
+                    throw new InvalidOperationException("Invalid validation trust files.");
+                var pem = File.ReadAllText(key.FullName);
+                if (!pem.StartsWith("-----BEGIN PUBLIC KEY-----", StringComparison.Ordinal) ||
+                    pem.Contains("PRIVATE KEY", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Validation requires a PUBLIC verifier key only.");
+                using var rsa = RSA.Create();
+                rsa.ImportFromPem(pem);
+                if (rsa.KeySize < 2048)
+                    throw new InvalidOperationException("Validation verifier RSA key is too small.");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or
+                CryptographicException or ArgumentException)
+            {
+                throw new InvalidOperationException("Validation trust anchor is not readable or valid.");
+            }
+        }
         if (BlobProvider is not ("filesystem" or "s3"))
             throw new InvalidOperationException("BlobProvider must be filesystem or s3.");
         if (BlobProvider == "s3")

@@ -72,6 +72,17 @@ if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_SKILL_SECURITY_ENF
     settings.SkillSecurityEnforced = skillSecurity;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_MCP_ENABLED"), out var mcpEnabled))
     settings.McpEnabled = mcpEnabled;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_VALIDATION_ENABLED"), out var validationEnabled))
+    settings.ValidationEnabled = validationEnabled;
+settings.ValidationExportDirectory = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_EXPORT_DIRECTORY") ?? settings.ValidationExportDirectory;
+settings.ValidationVerifierPublicKeyPath = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_VERIFIER_PUBLIC_KEY_PATH") ?? settings.ValidationVerifierPublicKeyPath;
+settings.ValidationVerifierKeyId = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_VERIFIER_KEY_ID") ?? settings.ValidationVerifierKeyId;
+settings.ValidationAudience = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_AUDIENCE") ?? settings.ValidationAudience;
+settings.ValidationTenant = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_TENANT") ?? settings.ValidationTenant;
+if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_APPROVED_ALIASES") is { } validationAliases)
+    settings.ValidationApprovedAliases = validationAliases.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_REVOKED_KEY_IDS") is { } revokedKeys)
+    settings.ValidationRevokedKeyIds = revokedKeys.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 settings.Validate();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = settings.MaxArtifactBytes * 2 + 1024 * 1024);
 builder.Services.Configure<FormOptions>(options =>
@@ -101,6 +112,8 @@ if (settings.OidcEnabled)
         });
 }
 builder.Services.AddSingleton(settings);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<ValidationEvidenceStore>();
 builder.Services.AddSingleton<IPackageDatabase>(provider =>
 {
     var effective = provider.GetRequiredService<Settings>();
@@ -123,7 +136,7 @@ builder.Services.AddSingleton<SkillScanCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
 if (settings.McpEnabled)
 {
-    builder.Services.AddMcpServer()
+    var mcpBuilder = builder.Services.AddMcpServer()
         .WithHttpTransport(options =>
         {
             options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
@@ -131,6 +144,8 @@ if (settings.McpEnabled)
         .WithTools<PackoryMcpTools>()
         .WithResources<PackoryMcpResources>()
         .WithPrompts<PackoryMcpPrompts>();
+    if (settings.ValidationEnabled)
+        mcpBuilder.WithTools<PackoryValidationMcpTools>();
 }
 builder.Services.AddRateLimiter(options =>
 {
