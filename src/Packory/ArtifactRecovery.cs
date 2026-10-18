@@ -167,6 +167,14 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             known.Add(key);
             if (!blobs.Contains(key)) missingHosted++;
         }
+        // Publication intent is authoritative recovery evidence. An incomplete
+        // filesystem write has an immutable blob but no catalog reference yet.
+        // Moving that blob before evaluating intents would make State() report
+        // "not-written" and erase the journal, losing the link to preserved bytes.
+        // Only genuinely unreferenced, untracked objects may be auto-quarantined.
+        var pendingPublications = database.PendingPublications();
+        var pendingKeys = pendingPublications.Select(p => p.Key)
+            .ToHashSet(StringComparer.Ordinal);
         var root = Path.Combine(Path.GetFullPath(settings.DataDirectory), "blobs");
         var quarantine = Path.Combine(Path.GetFullPath(settings.DataDirectory), "recovery", "orphaned",
             DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmss") + "-" + Guid.NewGuid().ToString("N"));
@@ -188,7 +196,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                      key.EndsWith(".zip", StringComparison.Ordinal)) ||
                     key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
                     key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal);
-                if (!immutable || known.Contains(key)) continue;
+                if (!immutable || known.Contains(key) || pendingKeys.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 File.Move(path, destination);
@@ -197,7 +205,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         }
         if (moved > 0)
             logger.LogWarning("Quarantined {Count} unindexed immutable blob(s) under recovery/orphaned. Review before deletion.", moved);
-        foreach (var pending in database.PendingPublications())
+        foreach (var pending in pendingPublications)
         {
             var exists = blobs.Contains(pending.Key);
             var committed = MetadataCommitted(pending);
