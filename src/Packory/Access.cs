@@ -144,7 +144,14 @@ public static class Access
             return Results.BadRequest(new { error = "Invalid feed ID" });
         // Unlike generic package reads, private feeds must authenticate
         // even when anonymous catalog reads are configured.
-        if (RequireMcp(ctx, settings) is { } denied) return denied;
+        if (RequireMcp(ctx, settings) is { } denied)
+        {
+            // NuGet clients need a standards-compliant authentication challenge
+            // before retrying a private service-index request with configured
+            // Basic credentials. Never echo credentials or relax feed grants.
+            ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"Packory private feed\"";
+            return denied;
+        }
         var role = ctx.Items[RoleKey] as string;
         if (role is "admin-token" or "oidc-admin") return null;
         if (role is "managed-read" or "managed-write" &&
