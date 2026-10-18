@@ -255,4 +255,70 @@ public sealed class PostgresS3RecoveryTests
         Assert.False(first.IsHeld());
     }
 
+    [Fact]
+    public async Task RecoveryMaintenanceLeavesUnwrittenIntentAndQueuedSkillUntouched()
+    {
+        // CI uses disposable PostgreSQL and S3 emulation. The app must not run
+        // reconciliation or background scanning while an operator inspects the
+        // existing database under the exclusive maintenance lease.
+        var baseConnection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");
+        if (string.IsNullOrWhiteSpace(baseConnection) || string.IsNullOrWhiteSpace(endpoint)) return;
+        var schema = "packory_maintenance_" + Guid.NewGuid().ToString("N")[..12];
+        var directory = Path.Combine(Path.GetTempPath(), "packory-maintenance-" + Guid.NewGuid().ToString("N"));
+        using var administrator = new NpgsqlConnection(baseConnection);
+        administrator.Open();
+        using (var cmd = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            cmd.ExecuteNonQuery();
+        try
+        {
+            var isolated = new NpgsqlConnectionStringBuilder(baseConnection) { SearchPath = schema };
+            var cfg = new Settings
+            {
+                MetadataProvider = "postgresql", BlobProvider = "s3",
+                PostgresConnectionString = isolated.ConnectionString,
+                S3Endpoint = endpoint, S3Bucket = "packory-recovery-tests",
+                S3Region = "us-east-1", S3KeyPrefix = "maintenance-" + Guid.NewGuid().ToString("N")[..12],
+                S3AccessKey = "test", S3SecretKey = "test",
+                S3AllowLoopbackHttp = true, RecoveryMaintenance = true,
+                DataDirectory = directory, AdminToken = new string('x', 64)
+            };
+            cfg.Validate();
+            var db = new PostgresDatabase(cfg);
+            db.Initialize(); // Explicit setup; app startup must never initialize the schema.
+            var security = new SkillSecurityStore(cfg);
+            security.Initialize();
+            var package = "unwritten." + Guid.NewGuid().ToString("N")[..10];
+            var key = NuGetEndpoints.NugetKey(package, "1.0.0");
+            db.BeginPublication(key, "nuget", package, "1.0.0");
+            Assert.True(security.TryStage("queued-test", "1.0.0", "synthetic fixture",
+                new string('a', 64), "skill-staging/test/1.0.0.zip"));
+
+            using (var host = new ReplicaHost(cfg))
+            using (var client = host.CreateClient())
+            {
+                Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable,
+                    (await client.GetAsync("/health/ready")).StatusCode);
+                Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable,
+                    (await client.GetAsync("/api/packages")).StatusCode);
+                await Task.Delay(250);
+                Assert.Contains(db.PendingPublications(), entry => entry.Key == key);
+                Assert.Equal("QUEUED", security.Get("queued-test", "1.0.0")?.State);
+                Assert.False(Directory.Exists(Path.Combine(directory, "skill-scans")));
+                using var request = new HttpRequestMessage(HttpMethod.Get, "/api/admin/publications/pending");
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                    "Bearer", cfg.AdminToken);
+                using var response = await client.SendAsync(request);
+                Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+            }
+            Assert.Contains(db.PendingPublications(), entry => entry.Key == key);
+        }
+        finally
+        {
+            using (var cmd = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator))
+                cmd.ExecuteNonQuery();
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
 }
