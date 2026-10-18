@@ -130,6 +130,7 @@ builder.Services.AddSingleton<BlobStore>(provider =>
 });
 builder.Services.AddSingleton<ArtifactLocks>();
 builder.Services.AddSingleton<ArtifactRecovery>();
+builder.Services.AddSingleton<ArtifactIntegrityScanner>();
 builder.Services.AddSingleton<PublicationRecoveryService>();
 builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
@@ -165,6 +166,17 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true
             });
     });
+    // A single in-process budget, independent of untrusted caller attributes.
+    // Integrity verification can hash large blobs and is maintenance-only.
+    options.AddPolicy("integrity-scan", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("integrity-operator",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 2,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 builder.Services.AddHttpClient("upstream", client => client.Timeout = TimeSpan.FromSeconds(90))
@@ -261,9 +273,11 @@ app.Use(async (ctx, next) =>
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
     }
+    var integrityRead = HttpMethods.IsGet(ctx.Request.Method) &&
+        string.Equals(ctx.Request.Path.Value, "/api/admin/integrity/scan", StringComparison.OrdinalIgnoreCase);
     if (activeSettings.RecoveryMaintenance &&
         !ctx.Request.Path.StartsWithSegments("/api/admin/publications") &&
-        !ctx.Request.Path.StartsWithSegments("/health"))
+        !ctx.Request.Path.StartsWithSegments("/health") && !integrityRead)
     {
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
@@ -365,6 +379,33 @@ app.MapDelete("/api/admin/tokens/{id}", (string id, Settings cfg, IPackageDataba
     if (!Guid.TryParseExact(id, "N", out _)) return Results.BadRequest(new { error = "Invalid token id" });
     return db.RevokeManagedToken(id) ? Results.NoContent() : Results.NotFound();
 }).RequireRateLimiting("publish");
+// Maintenance-only, administrator-authenticated, bounded inspection of
+// catalog references. It never marks a system as certified or deletes bytes.
+app.MapGet("/api/admin/integrity/scan", async (int? after, int? limit, Settings cfg,
+    ArtifactIntegrityScanner inspector, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    ctx.Response.Headers.CacheControl = "no-store";
+    if (!cfg.RecoveryMaintenance)
+        return Results.Conflict(new { error = "Offline recovery maintenance mode is required" });
+    if (!startupLease.IsHeld())
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    if (after is < 0 || limit is < 1 or > 10)
+        return Results.BadRequest(new { error = "after must be nonnegative and limit 1..10" });
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+    timeout.CancelAfter(TimeSpan.FromSeconds(45));
+    try
+    {
+        var page = await inspector.ScanAsync(after ?? 0, limit ?? 5, timeout.Token);
+        return Results.Ok(page);
+    }
+    catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
+    {
+        return Results.Json(new { error = "Integrity scan timed out; no acceptance result" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+}).RequireRateLimiting("integrity-scan");
+
 app.MapGet("/api/admin/publications/pending", (Settings cfg, PublicationRecoveryService recovery, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
