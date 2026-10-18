@@ -85,8 +85,8 @@ public sealed class ValidationEvidenceTests
     public void ValidSignedOfflineExport_IsReadableAndBounded()
     {
         using var fixture = new Fixture();
-        fixture.Settings.Validate();
         fixture.Publish(fixture.Document());
+        fixture.Settings.Validate();
         var result = fixture.Store().Get("approved-run");
         Assert.NotNull(result);
         Assert.Equal("passed", result.Status);
