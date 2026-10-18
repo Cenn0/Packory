@@ -14,7 +14,7 @@ public sealed class ArtifactIntegrityScanner(
     IPackageDatabase database, BlobStore blobs, SkillSecurityStore security, Settings settings)
 {
     public sealed record Check(string Kind, string Name, string Version, string? Filename,
-        string Origin, string State, string DigestBasis);
+        string Origin, string State, string DigestBasis, string? FeedId = null);
 
     public sealed record Page(int Offset, int TotalReferences, int Checked,
         int? NextOffset, int PendingPublicationIntents, string Coverage,
@@ -22,7 +22,8 @@ public sealed class ArtifactIntegrityScanner(
 
     private sealed record Reference(string Kind, string Name, string Version,
         string? Filename, string Origin, string? Key,
-        string? KnownSha256 = null, long? KnownSize = null);
+        string? KnownSha256 = null, long? KnownSize = null,
+        string? FeedId = null);
 
     private sealed record Expected(string Algorithm, byte[] Bytes, long? Size = null);
 
@@ -69,6 +70,16 @@ public sealed class ArtifactIntegrityScanner(
             refs.Add(new Reference(artifact.Kind, artifact.Name, artifact.Version,
                 null, artifact.Origin, key));
         }
+        foreach (var privateRevision in database.FeedNugetRevisions())
+        {
+            var valid = FeedDefinition.ValidId(privateRevision.FeedId) &&
+                Names.Nuget(privateRevision.Name) && Names.Version(privateRevision.Version);
+            refs.Add(new Reference("feed-nuget", privateRevision.Name,
+                privateRevision.Version, null, "hosted",
+                valid ? FeedNugetEndpoints.BlobKey(privateRevision.FeedId,
+                    privateRevision.Name, privateRevision.Version) : null,
+                FeedId: privateRevision.FeedId));
+        }
         foreach (var file in database.PyFiles())
             refs.Add(new Reference("pypi", file.Name, file.Version, file.Filename,
                 "hosted", PyPiEndpoints.Key(file.Name, file.Filename), file.Sha256, file.Size));
@@ -90,6 +101,7 @@ public sealed class ArtifactIntegrityScanner(
             .ThenBy(x => x.Name, StringComparer.Ordinal)
             .ThenBy(x => x.Version, StringComparer.Ordinal)
             .ThenBy(x => x.Filename ?? "", StringComparer.Ordinal)
+            .ThenBy(x => x.FeedId ?? "", StringComparer.Ordinal)
             .ToList();
     }
 
@@ -98,7 +110,8 @@ public sealed class ArtifactIntegrityScanner(
         ArtifactDigests.ValidSha256(digest[7..]);
 
     private static Check With(Reference x, string state, string basis) =>
-        new(x.Kind, x.Name, x.Version, x.Filename, x.Origin, state, basis);
+        new(x.Kind, x.Name, x.Version, x.Filename, x.Origin, state, basis,
+            x.FeedId);
 
     private async Task<Check> InspectAsync(Reference entry, CancellationToken ct)
     {
@@ -197,6 +210,15 @@ public sealed class ArtifactIntegrityScanner(
             var expected = NpmTarballIntegrity.ParseExpected(metadata, entry.Name,
                 entry.Version, packument: entry.Origin == "mirror");
             return expected is null ? null : new Expected(expected.Algorithm, expected.Bytes);
+        }
+        if (entry.Kind == "feed-nuget" && entry.FeedId is { } feed)
+        {
+            var revision = database.GetFeedNugetRevision(feed, entry.Name, entry.Version);
+            return revision is not null && NugetDigest.Valid(revision.Sha512) &&
+                   revision.Size >= 0
+                ? new Expected("sha512", Convert.FromBase64String(revision.Sha512),
+                    revision.Size)
+                : null;
         }
         if (entry.Kind == "nuget")
         {
