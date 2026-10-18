@@ -746,8 +746,8 @@ public sealed class ApiTests
             using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
             {
                 using var writer = new StreamWriter(zip.CreateEntry("integrity-fixture/SKILL.md").Open());
-                writer.Write("---\\nname: integrity-fixture\\ndescription: " + description +
-                    "\\n---\\n# Synthetic data only\\n");
+                writer.Write("---\nname: integrity-fixture\ndescription: " + description +
+                    "\n---\n# Synthetic data only\n");
             }
             return buffer.ToArray();
         }
