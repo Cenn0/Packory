@@ -275,6 +275,13 @@ app.Use(async (ctx, next) =>
     }
     var integrityRead = HttpMethods.IsGet(ctx.Request.Method) &&
         string.Equals(ctx.Request.Path.Value, "/api/admin/integrity/scan", StringComparison.OrdinalIgnoreCase);
+    // Authenticate BEFORE the expensive-tool rate limiter. Otherwise anonymous
+    // callers can exhaust its tiny shared operator quota, denying real operators.
+    if (integrityRead && Access.RequireAdmin(ctx, activeSettings) is { } rejected)
+    {
+        await rejected.ExecuteAsync(ctx);
+        return;
+    }
     if (activeSettings.RecoveryMaintenance &&
         !ctx.Request.Path.StartsWithSegments("/api/admin/publications") &&
         !ctx.Request.Path.StartsWithSegments("/health") && !integrityRead)
