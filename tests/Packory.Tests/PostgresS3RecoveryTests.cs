@@ -343,6 +343,16 @@ public sealed class PostgresS3RecoveryTests
             Guid.NewGuid().ToString("N"));
         var cfg = Configure(root, "feed-journal-" + Guid.NewGuid().ToString("N")[..12]);
         if (cfg is null) return;
+        // Integration suites share the PostgreSQL service. A global integrity
+        // count includes unrelated fixtures stored under other S3 prefixes;
+        // isolate this test's metadata as well as its S3 object namespace.
+        var schema = "packory_feedjournal_" + Guid.NewGuid().ToString("N")[..12];
+        using var administrator = new NpgsqlConnection(cfg.PostgresConnectionString);
+        administrator.Open();
+        using (var command = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            command.ExecuteNonQuery();
+        cfg.PostgresConnectionString = new NpgsqlConnectionStringBuilder(cfg.PostgresConnectionString)
+            { SearchPath = schema }.ConnectionString;
         try
         {
             using (var s3Client = new AmazonS3Client(new BasicAWSCredentials("test", "test"),
@@ -387,7 +397,12 @@ public sealed class PostgresS3RecoveryTests
             recovery.Reconcile();
             Assert.True(storage.Contains(key)); // Disable must not GC immutable bytes.
         }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+        finally
+        {
+            using (var command = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator))
+                command.ExecuteNonQuery();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
 }
