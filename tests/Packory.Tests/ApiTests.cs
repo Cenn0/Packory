@@ -298,7 +298,19 @@ public sealed class ApiTests
         var alphaFile = "/feeds/alpha-feed/nuget/v3/flatcontainer/private.package/1.0.0/private.package.1.0.0.nupkg";
         var betaFile = "/feeds/beta-feed/nuget/v3/flatcontainer/private.package/1.0.0/private.package.1.0.0.nupkg";
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(alphaIndex)).StatusCode);
+        using (var challenge = await client.GetAsync(alphaIndex))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, challenge.StatusCode);
+            Assert.Contains(challenge.Headers.WwwAuthenticate,
+                value => value.Scheme == "Basic" &&
+                    value.Parameter == "realm=\"Packory private feed\"");
+        }
+        using (var basicIndex = new HttpRequestMessage(HttpMethod.Get, alphaIndex))
+        {
+            basicIndex.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes("synthetic:" + alphaReader.Secret)));
+            Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(basicIndex)).StatusCode);
+        }
         Assert.Equal(HttpStatusCode.Forbidden,
             (await client.SendAsync(WithToken(HttpMethod.Get, alphaIndex, token: ReadToken))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
