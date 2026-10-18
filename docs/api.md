@@ -150,3 +150,14 @@ or the analogous `write/publish` grant. Never check issued tokens into
 source files. Generic `packory.read`, legacy static read/write
 credentials and tokens for other feeds do not grant private feed access.
 See [feed operations](feeds.md) for precise limitations.
+
+## Approved Agent Skill artifact integrity
+
+With `PACKORY_SKILL_SECURITY_ENFORCED=true`, the server checks the **published**
+ZIP's SHA-256 against the immutable approved scan digest before returning
+`/api/skills/{name}/{version}/download` or `/skill.md`, or deriving MCP
+`skills/list`, `skills/get` and `resources/read` file digests and bytes.
+A digest mismatch fails closed with an unavailable/not-found response; it does
+not mint a new approval or rewrite the trusted digest. This is integrity
+validation, **not a safety guarantee** for the reviewed Skill. Human consent
+to activate instructions remains a client-side responsibility.

@@ -5,6 +5,49 @@ namespace Packory;
 
 public static class SkillEndpoints
 {
+
+    /// <summary>
+    /// Read exactly the archived bytes bound to an approval. A database state
+    /// of APPROVED alone is insufficient: storage corruption or a changed S3
+    /// cache must never result in REST/MCP distributing different bytes while
+    /// retaining the scanner's original approval. Return a pinned byte buffer
+    /// so file replacement between verification and HTTP serialization cannot
+    /// bypass this check.
+    /// </summary>
+    public static byte[]? ReadVerifiedArchive(string name, string version,
+        IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings)
+    {
+        if (!Names.Skill(name) || !Names.Version(version) ||
+            !db.Skills(name).Any(x => x.Version == version)) return null;
+        string? approvedDigest = null;
+        if (settings.SkillSecurityEnforced)
+        {
+            var revision = security.Get(name, version);
+            if (revision is not { State: "APPROVED" } ||
+                revision.Sha256.Length != 64 ||
+                !revision.Sha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+                return null;
+            approvedDigest = revision.Sha256;
+        }
+        var path = blobs.Existing(SkillKey(name, version));
+        if (path is null) return null;
+        try
+        {
+            var limit = Math.Min(settings.MaxArtifactBytes, 20L * 1024 * 1024);
+            if (new FileInfo(path).Length > limit) return null;
+            var bytes = File.ReadAllBytes(path);
+            if (bytes.LongLength > limit) return null;
+            if (approvedDigest is not null &&
+                !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    System.Security.Cryptography.SHA256.HashData(bytes),
+                    Convert.FromHexString(approvedDigest)))
+                return null;
+            return bytes;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/skills", (IPackageDatabase db, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
@@ -29,8 +72,9 @@ public static class SkillEndpoints
             if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             ctx.Response.Headers.CacheControl = "no-store";
-            var file = blobs.Existing(SkillKey(name, version));
-            return file is null ? Results.NotFound() : Results.File(file, "application/zip", fileDownloadName: name + "-" + version + ".zip");
+            var bytes = ReadVerifiedArchive(name, version, db, blobs, security, settings);
+            return bytes is null ? Results.NotFound() :
+                Results.Bytes(bytes, "application/zip", fileDownloadName: name + "-" + version + ".zip");
         });
 
         app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
@@ -40,11 +84,13 @@ public static class SkillEndpoints
             if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             ctx.Response.Headers.CacheControl = "no-store";
-            var path = blobs.Existing(SkillKey(name, version));
-            if (path is null) return Results.NotFound();
-            using var archive = ZipFile.OpenRead(path);
-            var entry = archive.Entries.Single(e => e.FullName == "SKILL.md" || e.FullName == name + "/SKILL.md");
-            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            var bytes = ReadVerifiedArchive(name, version, db, blobs, security, settings);
+            if (bytes is null) return Results.NotFound();
+            using var archive = new ZipArchive(new MemoryStream(bytes, writable: false),
+                ZipArchiveMode.Read);
+            var entry = archive.Entries.Single(e =>
+                e.FullName == "SKILL.md" || e.FullName == name + "/SKILL.md");
+            using var reader = new StreamReader(entry.Open(), new UTF8Encoding(false, true));
             return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
         });
 

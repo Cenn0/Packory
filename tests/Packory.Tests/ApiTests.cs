@@ -685,6 +685,91 @@ public sealed class ApiTests
             HttpMethod.Get, "/api/skills/scan-me/1.0.0/download"))).StatusCode);
     }
 
+
+    [Fact]
+    public async Task Skills_McpAndRestNeverDistributeBytesDifferingFromApprovedScanDigest()
+    {
+        static byte[] Archive(string instruction)
+        {
+            using var buffer = new MemoryStream();
+            using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using var writer = new StreamWriter(
+                    zip.CreateEntry("digest-bound/SKILL.md").Open());
+                writer.Write("---\nname: digest-bound\ndescription: Digest-bound fixture\n---\n" + instruction);
+            }
+            return buffer.ToArray();
+        }
+
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var original = Archive("# Verified synthetic instruction\n");
+        var upload = new MultipartFormDataContent();
+        upload.Add(new StringContent("1.0.0"), "version");
+        upload.Add(new ByteArrayContent(original), "file", "digest-bound.zip");
+        using var staged = await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/skills", upload));
+        Assert.Equal(HttpStatusCode.Accepted, staged.StatusCode);
+        using var info = JsonDocument.Parse(await staged.Content.ReadAsStringAsync());
+        var digest = info.RootElement.GetProperty("sha256").GetString()!;
+
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var blobs = host.Services.GetRequiredService<BlobStore>();
+        var settings = host.Services.GetRequiredService<Settings>();
+        Assert.Null(PackoryMcpCatalog.Entry("digest-bound", "1.0.0",
+            db, blobs, security, settings));
+        Assert.True(security.SaveResult("digest-bound", "1.0.0", digest,
+            "NEEDS_REVIEW", 0, "SAFE", "{}"));
+        using var approved = await client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/security/skills/digest-bound/1.0.0/approve",
+            JsonContent.Create(new { sha256 = digest, reason = "Synthetic verification fixture" })));
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+
+        var entry = PackoryMcpCatalog.Entry("digest-bound", "1.0.0",
+            db, blobs, security, settings);
+        Assert.NotNull(entry);
+        var manifest = Assert.IsType<JsonArray>(entry["resources"]);
+        Assert.Single(manifest);
+        Assert.Equal("sha256:" + Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(
+                "---\nname: digest-bound\ndescription: Digest-bound fixture\n---\n# Verified synthetic instruction\n"))),
+            manifest[0]!["digest"]!.GetValue<string>());
+        using (var response = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/skills/digest-bound/1.0.0/download")))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(original, await response.Content.ReadAsByteArrayAsync());
+        }
+
+        // Simulate corruption after publication, not a new approved revision.
+        var key = SkillEndpoints.SkillKey("digest-bound", "1.0.0");
+        File.WriteAllBytes(blobs.Existing(key)!, Archive("# Changed after approval\n"));
+        Assert.Equal("APPROVED", security.Get("digest-bound", "1.0.0")!.State);
+        Assert.Null(PackoryMcpCatalog.Get("digest-bound", "1.0.0",
+            db, blobs, security, settings));
+        Assert.Null(PackoryMcpCatalog.Entry("digest-bound", "1.0.0",
+            db, blobs, security, settings));
+        Assert.Null(SkillEndpoints.ReadVerifiedArchive("digest-bound", "1.0.0",
+            db, blobs, security, settings));
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/api/skills/digest-bound/1.0.0/download"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/api/skills/digest-bound/1.0.0/skill.md"))).StatusCode);
+        Assert.Throws<ArgumentException>(() => PackoryMcpResources.SkillFile(
+            "1.0.0", "digest-bound", "SKILL.md", db, blobs, security, settings));
+
+        // Restoring precisely the originally approved bytes restores access.
+        File.WriteAllBytes(blobs.Existing(key)!, original);
+        Assert.NotNull(PackoryMcpCatalog.Entry("digest-bound", "1.0.0",
+            db, blobs, security, settings));
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/api/skills/digest-bound/1.0.0/download"))).StatusCode);
+    }
+
     [Fact]
     public async Task Skills_LegacyBackfillIsExplicitQuarantinedIdempotentAndAdminOnly()
     {

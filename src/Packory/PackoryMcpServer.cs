@@ -49,14 +49,16 @@ public static class PackoryMcpCatalog
     public static SkillSnapshot? Get(string name, string version, IPackageDatabase db,
         BlobStore blobs, SkillSecurityStore security, Settings settings)
     {
-        if (!Names.Skill(name) || !Names.Version(version)) return null;
-        if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return null;
-        if (!db.Skills(name).Any(s => s.Version == version)) return null;
-        var zip = blobs.Existing(SkillEndpoints.SkillKey(name, version));
-        if (zip is null) return null;
+        // The exact bytes must match the digest approved after SkillSpector
+        // inspection. A changed artifact must disappear from MCP discovery,
+        // skills/get and resources/read, never receive fresh trusted digests.
+        var approvedBytes = SkillEndpoints.ReadVerifiedArchive(
+            name, version, db, blobs, security, settings);
+        if (approvedBytes is null) return null;
         try
         {
-            using var archive = ZipFile.OpenRead(zip);
+            using var archive = new ZipArchive(
+                new MemoryStream(approvedBytes, writable: false), ZipArchiveMode.Read);
             var files = new List<SkillFile>();
             long total = 0;
             var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
