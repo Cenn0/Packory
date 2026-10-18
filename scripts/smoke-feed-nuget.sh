@@ -86,8 +86,28 @@ PROJECT
   dotnet pack "$dir/project/Synthetic.csproj" --no-restore -c Release \
     -o "$dir/packages" --verbosity quiet
   if [ "$name" = alpha ]; then credential="$ALPHA_PUBLISH"; else credential="$BETA_PUBLISH"; fi
+  # The NuGet API key authenticates the push operation, not the initial
+  # GET of the private V3 service index. Supply scoped HTTP credentials for
+  # discovery as well. Keep the disposable config private and outside git.
+  cat >"$dir/NuGet.Push.Config" <<CONFIG
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="packory" value="$BASE/feeds/$name-feed/nuget/v3/index.json" allowInsecureConnections="true" />
+  </packageSources>
+  <packageSourceCredentials>
+    <packory>
+      <add key="Username" value="synthetic" />
+      <add key="ClearTextPassword" value="$credential" />
+      <add key="ValidAuthenticationTypes" value="basic" />
+    </packory>
+  </packageSourceCredentials>
+</configuration>
+CONFIG
+  chmod 600 "$dir/NuGet.Push.Config"
   dotnet nuget push "$dir/packages/Packory.Private.Sample.1.0.0.nupkg" \
-    --source "$BASE/feeds/$name-feed/nuget/v3/index.json" \
+    --source packory --configfile "$dir/NuGet.Push.Config" \
     --api-key "$credential" --skip-duplicate
 done
 
