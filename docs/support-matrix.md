@@ -8,18 +8,19 @@
 
 | Protocol / feature | Baseline implemented | Reproducible evidence | Not currently verified or supported broadly |
 | --- | --- | --- | --- |
-| NuGet V3 | Hosted push, flat-container cache, registration/search subsets | CI `dotnet pack/push/restore/build`, deterministic API and hosted smoke | Broad NuGet CLI versions/OS, complete registration/SemVer2, large transitive graphs, cold/warm/offline/full fault matrix |
+| NuGet V3 | Legacy hosted/push/flat-container mirror and **experimental isolated private hosted NuGet feeds**; immutable SHA-512 V3/V4 metadata | CI `dotnet pack/push/restore/build`, deterministic API, private two-feed scope/duplicate-name native CLI smoke | Broad NuGet CLI versions/OS, complete registration/SemVer2, large transitive graphs, cold/warm/offline/full fault matrix |
 | npm | Hosted, scoped metadata, tarball mirror, integrity | CI native `npm publish/install/ci`, API tests; setup-node 22 runtime | Complete packuments/dist-tag semantics, yarn/pnpm, client version pinning, offline lockfile matrix |
 | Cargo | Hosted alternate sparse registry | Native `cargo publish` and consumption in hosted/CI smoke | cargo versions unpinned, yank, crates.io replacement proxy |
 | PyPI | Hosted Simple API HTML/JSON + upload | Native pip hosted transitive wheel install with Python 3.12 and 3.13 contexts | Twine versions, multiple files/metadata sidecars, yanks, PyPI proxy, multiple operating systems |
 | OCI | Hosted v2 blobs, manifests, tags, referrers | Local Docker login/push/pull scratch-image smoke and API integration | ORAS, Helm, standard bearer-token server, cross-restart chunk sessions, upload resume, client/OS matrix |
 | Agent Skills | ZIP validation + immutable named versions | API upload/download and malicious-archive regression subset | Verified provenance/publisher, approval workflow, signatures, complete Agent Skills standard conformance |
-| Managed API tokens | SHA-256 hashed expiring/revocable read/write, namespace policy | Existing API auth lifecycle integration | Feed/namespace IAM, full audit/denial coverage |
+| Managed API tokens | SHA-256 hashed expiring/revocable read/write, namespace policy and **exact per-feed read/publish grants for private NuGet** | Existing API auth lifecycle integration | Full tenant policy model, cross-protocol feed IAM and audit/denial coverage |
 | OIDC / Keycloak | JWT resource-server validation, role/scope checks | CI disposable Keycloak 26.7.3 and signed JWT audience/scope over TLS | PKCE BFF, browser login/logout, group mapping, identity lifecycle |
 | PostgreSQL | Provider abstraction + writer advisory lease | Isolated PostgreSQL CI integration | Coordinated real-provider restore, fencing after network partition |
 | S3 | Conditional immutable writes, verified orphan quarantine | Moto 5.2.3 emulator and PostgreSQL/S3 CI | Real S3 conditional DELETE/PUT concurrency, versioning/retention, lifecycle, disaster restore |
 | Multi-instance | Restricted PostgreSQL/S3 readers | Two-instance integration on test infrastructure | General NuGet/npm read replicas, OCI session handoff, active-active writes |
-| MCP Registry / Raw / AI Models | V2 concept only | None on baseline main | Entire runtime/API/security acceptance |
+| Read-only Packory MCP | Approved Skill catalog and opt-in scoped signed validation findings | MCP SDK/Keycloak CI, synthetic signed evidence and scope checks | External evaluator qualification and independent production security assessment still missing
+| MCP Registry / Raw / AI Models | V2 concepts only | No complete runtime | Registry schemas, generic blobs, model provenance and security acceptance remain outstanding |
 
 ## Native client test contract
 
