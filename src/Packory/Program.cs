@@ -135,6 +135,7 @@ builder.Services.AddSingleton<PublicationRecoveryService>();
 builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddSingleton<SkillSecurityStore>();
+builder.Services.AddSingleton<McpRegistryStore>();
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
@@ -146,13 +147,24 @@ if (settings.McpEnabled)
             options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
         })
         .WithTools<PackoryMcpTools>()
+        .WithTools<McpRegistryMcpTools>()
         .WithResources<PackoryMcpResources>()
+        .WithResources<McpRegistryMcpResources>()
         .WithPrompts<PackoryMcpPrompts>();
     if (settings.ValidationEnabled)
         mcpBuilder.WithTools<PackoryValidationMcpTools>();
 }
 builder.Services.AddRateLimiter(options =>
 {
+    // Shared zero-queue request budget for expensive Streamable HTTP MCP reads.
+    // The authentication gate runs before the rate-limit middleware.
+    options.AddPolicy("mcp", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("mcp-shared",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 300, Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0, AutoReplenishment = true
+            }));
     options.AddPolicy("publish", context =>
     {
         var configured = context.RequestServices.GetRequiredService<Settings>();
@@ -212,6 +224,7 @@ if (!readerInstance)
     {
         metadata.Initialize();
         app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
+        app.Services.GetRequiredService<McpRegistryStore>().Initialize();
         app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
     }
 }
@@ -226,6 +239,7 @@ app.Use(async (ctx, next) =>
 {
     if (ctx.Request.Path.StartsWithSegments("/mcp"))
     {
+        ctx.Response.Headers.CacheControl = "no-store";
         // Explicit Origin validation plus mandatory bearer auth for remote MCP.
         var origin = ctx.Request.Headers.Origin.ToString();
         if (!string.IsNullOrEmpty(origin))
@@ -465,7 +479,8 @@ NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
-if (settings.McpEnabled) app.MapMcp("/mcp");
+McpRegistryEndpoints.Map(app);
+if (settings.McpEnabled) app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
 
 public partial class Program { }

@@ -167,3 +167,38 @@ async function decideSkill(item, action) {
 $('security-refresh').addEventListener('click', loadSecurity);
 $('token').addEventListener('change', loadSecurity);
 loadSecurity();
+
+// MCP server descriptors are untrusted metadata. Only render as text; do not
+// automatically visit remotes, forward API tokens or execute a tool/Skill.
+async function loadMcpServers() {
+  const rows = $('mcp-table'); rows.replaceChildren();
+  $('mcp-status').textContent = 'Loading reviewed MCP server metadata…';
+  try {
+    const params = new URLSearchParams({ q: $('mcp-query').value.trim(), limit: '50' });
+    const response = await request('/api/v1/mcp/servers?' + params);
+    const items = response.items || [];
+    $('mcp-status').textContent = items.length + ' operator-published server revisions. Publisher ownership is not verified.';
+    if (!items.length) {
+      const row = document.createElement('tr');
+      const cell = element('td', 'No published MCP server metadata matches this search.', 'muted');
+      cell.colSpan = 4; row.append(cell); rows.append(row);
+    }
+    for (const item of items) {
+      const row = document.createElement('tr');
+      row.append(
+        element('td', item.name || ''),
+        element('td', item.version || ''),
+        element('td', item.remoteUrl || ''),
+        element('td', item.publisherVerified ? 'Publisher verified by provider' : 'Operator-reviewed metadata only')
+      );
+      rows.append(row);
+    }
+  } catch (error) {
+    $('mcp-status').textContent = 'Cannot load MCP metadata: ' + error.message;
+  }
+}
+$('mcp-filter').addEventListener('submit', event => {
+  event.preventDefault(); loadMcpServers();
+});
+$('token').addEventListener('change', loadMcpServers);
+loadMcpServers();

@@ -40,6 +40,18 @@ class StaticDashboardContractTests(unittest.TestCase):
         for ecosystem in expected:
             self.assertIn('"' + ecosystem + '"', program)
 
+    def test_mcp_catalog_discovery_does_not_expose_remote_execution_controls(self):
+        page = PAGE.read_text(encoding="utf-8")
+        frontend = (ROOT / "src/Packory/wwwroot/app.js").read_text(encoding="utf-8")
+        for value in ('id="mcp-filter"', 'id="mcp-query"', 'id="mcp-table"', 'id="mcp-status"'):
+            self.assertIn(value, page)
+        self.assertIn("/api/v1/mcp/servers?", frontend)
+        self.assertIn("item.remoteUrl || ''", frontend)
+        self.assertIn("element('td', item.remoteUrl || '')", frontend)
+        self.assertNotIn("window.open(item.remoteUrl", frontend)
+        self.assertNotIn("fetch(item.remoteUrl", frontend)
+        self.assertNotIn("/api/v1/admin/mcp/servers/decide", frontend)
+
     def test_experimental_labels_and_real_paths(self):
         page = PAGE.read_text(encoding="utf-8")
         self.assertNotIn("Packory MVP", page)

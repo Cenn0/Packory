@@ -20,7 +20,7 @@
 | S3 | Conditional immutable writes, verified orphan quarantine | Moto 5.2.3 emulator and PostgreSQL/S3 CI | Real S3 conditional DELETE/PUT concurrency, versioning/retention, lifecycle, disaster restore |
 | Multi-instance | Restricted PostgreSQL/S3 readers | Two-instance integration on test infrastructure | General NuGet/npm read replicas, OCI session handoff, active-active writes |
 | Read-only Packory MCP | Approved Skill catalog and opt-in scoped signed validation findings | MCP SDK/Keycloak CI, synthetic signed evidence and scope checks | External evaluator qualification and independent production security assessment still missing
-| MCP Registry / Raw / AI Models | V2 concepts only | No complete runtime | Registry schemas, generic blobs, model provenance and security acceptance remain outstanding |
+| MCP Registry metadata / Raw / AI Models | Experimental remote-only pinned `server.json` subset, immutable staged review/revoke, read-only REST and MCP discovery UI; Raw and model catalog remain unimplemented | .NET metadata/negative/approval regression tests, HTTP MCP client integration, database persistence; provider-level validation remains limited | No official Registry `/v0.1` API, publisher ownership proof, signed provenance, full schema/import, remote gateway, Raw or model catalog, independent security qualification |
 
 ## Native client test contract
 

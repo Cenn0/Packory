@@ -29,6 +29,23 @@
       <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
     </section>
     <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
+    <section class="panel mcp-panel" aria-labelledby="mcp-title">
+      <div class="section-head">
+        <div><p class="eyebrow">MCP DISCOVERY</p><h2 id="mcp-title">MCP server catalog</h2><p class="muted">Version-pinned remote server descriptions. Metadata review is not publisher verification or permission to connect.</p></div>
+        <form id="mcp-filter" role="search">
+          <label for="mcp-query">Find server metadata</label>
+          <div class="mcp-filter-controls"><input id="mcp-query" type="search" maxlength="100" placeholder="Name or title"><button type="submit">Search</button></div>
+        </form>
+      </div>
+      <p id="mcp-status" role="status" aria-live="polite">Loading reviewed MCP server metadata…</p>
+      <div class="table-wrap">
+        <table aria-label="Reviewed MCP server metadata">
+          <thead><tr><th>Server</th><th>Version</th><th>Streamable HTTP endpoint</th><th>Qualification</th></tr></thead>
+          <tbody id="mcp-table"></tbody>
+        </table>
+      </div>
+      <p class="muted">No automatic connection, package execution, token forwarding or remote verification. Administrative import and approval are intentionally API-only until a secure browser session/BFF is available.</p>
+    </section>
     <section class="panel scanner-panel" aria-labelledby="scanner-title">
       <div class="section-head"><div><p class="eyebrow">SECURITY CENTER</p><h2 id="scanner-title">Agent Skill Security</h2><p class="muted">NVIDIA SkillSpector · Offline static analysis · Manual administrator approval</p></div><button id="security-refresh" type="button">Refresh scans</button></div>
       <p id="security-status" role="status" aria-live="polite">Enter an administrator token above to review scans. Credentials stay in memory only.</p>
