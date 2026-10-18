@@ -314,7 +314,7 @@ public sealed class McpRegistryStore(Settings settings)
         return reader.Read() ? Read(reader) : null;
     }
 
-    public IReadOnlyList<McpRegistryEntry> List(string? query, int limit, int skip = 0,
+    public IReadOnlyList<McpRegistryEntry> List(string? query, int limit = 25, int skip = 0,
         bool admin = false)
     {
         if (query is { Length: > 100 } || skip is < 0 or > 10000 ||
