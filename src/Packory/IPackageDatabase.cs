@@ -27,7 +27,7 @@ public interface IPackageDatabase
     // Atomic metadata + checksum pair for verified NuGet mirrors.
     void UpsertNugetMirror(string name, string version, string description,
         string sha512, long size);
-    NugetDigest? NugetDigest(string name, string version);
+    NugetDigest? GetNugetDigest(string name, string version);
     IReadOnlyList<string> Versions(string kind, string name);
     IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit);
     bool OciHasBlob(string repository, string digest);
