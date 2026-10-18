@@ -52,7 +52,8 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **npm** | Upstream metadata and tarball caching, scoped package handling and basic single-version publishing |
 | **OCI (experimental)** | Hosted Distribution v2 endpoints for SHA-256 blobs, chunk uploads, manifests, tags and referrers; incomplete client/auth support |
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
-| **Agent skills** | Import, list and download versioned ZIP files containing a simple `SKILL.md` manifest |
+| **Agent skills (experimental)** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download; revocation and rescan |
+| **Packory MCP (experimental)** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension methods; no untrusted skill execution |
 | **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
@@ -70,7 +71,7 @@ dotnet nuget add source http://localhost:8080/nuget/v3/index.json \
 npm install --registry=http://localhost:8080/npm/ lodash
 ```
 
-Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. The skills importer **validates archives but does not establish that their contents are safe to execute**.
+Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. With skill security enforcement enabled, imports are **staged and unavailable for distribution until an authorized approval**. Offline static SkillSpector inspection is an input to human review, **not proof that a skill is safe to execute**. The experimental [MCP and SkillSpector implementation](docs/mcp-security-integration.md) and [delivery checkpoint](docs/roadmap-status-2026-10-18.md) describe the actual limitations.
 
 ## Architecture overview
 
