@@ -123,6 +123,6 @@ public sealed class SchemaVersionTests
         Assert.Equal(6, database.Feeds(null, 20).Count);
         Assert.Equal("oci", database.Feed("default-oci")?.Kind);
         using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", connection);
-        Assert.Equal(2, Convert.ToInt32(cmd.ExecuteScalar()));
+        Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
     }
 }
