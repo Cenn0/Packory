@@ -34,3 +34,16 @@
 - **Security recommendation:** do not expose this experimental deployment as a production multi-tenant registry, do not enable active-active writers, require TLS and validated authorization, and do not run untrusted skills.
 
 This checkpoint deliberately leaves operator-only gates incomplete. Do not create synthetic “passed” RPO/RTO, S3 certification, sign-off or production evidence records.
+
+## MS1 startup recovery follow-up — filesystem journal preservation
+
+The 18 October continuation fixes a source-level inconsistency: previously,
+filesystem orphan enumeration ran **before** pending-intent classification,
+which could move an unfinished publish's bytes and subsequently erase its
+journal as `not-written`. Startup reconciliation now excludes any blob key
+with a pending publication intent from automatic orphan movement. Regression
+tests cover regular and isolated-feed NuGet identities, repeated restarts,
+and mixed tracked/untracked files. Only truly untracked objects are moved into
+`recovery/orphaned`. This narrow fix does not certify real-provider S3
+recovery or close MS1's deployment gates. See its PR CI result for test
+evidence; no production restore is claimed.

@@ -160,7 +160,13 @@ Every hosted NuGet, npm, Cargo, PyPI, Agent Skill, and OCI blob/manifest write
 now creates a **durable database publication-intent record before its immutable
 blob write**. On a successful metadata commit the corresponding journal entry
 is removed. After restart, reconciliation clears records that are fully committed
-or have no remaining object. An S3 object whose write succeeded but whose
+or have no remaining object. For **filesystem storage**, a blob associated with
+an incomplete publication intent is **never automatically relocated as an
+unindexed orphan**: both its original bytes and its durable journal entry
+remain in place for explicit operator investigation. Truly untracked local
+immutable objects are moved to `recovery/orphaned` for inspection. Do not
+serve a revision or remove its bytes merely because an incomplete intent
+exists. An S3 object whose write succeeded but whose
 metadata commit did **not** succeed remains recorded for operator inspection via
 admin-only `GET /api/admin/publications/pending`. This endpoint exposes artifact
 keys, kind, package name/version and start time, **never credentials**. The S3
