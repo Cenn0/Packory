@@ -59,3 +59,24 @@ Run dotnet restore Packory.slnx; dotnet build Packory.slnx -c Release --no-resto
 Add real sidecar smoke tests, synthetic malicious Skills, interrupted jobs, stale artifacts, backfill/upgrade, auth bypass checks and protocol interoperability against old and current MCP clients. Do not mark tests green without executing them. Update support claims only after the tests are available and pass.
 
 References: NVIDIA SkillSpector https://github.com/NVIDIA/SkillSpector ; MCP C# SDK https://github.com/modelcontextprotocol/csharp-sdk ; MCP Skills Extension https://skills.extensions.modelcontextprotocol.io/specification/stable/skills ; Packory skill security roadmap skill-security-roadmap.md .
+
+## Authenticated MCP skill byte verification (October 2026)
+
+Both the REST ZIP and `skill.md` delivery endpoints and MCP `skills/get` /
+`resources/read` now materialize the current bounded ZIP bytes and compare their
+SHA-256 against the server-side `APPROVED` revision **before distributing those
+bytes**. A storage replacement after approval fails closed even if an S3/local
+cache file is readable. REST returns 404 for inaccessible content. MCP callers
+can inspect `verify_skill_integrity(name, version)`, which reports either an
+approved immutable digest, `integrity_unavailable` for an inaccessible/mismatched
+published revision, or `unavailable` for non-published/revoked revisions.
+No raw scanner findings, unapproved ZIPs or executable actions are returned.
+
+**Limits:** each read verifies a bounded object and incurs hashing and
+in-memory materialization; performance and multi-node caching are not certified.
+The returned `safeToExecute=false` is deliberate: a human approval and
+matching digest authenticate the reviewed bytes, not their runtime behavior.
+MCP hosts must still compare resource digests to the Skills Extension manifest
+and apply their own user-approval and sandbox policies. Enabling compatibility
+mode by setting `PACKORY_SKILL_SECURITY_ENFORCED=false` disables this policy
+check and is not recommended for untrusted registries.

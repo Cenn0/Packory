@@ -729,6 +729,85 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task ApprovedSkillTamperingFailsClosedAcrossRestAndMcp()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var settings = host.Services.GetRequiredService<Settings>();
+        var database = host.Services.GetRequiredService<IPackageDatabase>();
+        var blobs = host.Services.GetRequiredService<BlobStore>();
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        const string name = "integrity-fixture";
+        const string version = "1.0.0";
+
+        static byte[] Archive(string description)
+        {
+            using var buffer = new MemoryStream();
+            using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using var writer = new StreamWriter(zip.CreateEntry("integrity-fixture/SKILL.md").Open());
+                writer.Write("---\nname: integrity-fixture\ndescription: " + description +
+                    "\n---\n# Synthetic data only\n");
+            }
+            return buffer.ToArray();
+        }
+
+        var approvedBytes = Archive("Harmless approved revision");
+        var sha = Convert.ToHexStringLower(SHA256.HashData(approvedBytes));
+        Assert.True(security.TryStage(name, version, "Synthetic fixture", sha,
+            "skill-staging/" + sha + ".zip"));
+        Assert.True(security.SaveResult(name, version, sha, "NEEDS_REVIEW", 0, "SAFE", "{}"));
+        Assert.True(security.TryTransition(name, version, sha, "NEEDS_REVIEW",
+            "APPROVED", "synthetic-reviewer", "Fixture verification only"));
+        Assert.True(database.AddSkill(name, version, "Synthetic fixture", "synthetic-test"));
+        var key = SkillEndpoints.SkillKey(name, version);
+        Assert.True(await blobs.PutAsync(key, new MemoryStream(approvedBytes),
+            approvedBytes.LongLength + 1, CancellationToken.None));
+
+        using (var ok = await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/skills/" + name + "/" + version + "/download")))
+        {
+            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+            Assert.Equal(approvedBytes, await ok.Content.ReadAsByteArrayAsync());
+        }
+        var snapshot = PackoryMcpCatalog.Get(name, version, database, blobs, security, settings);
+        Assert.NotNull(snapshot);
+        var entry = PackoryMcpCatalog.Entry(name, version, database, blobs, security, settings);
+        Assert.NotNull(entry);
+        Assert.Equal("digest_verified",
+            JsonDocument.Parse(JsonSerializer.Serialize(PackoryMcpTools.VerifySkillIntegrity(
+                name, version, database, blobs, security, settings)))
+                .RootElement.GetProperty("status").GetString());
+
+        // Simulate a compromised blob store after approval, preserving the same
+        // name and version. No REST or MCP read may distribute these new bytes.
+        var tamperedBytes = Archive("Unauthorized replacement instructions");
+        File.WriteAllBytes(blobs.Existing(key)!, tamperedBytes);
+        foreach (var path in new[]
+        {
+            "/api/skills/" + name + "/" + version + "/download",
+            "/api/skills/" + name + "/" + version + "/skill.md"
+        })
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await client.SendAsync(WithToken(HttpMethod.Get, path))).StatusCode);
+        Assert.Null(PackoryMcpCatalog.Get(name, version, database, blobs, security, settings));
+        Assert.Null(PackoryMcpCatalog.Entry(name, version, database, blobs, security, settings));
+        Assert.Throws<ArgumentException>(() => PackoryMcpResources.SkillFile(
+            version, name, "SKILL.md", database, blobs, security, settings));
+        Assert.Equal("integrity_unavailable",
+            JsonDocument.Parse(JsonSerializer.Serialize(PackoryMcpTools.VerifySkillIntegrity(
+                name, version, database, blobs, security, settings)))
+                .RootElement.GetProperty("status").GetString());
+
+        Assert.True(security.TryTransition(name, version, sha, "APPROVED",
+            "REVOKED", "synthetic-reviewer", "Fixture revocation check"));
+        Assert.Equal("unavailable",
+            JsonDocument.Parse(JsonSerializer.Serialize(PackoryMcpTools.VerifySkillIntegrity(
+                name, version, database, blobs, security, settings)))
+                .RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task Mcp_AuthenticatedClientNegotiatesAndDiscoversReadOnlyTools()
     {
         using var host = new Host();
@@ -747,6 +826,7 @@ public sealed class ApiTests
         var tools = await mcp.ListToolsAsync(cancellationToken: timeout.Token);
         Assert.Contains(tools, tool => tool.Name == "search_artifacts");
         Assert.Contains(tools, tool => tool.Name == "list_approved_skills");
+        Assert.Contains(tools, tool => tool.Name == "verify_skill_integrity");
         Assert.DoesNotContain(tools, tool => tool.Name.StartsWith("approve_", StringComparison.OrdinalIgnoreCase));
     }
 

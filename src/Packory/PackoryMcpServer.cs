@@ -52,11 +52,16 @@ public static class PackoryMcpCatalog
         if (!Names.Skill(name) || !Names.Version(version)) return null;
         if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return null;
         if (!db.Skills(name).Any(s => s.Version == version)) return null;
-        var zip = blobs.Existing(SkillEndpoints.SkillKey(name, version));
-        if (zip is null) return null;
+        // The approval state's SHA-256 must still match the exact archive
+        // being parsed. Never trust a cached S3/file blob merely because
+        // the database record says APPROVED.
+        var publishedBytes = SkillEndpoints.ReadVerifiedPublishedBytes(
+            name, version, blobs, security, settings);
+        if (publishedBytes is null) return null;
         try
         {
-            using var archive = ZipFile.OpenRead(zip);
+            using var archive = new ZipArchive(
+                new MemoryStream(publishedBytes, writable: false), ZipArchiveMode.Read);
             var files = new List<SkillFile>();
             long total = 0;
             var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -263,6 +268,28 @@ public sealed class PackoryMcpTools
     [Description("Discover versioned, security-approved agent Skills available to read.")]
     public static object ListApprovedSkills(IPackageDatabase db, SkillSecurityStore security, Settings settings) =>
         new { items = PackoryMcpCatalog.Approved(db, security, settings) };
+
+    [McpServerTool(Name = "verify_skill_integrity", ReadOnly = true)]
+    [Description("Verify that a published, reviewed Skill ZIP still matches its immutable approved SHA-256. Does not execute or certify Skill instructions.")]
+    public static object VerifySkillIntegrity(string name, string version, IPackageDatabase db,
+        BlobStore blobs, SkillSecurityStore security, Settings settings)
+    {
+        if (!Names.Skill(name) || !Names.Version(version) ||
+            !db.Skills(name).Any(x => x.Version == version) ||
+            (settings.SkillSecurityEnforced && !security.IsApproved(name, version)))
+            return new { status = "unavailable" } as object;
+        var bytes = SkillEndpoints.ReadVerifiedPublishedBytes(name, version, blobs, security, settings);
+        if (bytes is null)
+            return new { status = "integrity_unavailable" };
+        var digest = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        return new
+        {
+            status = "digest_verified", name, version, sha256 = digest,
+            approvedUnderPolicy = settings.SkillSecurityEnforced,
+            safeToExecute = false,
+            note = "Integrity and human release decision only; not malware-free or safe-to-execute certification."
+        };
+    }
 
     [McpServerTool(Name = "skill_metadata", ReadOnly = true)]
     [Description("Retrieve an approved skill's description, integrity digest and approval state; never executes it.")]
