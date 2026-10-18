@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Packory;
@@ -29,8 +30,11 @@ public static class SkillEndpoints
             if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             ctx.Response.Headers.CacheControl = "no-store";
-            var file = blobs.Existing(SkillKey(name, version));
-            return file is null ? Results.NotFound() : Results.File(file, "application/zip", fileDownloadName: name + "-" + version + ".zip");
+            var bytes = ReadVerifiedPublishedBytes(name, version, blobs, security, settings);
+            // Materialize and authenticate the exact response bytes. Sending a file
+            // path after checking its hash would permit a TOCTOU modification.
+            return bytes is null ? Results.NotFound() : Results.Bytes(bytes,
+                "application/zip", fileDownloadName: name + "-" + version + ".zip");
         });
 
         app.MapGet("/api/skills/{name}/{version}/skill.md", (string name, string version, IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
@@ -40,12 +44,23 @@ public static class SkillEndpoints
             if (settings.SkillSecurityEnforced && !security.IsApproved(name, version)) return Results.NotFound();
             if (!db.Skills(name).Any(x => x.Version == version)) return Results.NotFound();
             ctx.Response.Headers.CacheControl = "no-store";
-            var path = blobs.Existing(SkillKey(name, version));
-            if (path is null) return Results.NotFound();
-            using var archive = ZipFile.OpenRead(path);
-            var entry = archive.Entries.Single(e => e.FullName == "SKILL.md" || e.FullName == name + "/SKILL.md");
-            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-            return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
+            var bytes = ReadVerifiedPublishedBytes(name, version, blobs, security, settings);
+            if (bytes is null) return Results.NotFound();
+            try
+            {
+                using var archive = new ZipArchive(new MemoryStream(bytes, writable: false), ZipArchiveMode.Read);
+                var entries = archive.Entries.Where(e =>
+                    e.FullName == "SKILL.md" || e.FullName == name + "/SKILL.md").ToArray();
+                if (entries.Length != 1 || entries[0].Length > 256 * 1024)
+                    return Results.NotFound();
+                using var reader = new StreamReader(entries[0].Open(), new UTF8Encoding(false, true));
+                return Results.Text(reader.ReadToEnd(), "text/markdown; charset=utf-8");
+            }
+            catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException
+                or IOException or DecoderFallbackException)
+            {
+                return Results.NotFound();
+            }
         });
 
         app.MapPost("/api/skills", async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks,
@@ -100,6 +115,43 @@ public static class SkillEndpoints
     }
 
     public static string SkillKey(string name, string version) => $"skills/{name}/{version}.zip";
+
+    /// <summary>
+    /// Authenticates *the exact bytes* to be served against the immutable,
+    /// digest-bound administrator approval. This is separate from a passing
+    /// scanner verdict: approved means reviewed, not safe to execute.
+    /// Fail closed if a filesystem/S3 materialization changes after approval.
+    /// </summary>
+    public static byte[]? ReadVerifiedPublishedBytes(string name, string version,
+        BlobStore blobs, SkillSecurityStore security, Settings settings)
+    {
+        if (!Names.Skill(name) || !Names.Version(version)) return null;
+        var revision = settings.SkillSecurityEnforced ? security.Get(name, version) : null;
+        if (settings.SkillSecurityEnforced &&
+            (revision is null || revision.State != "APPROVED" ||
+             !ArtifactDigests.ValidSha256(revision.Sha256)))
+            return null;
+        try
+        {
+            var path = blobs.Existing(SkillKey(name, version));
+            if (path is null) return null;
+            var limit = Math.Min(settings.MaxArtifactBytes, 20L * 1024 * 1024);
+            if (new FileInfo(path).Length is <= 0 || new FileInfo(path).Length > limit)
+                return null;
+            var bytes = File.ReadAllBytes(path);
+            if (bytes.LongLength is <= 0 || bytes.LongLength > limit) return null;
+            if (revision is not null &&
+                !CryptographicOperations.FixedTimeEquals(
+                    SHA256.HashData(bytes), Convert.FromHexString(revision.Sha256)))
+                return null;
+            return bytes;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException
+            or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
 
     public sealed record SkillManifest(string Name, string Description);
 
