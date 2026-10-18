@@ -121,6 +121,40 @@ def jsonrpc_payload(response, request_id):
     raise ValueError("MCP returned no JSON-RPC response event")
 
 
+def verify_skill_integrity_over_mcp(rpc_id, *, expected_to_pass):
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "SyntheticCheck", "version": "1.0"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    message = {
+        "jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+        "params": {
+            "_meta": meta, "name": "verify_skill_integrity",
+            "arguments": {"name": NAME, "version": VERSION},
+        },
+    }
+    # Named 2026-07-28 tool calls carry Mcp-Name alongside MCP method and
+    # the ordinary JSON-RPC parameters.
+    code, response = http("POST", "/mcp", json.dumps(message).encode(),
+                          "application/json", mcp_method="tools/call",
+                          mcp_name="verify_skill_integrity")
+    require(code == 200, "MCP verification tool unexpected HTTP status " + str(code))
+    result = jsonrpc_payload(response, rpc_id)
+    require("error" not in result,
+            "MCP verification tool JSON-RPC error code " +
+            str(result.get("error", {}).get("code")))
+    payload = json.dumps(result.get("result", {}))
+    if expected_to_pass:
+        require("digest_verified" in payload,
+                "MCP integrity tool did not confirm the approved archive digest")
+        require("safeToExecute" in payload and "false" in payload,
+                "MCP integrity tool must never declare arbitrary Skill execution safe")
+    else:
+        require("unavailable" in payload and "digest_verified" not in payload,
+                "MCP integrity tool allowed a revoked or missing Skill")
+
+
 def check_mcp():
     request = {
         "jsonrpc": "2.0", "id": 3, "method": "skills/list",
@@ -183,6 +217,7 @@ def check_mcp():
     read_digest = "sha256:" + hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
     require(read_digest == manifest["digest"],
             "MCP resources/read bytes do not match Skill manifest digest")
+    verify_skill_integrity_over_mcp(9, expected_to_pass=True)
 
 
 
@@ -209,6 +244,7 @@ def check_mcp_revocation():
         answer = query(method, ident, {"uri": uri}, uri)
         require("error" in answer and "result" not in answer,
                 "Revoked Skill metadata/bytes available via " + method)
+    verify_skill_integrity_over_mcp(10, expected_to_pass=False)
 
 
 def main():
