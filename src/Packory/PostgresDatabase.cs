@@ -68,6 +68,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_namespaces') IS NOT NULL
                     AND to_regclass('feed_policies') IS NOT NULL
                     AND to_regclass('feed_upstreams') IS NOT NULL
+                    AND to_regclass('nuget_digests') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -167,8 +168,12 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         cmd.ExecuteNonQuery();
     }
 
-    public bool PublishNuget(string name, string version, string description, string actor)
+    public bool PublishNuget(string name, string version, string description, string actor,
+        string? sha512 = null, long? size = null)
     {
+        if (sha512 is null && size is not null || sha512 is not null && size is null)
+            throw new InvalidDataException("NuGet checksum and size must be set together.");
+        if (sha512 is not null) NugetDigest.Validate(sha512, size!.Value);
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = Command(db, """
@@ -178,9 +183,67 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             """, tx, ("name", name), ("version", version),
             ("description", description), ("updated", DateTimeOffset.UtcNow.ToString("O")));
         if (cmd.ExecuteNonQuery() != 1) return false;
+        if (sha512 is not null)
+        {
+            using var checksum = Command(db, """
+                INSERT INTO nuget_digests(name,version,sha512,size,origin)
+                VALUES(@name,@version,@sha512,@size,'hosted')
+                """, tx, ("name", name), ("version", version),
+                ("sha512", sha512), ("size", size!.Value));
+            if (checksum.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("NuGet digest record could not be committed.");
+        }
         Audit(db, tx, "publish", "nuget", name, version, actor);
         tx.Commit();
         return true;
+    }
+
+    public NugetDigest? GetNugetDigest(string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db,
+            "SELECT sha512,size,origin FROM nuget_digests WHERE name=@name AND version=@version",
+            null, ("name", name), ("version", version));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new NugetDigest(reader.GetString(0), reader.GetInt64(1),
+            reader.GetString(2)) : null;
+    }
+
+    public void UpsertNugetMirror(string name, string version, string description,
+        string sha512, long size)
+    {
+        NugetDigest.Validate(sha512, size);
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using (var cmd = Command(db, """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('nuget',@name,@version,@description,'mirror',@updated)
+            ON CONFLICT(kind,name,version) DO UPDATE SET
+                description=excluded.description,updated_at=excluded.updated_at
+            WHERE packages.origin='mirror'
+            """, tx, ("name", name), ("version", version), ("description", description),
+            ("updated", DateTimeOffset.UtcNow.ToString("O"))))
+        {
+            if (cmd.ExecuteNonQuery() != 1)
+                throw new InvalidOperationException("Hosted NuGet metadata cannot be overwritten by a mirror.");
+        }
+        using (var cmd = Command(db, """
+            INSERT INTO nuget_digests(name,version,sha512,size,origin)
+            VALUES(@name,@version,@sha512,@size,'mirror')
+            ON CONFLICT(name,version) DO NOTHING
+            """, tx, ("name", name), ("version", version), ("sha512", sha512),
+            ("size", size)))
+            cmd.ExecuteNonQuery();
+        using (var cmd = Command(db,
+            "SELECT sha512,size,origin FROM nuget_digests WHERE name=@name AND version=@version",
+            tx, ("name", name), ("version", version)))
+        using (var reader = cmd.ExecuteReader())
+        {
+            if (!reader.Read() || reader.GetString(0) != sha512 ||
+                reader.GetInt64(1) != size || reader.GetString(2) != "mirror")
+                throw new InvalidDataException("Existing NuGet mirror digest conflicts with incoming bytes.");
+        }
+        tx.Commit();
     }
 
     public IReadOnlyList<string> Versions(string kind, string name)
