@@ -86,4 +86,80 @@ public sealed class S3ProviderTests
             if (Directory.Exists(second)) Directory.Delete(second, true);
         }
     }
+    [Fact]
+    public async Task RemoteIntegrityAuditDetectsTamperingHiddenByHealthyLocalCache()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");
+        if (string.IsNullOrWhiteSpace(endpoint)) return;
+        const string bucket = "packory-ci-objectstore";
+        var prefix = "audit-" + Guid.NewGuid().ToString("N")[..12];
+        var root = Path.Combine(Path.GetTempPath(), "packory-s3-audit-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cfg = new Settings
+            {
+                DataDirectory = root, BlobProvider = "s3", S3Endpoint = endpoint,
+                S3Bucket = bucket, S3KeyPrefix = prefix, S3Region = "us-east-1",
+                S3AccessKey = "test", S3SecretKey = "test", S3AllowLoopbackHttp = true
+            };
+            cfg.Validate();
+            var db = new Database(cfg);
+            db.Initialize();
+            var security = new SkillSecurityStore(cfg);
+            security.Initialize();
+            using var store = new S3BlobStore(cfg);
+            using var sdk = new AmazonS3Client(new BasicAWSCredentials("test", "test"),
+                new AmazonS3Config
+                {
+                    ServiceURL = endpoint, AuthenticationRegion = "us-east-1", ForcePathStyle = true
+                });
+            await sdk.PutBucketAsync(new PutBucketRequest { BucketName = bucket });
+            var original = Encoding.UTF8.GetBytes("original canonical bytes");
+            var changed = Encoding.UTF8.GetBytes("remote object was changed");
+            const string filename = "remote_integrity-1.0.0-py3-none-any.whl";
+            var file = new PyFileEntry("remote-integrity", "1.0.0", filename,
+                Convert.ToHexStringLower(SHA256.HashData(original)), original.Length);
+            Assert.True(db.PublishPyFile(file, "sample", "integration-writer"));
+            var key = PyPiEndpoints.Key(file.Name, filename);
+            Assert.True(await store.PutAsync(key,
+                new MemoryStream(original, writable: false), 4096, CancellationToken.None));
+            var oldCache = store.Existing(key)!;
+            Assert.Equal(original, await File.ReadAllBytesAsync(oldCache));
+
+            var scanner = new ArtifactIntegrityScanner(db, store, security, cfg);
+            var initial = await scanner.ScanAsync(0, 1, CancellationToken.None);
+            Assert.Equal("digest_match", Assert.Single(initial.Items).State);
+
+            // Emulate storage-side corruption while retaining the earlier local
+            // cache copy. An audit of Existing(key) would falsely pass.
+            using (var payload = new MemoryStream(changed, writable: false))
+                await sdk.PutObjectAsync(new PutObjectRequest
+                {
+                    BucketName = bucket, Key = prefix + "/" + key,
+                    InputStream = payload, AutoCloseStream = false
+                });
+            Assert.Equal(original, await File.ReadAllBytesAsync(oldCache));
+            var corrupted = await scanner.ScanAsync(0, 1, CancellationToken.None);
+            Assert.Equal("digest_mismatch", Assert.Single(corrupted.Items).State);
+
+            var directlyRead = await store.InspectRemoteAsync(key, "sha256", 4096,
+                CancellationToken.None);
+            Assert.True(directlyRead.Exists);
+            Assert.False(directlyRead.ExceedsLimit);
+            Assert.Equal(changed.Length, directlyRead.Size);
+            Assert.Equal(SHA256.HashData(changed), directlyRead.Digest);
+
+            var exceeded = await store.InspectRemoteAsync(key, "sha256", 1,
+                CancellationToken.None);
+            Assert.True(exceeded.ExceedsLimit);
+            var missing = await store.InspectRemoteAsync("pypi/not-present/0.0.1.whl",
+                "sha256", 4096, CancellationToken.None);
+            Assert.False(missing.Exists);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
 }
