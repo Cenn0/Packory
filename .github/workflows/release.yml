@@ -1,0 +1,182 @@
+name: Controlled Packory release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New semantic version tag, e.g. v0.3.0-rc.1'
+        required: true
+        type: string
+      channel:
+        description: 'Candidate = private draft; public requires independent signed acceptance'
+        required: true
+        default: candidate
+        type: choice
+        options:
+          - candidate
+          - public
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packory-release
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'Cenn0/Packory'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Configure required reviewers here for public promotion. This alone is NOT
+    # the sign-off: the signed eight-gate evidence below is mandatory as well.
+    environment: release-approval
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      ACCEPTED_SHA: ${{ vars.PACKORY_PUBLIC_RELEASE_SHA }}
+      ACCEPTANCE_REF: ${{ vars.PACKORY_RELEASE_ACCEPTANCE_REF }}
+      REVIEWER_KEY_ID: ${{ vars.PACKORY_RELEASE_REVIEWER_KEY_ID }}
+      EVIDENCE_B64: ${{ secrets.PACKORY_RELEASE_EVIDENCE_ZIP_B64 }}
+      TRUST_KEY_B64: ${{ secrets.PACKORY_RELEASE_REVIEWER_KEY_B64 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate source identity, semver and intended release channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          git fetch --no-tags origin main
+          test "$GITHUB_SHA" = "$(git rev-parse FETCH_HEAD)"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]] || {
+            echo 'Use a valid vMAJOR.MINOR.PATCH[-alpha/beta/rc.N] tag.' >&2; exit 1;
+          }
+          [[ "$RELEASE_CHANNEL" == candidate || "$RELEASE_CHANNEL" == public ]]
+          tag="$RELEASE_TAG"
+          [[ "$RELEASE_CHANNEL" != candidate ]] || tag="candidate-$RELEASE_TAG"
+          if git ls-remote --tags --exit-code origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo 'Refusing to recreate an existing tag.' >&2; exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo 'Release already exists.' >&2; exit 1
+          fi
+      - name: Require independent signed acceptance before any public distribution
+        if: inputs.channel == 'public'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ACCEPTED_SHA"
+          test "$ACCEPTED_SHA" = "$GITHUB_SHA"
+          test -n "$ACCEPTANCE_REF"
+          test -n "$REVIEWER_KEY_ID"
+          test -n "$EVIDENCE_B64"
+          test -n "$TRUST_KEY_B64"
+          python3 - <<'PY'
+          import base64, io, os, pathlib, re, stat, zipfile
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'packory-private-evidence'
+          root.mkdir(mode=0o700)
+          compressed = base64.b64decode(os.environ['EVIDENCE_B64'], validate=True)
+          if len(compressed) > 6 * 1024 * 1024: raise SystemExit('Oversized evidence archive')
+          with zipfile.ZipFile(io.BytesIO(compressed)) as archive:
+              names = set()
+              for member in archive.infolist():
+                  name = member.filename
+                  if (member.is_dir() or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}', name)
+                      or '..' in name or name in names or member.file_size > 2 * 1024 * 1024
+                      or stat.S_ISLNK(member.external_attr >> 16)):
+                      raise SystemExit('Unsafe evidence ZIP entry')
+                  names.add(name)
+                  (root / name).write_bytes(archive.read(member))
+          if not {'release-manifest.json', 'release-manifest.sig'} <= names:
+              raise SystemExit('Evidence manifest and signature are mandatory')
+          (root / 'reviewer-public-key.pem').write_bytes(
+              base64.b64decode(os.environ['TRUST_KEY_B64'], validate=True))
+          PY
+          python3 scripts/verify_release_evidence.py \
+            --evidence-dir "$RUNNER_TEMP/packory-private-evidence" \
+            --public-key "$RUNNER_TEMP/packory-private-evidence/reviewer-public-key.pem" \
+            --key-id "$REVIEWER_KEY_ID" --expected-sha "$GITHUB_SHA"
+          echo 'Signed private acceptance validated; evidence is not attached to public releases.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Run release quality and privacy gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_public_privacy.py
+          python3 -m unittest discover -s tests -p test_release_evidence.py -v
+          python3 -m unittest discover -s tests -p test_public_privacy.py -v
+          dotnet restore Packory.slnx
+          dotnet build Packory.slnx -c Release --no-restore -warnaserror
+          dotnet test Packory.slnx -c Release --no-build
+          bash scripts/smoke-hosted.sh
+          bash scripts/smoke-feed-nuget.sh
+          bash scripts/smoke-ecosystems.sh
+          bash scripts/smoke-oci-docker.sh
+          docker compose config --quiet
+      - name: Compile distribution and image from the exact verified commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p release-assets "$RUNNER_TEMP/packory-publish"
+          dotnet publish src/Packory/Packory.csproj -c Release -r linux-x64 \
+            --self-contained false -p:Version="$version" -o "$RUNNER_TEMP/packory-publish"
+          cp LICENSE "$RUNNER_TEMP/packory-publish/LICENSE"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/packory-publish/RELEASE-SHA.txt"
+          archive="packory-$version-linux-x64.tar.gz"
+          tar -czf "release-assets/$archive" -C "$RUNNER_TEMP/packory-publish" .
+          tar -tzf "release-assets/$archive" >/dev/null
+          (cd release-assets && sha256sum "$archive" > SHA256SUMS.txt)
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --tag packory:release .
+          docker run --rm --entrypoint dotnet packory:release --list-runtimes
+          sha256sum -c release-assets/SHA256SUMS.txt
+      - name: Publish versioned image only after public acceptance
+        if: inputs.channel == 'public'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:$version"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag packory:release "$image"
+          docker push "$image"
+          echo "Published image $image after evidence and build verification." >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish candidate draft or accepted public GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ "$RELEASE_CHANNEL" == candidate ]]; then
+            gh release create "candidate-$RELEASE_TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --draft --prerelease --latest=false \
+              --title "Packory $version candidate (NOT production-approved)" \
+              --notes 'Engineering build candidate only. No production approval, publicly distributed container or operational certification. External PG/S3, restore, security, load and supply-chain release gates remain separately required.'
+          else
+            flags=()
+            if [[ "$version" == *-* ]]; then flags+=(--prerelease --latest=false); fi
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${flags[@]}" \
+              --title "Packory $version" --generate-notes \
+              --notes "Approved acceptance record: $ACCEPTANCE_REF. See docs/release-gates.md for deployment-specific limitations. Framework-dependent .NET 10 Linux x64 archive and versioned GHCR image."
+          fi
+      - name: Verify the created release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          [[ "$RELEASE_CHANNEL" != candidate ]] || tag="candidate-$RELEASE_TAG"
+          mkdir -p "$RUNNER_TEMP/packory-verify-release"
+          gh release download "$tag" -D "$RUNNER_TEMP/packory-verify-release" --pattern '*.tar.gz' --pattern 'SHA256SUMS.txt'
+          (cd "$RUNNER_TEMP/packory-verify-release" && sha256sum -c SHA256SUMS.txt)
