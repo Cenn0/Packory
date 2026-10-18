@@ -12,6 +12,11 @@ namespace Packory;
 /// </summary>
 public sealed class ValidationEvidenceStore(Settings settings)
 {
+    // Capture the verifier trust anchor at service construction; rotating a
+    // file on disk cannot silently rebind the authenticated signer mid-process.
+    private readonly byte[] _pinnedVerifierKey = settings.ValidationEnabled
+        ? ReadBounded(settings.ValidationVerifierPublicKeyPath!, 8192) : [];
+
     private static readonly Regex AliasPattern = new(@"\A[a-z][a-z0-9-]{0,63}\z", RegexOptions.CultureInvariant);
     private static readonly Regex IdentifierPattern = new(@"\A[a-z][a-z0-9.-]{0,63}\z", RegexOptions.CultureInvariant);
     private static readonly Regex KeyPattern = new(@"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant);
@@ -57,12 +62,21 @@ public sealed class ValidationEvidenceStore(Settings settings)
             var contentPath = Path.Combine(root, alias + ".json");
             var sigPath = Path.Combine(root, alias + ".sig");
             if (!RegularFile(contentPath, 32768) || !RegularFile(sigPath, 1024)) return null;
-            var bytes = File.ReadAllBytes(contentPath);
-            var signatureText = File.ReadAllText(sigPath, new UTF8Encoding(false, true)).Trim();
-            if (bytes.Length > 32768 || signatureText.Length > 1024) return null;
+            var bytes = ReadBounded(contentPath, 32768);
+            var signatureText = new UTF8Encoding(false, true).GetString(ReadBounded(sigPath, 1024)).Trim();
+            // Detached signatures alone do not resist validly signed but stale
+            // alias swaps. Operator approval must pin the EXACT signed bytes.
+            var approval = settings.ValidationApprovedExports.FirstOrDefault(
+                x => x.StartsWith(alias + "=", StringComparison.Ordinal));
+            var expected = approval is null ? "" : approval[(alias.Length + 1)..];
+            var actual = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (expected.Length != actual.Length ||
+                !CryptographicOperations.FixedTimeEquals(
+                    Encoding.ASCII.GetBytes(expected), Encoding.ASCII.GetBytes(actual)))
+                return null;
             var signature = Convert.FromBase64String(signatureText);
             using var rsa = RSA.Create();
-            rsa.ImportFromPem(File.ReadAllText(settings.ValidationVerifierPublicKeyPath!));
+            rsa.ImportFromPem(new UTF8Encoding(false, true).GetString(_pinnedVerifierKey));
             if (!rsa.VerifyData(bytes, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))
                 return null;
             // Reject invalid UTF-8 rather than replacing malicious or ambiguous bytes.
@@ -120,6 +134,23 @@ public sealed class ValidationEvidenceStore(Settings settings)
             // Invalid or absent evidence is indistinguishable from unavailable evidence.
             return null;
         }
+    }
+
+    // Bound reads themselves: file length checks alone permit a race where a
+    // file grows between stat() and read(). This never buffers past the cap.
+    private static byte[] ReadBounded(string path, int maxBytes)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 4096, FileOptions.SequentialScan);
+        using var buffer = new MemoryStream(maxBytes);
+        var chunk = new byte[4096];
+        int count;
+        while ((count = stream.Read(chunk, 0, Math.Min(chunk.Length, maxBytes + 1 - (int)buffer.Length))) > 0)
+        {
+            buffer.Write(chunk, 0, count);
+            if (buffer.Length > maxBytes) throw new IOException("Evidence file exceeds bounded limit.");
+        }
+        return buffer.ToArray();
     }
 
     private static bool RegularFile(string path, long maxBytes)

@@ -67,6 +67,8 @@ public sealed class ValidationEvidenceTests
                 HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
             File.WriteAllBytes(Path.Combine(DirectoryPath, "approved-run.json"), data);
             File.WriteAllText(Path.Combine(DirectoryPath, "approved-run.sig"), Convert.ToBase64String(signature));
+            Settings.ValidationApprovedExports = ["approved-run=sha256:" +
+                Convert.ToHexStringLower(SHA256.HashData(data))];
         }
 
         public void Publish(JsonObject document) => Publish(document.ToJsonString());
@@ -83,8 +85,8 @@ public sealed class ValidationEvidenceTests
     public void ValidSignedOfflineExport_IsReadableAndBounded()
     {
         using var fixture = new Fixture();
-        fixture.Settings.Validate();
         fixture.Publish(fixture.Document());
+        fixture.Settings.Validate();
         var result = fixture.Store().Get("approved-run");
         Assert.NotNull(result);
         Assert.Equal("passed", result.Status);
@@ -219,4 +221,62 @@ public sealed class ValidationEvidenceTests
         fixture.Settings.ValidationApprovedAliases = ["../traversal"];
         Assert.Throws<InvalidOperationException>(fixture.Settings.Validate);
     }
+    [Fact]
+    public void SignedEarlierExportCannotReplaceApprovedImmutableDigest()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.Document();
+        fixture.Publish(first);
+        var originalApproval = fixture.Settings.ValidationApprovedExports.ToArray();
+        Assert.NotNull(fixture.Store().Get("approved-run"));
+
+        var second = fixture.Document();
+        second["status"] = "failed";
+        fixture.Publish(second);
+        fixture.Settings.ValidationApprovedExports = originalApproval;
+        // Even a correctly signed, unexpired, same-audience replacement is
+        // rejected if the operator did not approve its exact content digest.
+        Assert.Null(fixture.Store().Get("approved-run"));
+        Assert.Empty(fixture.Store().List());
+    }
+
+    [Fact]
+    public void SignedExportRejectsMissingDigestApproval()
+    {
+        using var fixture = new Fixture();
+        fixture.Publish(fixture.Document());
+        fixture.Settings.ValidationApprovedExports = [];
+        Assert.Null(fixture.Store().Get("approved-run"));
+        Assert.Throws<InvalidOperationException>(fixture.Settings.Validate);
+    }
+
+    [Fact]
+    public void TrustAnchorCannotBeSwappedAfterStoreConstruction()
+    {
+        using var fixture = new Fixture();
+        fixture.Publish(fixture.Document());
+        var store = fixture.Store();
+        Assert.NotNull(store.Get("approved-run"));
+
+        using var attacker = RSA.Create(2048);
+        File.WriteAllText(fixture.Settings.ValidationVerifierPublicKeyPath!,
+            attacker.ExportSubjectPublicKeyInfoPem());
+        Assert.NotNull(store.Get("approved-run")); // Original pinned public key remains active.
+
+        var data = File.ReadAllBytes(Path.Combine(fixture.DirectoryPath, "approved-run.json"));
+        var forged = attacker.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        File.WriteAllText(Path.Combine(fixture.DirectoryPath, "approved-run.sig"),
+            Convert.ToBase64String(forged));
+        Assert.Null(store.Get("approved-run")); // Reloading the replacement key would have accepted it.
+    }
+
+    [Fact]
+    public void ValidationMcpRequestsHaveBoundedNonBlockingQuota()
+    {
+        using var quota = new ValidationMcpQuota();
+        for (var i = 0; i < 60; i++)
+            Assert.True(quota.TryAcquire());
+        Assert.False(quota.TryAcquire());
+    }
+
 }
