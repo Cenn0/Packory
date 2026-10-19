@@ -202,7 +202,7 @@ public static class Access
         var sep = grant.IndexOf(':');
         if (sep <= 0 || sep == grant.Length - 1) return false;
         var kind = grant[..sep];
-        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return false;
+        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw")) return false;
         var value = grant[(sep + 1)..];
         var wildcard = value.EndsWith('*');
         if (wildcard) value = value[..^1];
