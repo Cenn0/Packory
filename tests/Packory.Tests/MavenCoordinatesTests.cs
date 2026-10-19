@@ -27,6 +27,7 @@ public sealed class MavenCoordinatesTests
     [InlineData("com//tool/1.0/tool-1.0.jar")]
     [InlineData("com/acme/tool/1.0/other-1.0.jar")]
     [InlineData("com/acme/tool/1.0/tool-1.0.jar%2f..")]
+    [InlineData("com.acme/tool/1.0/tool-1.0.jar")]
     [InlineData("com/acme/tool/1.0/tool-1.0.jar/")]
     [InlineData("com/acme/tool/1.0/tool-1.0-.jar")]
     [InlineData("com/acme/tool/1.0/tool-1.0.jar\n")]
