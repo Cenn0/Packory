@@ -54,6 +54,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Agent skills (experimental)** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download; revocation and rescan |
 | **Packory MCP (experimental)** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension methods; no untrusted skill execution |
+| **MCP server metadata (experimental)** | Versioned, operator-reviewed and revocable remote server.json descriptors; discovery only, without connecting to or executing a remote MCP server |
 | **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
@@ -76,20 +77,29 @@ Publish operations require an appropriate token. [API examples](docs/api.md) exp
 ## Architecture overview
 
 ```mermaid
-flowchart LR
-  C[NuGet, npm, Cargo, PyPI, OCI clients] --> A[Packory ASP.NET Core]
-  K[Skill ZIP importer] --> A
-  O[Optional OIDC issuer] -.-> A
-  A --> N[Native protocol adapters]
-  A --> M[Catalog and management API]
-  N --> D[(SQLite or PostgreSQL metadata)]
-  M --> D
-  N --> B[(Filesystem or S3 objects)]
-  M --> B
-  N -.->|Configured HTTPS origins| U[nuget.org and npmjs.org]
+flowchart TB
+  C["Native clients: NuGet / npm / Cargo / PyPI / OCI"] --> A["Native protocol endpoints"]
+  B["Browser and REST clients"] --> M["Catalog and management API"]
+  X["MCP clients"] --> R["Read-only Streamable HTTP /mcp"]
+  K["Staged Agent Skill ZIPs"] --> V["Skill validation and reviewer approval"]
+  V -.->|"Optional offline scan"| W["Pinned SkillSpector sidecar"]
+  I["Optional OIDC issuer"] -.-> P["Authentication and scoped policy"]
+  A --> P
+  M --> P
+  R --> P
+  V --> P
+  P --> D[("SQLite or PostgreSQL catalog / journal")]
+  P --> S[("Filesystem or S3 artifact storage")]
+  A -.->|"Configured upstream HTTPS"| U["nuget.org / npm upstream"]
 ```
 
 NuGet and npm keep their **own native protocols** while sharing the catalog and storage. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
+
+### MCP, skills and verification boundaries
+
+The embedded [MCP server](docs/mcp-security-integration.md) exposes **read-only** catalog tools, prompts, skill resources and the Skills Extension; approved skill files can be browsed without executing their instructions. Agent Skill ZIPs pass bounded archive validation and, when enforcement is enabled, **staging, offline static inspection and an explicit approval decision** before public discovery. A scanner result is not proof of safety or publisher identity. The [remote MCP server descriptor catalog](docs/mcp-registry-catalog.md) publishes inert, version-pinned metadata; it neither verifies ownership nor proxies or launches the remote server.
+
+[Optional signed validation-result tools](docs/mcp-validation-results.md) require an operator-managed OIDC identity and a separate validation-read scope. They report sanitized, signed *claims* from an independently operated verifier; Packory does **not** re-run those external checks. Private NuGet feed routing is an [experimental isolated hosted slice](docs/feeds.md), not a general multi-registry feed control plane. For production release blockers, use the [dated delivery checkpoint](docs/roadmap-status-2026-10-18.md) and [release gates](docs/release-gates.md).
 
 ## Limitations and security
 
@@ -121,7 +131,3 @@ bash scripts/smoke-ecosystems.sh
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
 
-
-### MCP server metadata catalog (experimental)
-
-Packory can stage, review, publish, revoke and discover immutable remote MCP server.json descriptors without connecting to or executing the referenced servers. Only reviewed metadata is discoverable; **publisher ownership and runtime safety are not verified**. See [MCP Registry Catalog](docs/mcp-registry-catalog.md) for scoped schema support, REST and MCP tools, and security limits.
