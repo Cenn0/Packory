@@ -4,9 +4,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
-HELM_VERSION="v3.21.4"
-# SHA-256 per official helm/helm v3.21.4 release checksum (linux-amd64).
-HELM_SHA256="9173d05edf9592c6be1d0412ffafd935448dfc7a63c2bc732b8c67e55503e8"
+HELM_VERSION="v3.22.0"
+# SHA-256 per official helm/helm v3.22.0 release checksum (linux-amd64).
+HELM_SHA256="1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb"
 BASE="http://127.0.0.1:18083"
 REGISTRY="127.0.0.1:18083"
 TOKEN="$(openssl rand -hex 32)"
