@@ -6,8 +6,8 @@ namespace Packory.Tests;
 public sealed class MavenCoordinatesTests
 {
     [Theory]
-    [InlineData("org/example/library/1.2.3/library-1.2.3.jar", "org.example.library", "library", "1.2.3", null, "jar")]
-    [InlineData("org/example/library/1.2.3/library-1.2.3-sources.jar", "org.example.library", "library", "1.2.3", "sources", "jar")]
+    [InlineData("org/example/library/1.2.3/library-1.2.3.jar", "org.example", "library", "1.2.3", null, "jar")]
+    [InlineData("org/example/library/1.2.3/library-1.2.3-sources.jar", "org.example", "library", "1.2.3", "sources", "jar")]
     [InlineData("com/acme/tool/2.0/tool-2.0.pom", "com.acme", "tool", "2.0", null, "pom")]
     public void CanonicalPathsRoundTrip(string path, string group, string name,
         string version, string? classifier, string extension)
