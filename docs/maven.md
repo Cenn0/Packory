@@ -18,7 +18,7 @@ The layout validator rejects traversal, encoded separators, noncanonical group s
 
 ## Publishing
 
-Upload each file through an authenticated HTTP PUT to its canonical repository path. An existing path cannot be overwritten. POM uploads must be bounded XML containing explicit matching groupId, artifactId and version fields; DTD/external entity resolution is prohibited. Parent-inherited project GAV and advanced deployment metadata are not supported in this slice.
+Upload each file through an authenticated HTTP PUT to its canonical repository path. The request must include a positive Content-Length; unsupported unknown-length uploads receive HTTP 411. An existing path cannot be overwritten. POM uploads must be bounded XML containing explicit matching groupId, artifactId and version fields; DTD/external entity resolution is prohibited. Parent-inherited project GAV and advanced deployment metadata are not supported in this slice.
 
 ~~~bash
 curl --fail-with-body --request PUT \
