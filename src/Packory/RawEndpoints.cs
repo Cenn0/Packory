@@ -88,7 +88,7 @@ public static class RawEndpoints
         app.MapGet("/raw/{name}/{version}/metadata", (string name, string version,
             Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
-            if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
+            if (Access.RequireGlobalArtifactRead(ctx, cfg) is { } denied) return denied;
             if (!Valid(name, version)) return Results.BadRequest();
             var artifact = db.GetRawArtifact(name, version);
             if (artifact is null) return Results.NotFound();
@@ -104,7 +104,7 @@ public static class RawEndpoints
             string name, string version, Settings cfg, IPackageDatabase db,
             BlobStore blobs, HttpContext ctx) =>
         {
-            if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
+            if (Access.RequireGlobalArtifactRead(ctx, cfg) is { } denied) return denied;
             if (!Valid(name, version)) return Results.BadRequest();
             var artifact = db.GetRawArtifact(name, version);
             if (artifact is null) return Results.NotFound();
