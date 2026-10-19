@@ -7,6 +7,10 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    MavenAssetEntry? MavenAsset(string relativePath);
+    IReadOnlyList<MavenAssetEntry> MavenAssets();
+    IReadOnlyList<string> MavenVersions(string groupId, string artifactId);
+    bool PublishMaven(MavenAssetEntry asset, string actor);
     RawArtifactEntry? GetRawArtifact(string name, string version);
     IReadOnlyList<RawArtifactEntry> RawArtifacts();
     bool PublishRaw(string name, string version, string mediaType,
