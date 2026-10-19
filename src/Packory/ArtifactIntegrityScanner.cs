@@ -72,6 +72,14 @@ public sealed class ArtifactIntegrityScanner(
             refs.Add(new Reference(artifact.Kind, artifact.Name, artifact.Version,
                 null, artifact.Origin, key));
         }
+        foreach (var maven in database.MavenAssets())
+        {
+            var valid = MavenEndpoints.ValidRecord(maven);
+            refs.Add(new Reference("maven", maven.GroupId + ":" + maven.ArtifactId,
+                maven.Version, maven.Path, "hosted",
+                valid ? MavenEndpoints.Key(maven.Path) : null,
+                valid ? maven.Sha256 : null, valid ? maven.Size : null));
+        }
         foreach (var privateRevision in database.FeedNugetRevisions())
         {
             var valid = FeedDefinition.ValidId(privateRevision.FeedId) &&
