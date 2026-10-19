@@ -27,6 +27,7 @@ for command in dotnet mvn java python3 openssl curl cmp; do
   command -v "$command" >/dev/null || { echo "Missing required $command" >&2; exit 1; }
 done
 test -f "$ROOT/src/Packory/bin/Release/net10.0/Packory.dll"
+mvn -version | sed -n '1p'
 
 # Resolve the pinned Maven consumer plugin before enabling a synthetic isolated mirror.
 # The plugin itself is downloaded from the normal public Maven distribution origin.
