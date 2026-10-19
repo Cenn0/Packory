@@ -186,6 +186,30 @@ public sealed class MavenHostedTests
     }
 
     [Fact]
+    public async Task ScopedManagedCredentialCannotReadGlobalMavenArtifacts()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var path = "/maven/org/sample/demo/1.0/demo-1.0.pom";
+        using var publish = await client.SendAsync(Auth(HttpMethod.Put, path, Admin,
+            Pom("org.sample", "demo", "1.0")));
+        Assert.Equal(HttpStatusCode.Created, publish.StatusCode);
+
+        var token = new string('d', 64);
+        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        host.Services.GetRequiredService<IPackageDatabase>().CreateManagedToken(
+            new ManagedTokenRecord(Guid.NewGuid().ToString("N"), hash, "read",
+                "feed:private-nuget:read", DateTimeOffset.UtcNow.AddHours(1).ToString("O")));
+        using var denied = await client.SendAsync(Auth(HttpMethod.Get, path, token));
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var deniedMetadata = await client.SendAsync(Auth(HttpMethod.Get,
+            "/maven/org/sample/demo/maven-metadata.xml", token));
+        Assert.Equal(HttpStatusCode.Forbidden, deniedMetadata.StatusCode);
+        using var permitted = await client.SendAsync(Auth(HttpMethod.Get, path, Reader));
+        Assert.Equal(HttpStatusCode.OK, permitted.StatusCode);
+    }
+
+    [Fact]
     public async Task MavenPublicationJournalAndRecoveryDistinguishCommittedAndMissingBytes()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-maven-recovery-" +
