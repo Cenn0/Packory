@@ -125,6 +125,95 @@ public sealed class Database(Settings settings) : IPackageDatabase
         SchemaVersionGuard.Upgrade(db);
     }
 
+    public MavenAssetEntry? GetMavenAsset(string path)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT path,group_id,artifact_id,version,sha256,size,media_type,created_at
+            FROM maven_assets WHERE path=$path
+            """;
+        cmd.Parameters.AddWithValue("$path", path);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new MavenAssetEntry(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5), reader.GetString(6),
+            reader.GetString(7)) : null;
+    }
+
+    public IReadOnlyList<MavenAssetEntry> MavenAssets()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT path,group_id,artifact_id,version,sha256,size,media_type,created_at
+            FROM maven_assets ORDER BY path
+            """;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<MavenAssetEntry>();
+        while (reader.Read())
+            rows.Add(new MavenAssetEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                reader.GetInt64(5), reader.GetString(6), reader.GetString(7)));
+        return rows;
+    }
+
+    public IReadOnlyList<string> MavenVersions(string groupId, string artifactId)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT version FROM maven_assets
+            WHERE group_id=$group AND artifact_id=$artifact
+                AND media_type='application/xml'
+            ORDER BY version
+            """;
+        cmd.Parameters.AddWithValue("$group", groupId);
+        cmd.Parameters.AddWithValue("$artifact", artifactId);
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public bool PublishMavenAsset(MavenAssetEntry asset, string actor)
+    {
+        if (!MavenEndpoints.ValidRecord(asset))
+            throw new ArgumentException("Invalid Maven asset metadata.", nameof(asset));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var put = db.CreateCommand();
+        put.Transaction = tx;
+        put.CommandText = """
+            INSERT OR IGNORE INTO maven_assets
+                (path,group_id,artifact_id,version,sha256,size,media_type,created_at)
+            VALUES($path,$group,$artifact,$version,$sha,$size,$mime,$at)
+            """;
+        put.Parameters.AddWithValue("$path", asset.Path);
+        put.Parameters.AddWithValue("$group", asset.GroupId);
+        put.Parameters.AddWithValue("$artifact", asset.ArtifactId);
+        put.Parameters.AddWithValue("$version", asset.Version);
+        put.Parameters.AddWithValue("$sha", asset.Sha256);
+        put.Parameters.AddWithValue("$size", asset.Size);
+        put.Parameters.AddWithValue("$mime", asset.MediaType);
+        put.Parameters.AddWithValue("$at", asset.CreatedAt);
+        if (put.ExecuteNonQuery() != 1) return false;
+        using var catalog = db.CreateCommand();
+        catalog.Transaction = tx;
+        catalog.CommandText = """
+            INSERT OR IGNORE INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('maven',$name,$version,'Hosted Maven release','hosted',$at)
+            """;
+        catalog.Parameters.AddWithValue("$name", asset.GroupId + ":" + asset.ArtifactId);
+        catalog.Parameters.AddWithValue("$version", asset.Version);
+        catalog.Parameters.AddWithValue("$at", asset.CreatedAt);
+        catalog.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "maven",
+            asset.GroupId + ":" + asset.ArtifactId, asset.Version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public RawArtifactEntry? GetRawArtifact(string name, string version)
     {
         using var db = Open();
