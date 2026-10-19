@@ -357,8 +357,8 @@ app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 });
 app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, IPackageDatabase db, SkillSecurityStore security, HttpContext ctx) =>
 {
-    if (Access.Require(ctx, cfg) is { } denied) return denied;
-    if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci")) return Results.BadRequest(new { error = "Unknown package kind" });
+    if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
+    if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw" or "maven")) return Results.BadRequest(new { error = "Unknown package kind" });
     return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50)
         .Where(x => x.Kind != "skill" || !cfg.SkillSecurityEnforced ||
                     security.IsApproved(x.Name, x.Version)).ToList() });
@@ -480,6 +480,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
 FeedEndpoints.Map(app);
 FeedNugetEndpoints.Map(app);
 RawEndpoints.Map(app);
+MavenEndpoints.Map(app);
 RegistryCapabilities.Map(app);
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);

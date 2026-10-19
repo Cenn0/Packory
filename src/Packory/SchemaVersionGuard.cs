@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 5;
+    public const int Current = 6;
 
     private static int RequireKnown(object? value)
     {
@@ -91,6 +91,20 @@ public static class SchemaVersionGuard
             media_type TEXT NOT NULL, created_at TEXT NOT NULL,
             PRIMARY KEY(name,version)
         );
+        """;
+
+    // V6: immutable Maven release assets. The transport remains globally scoped;
+    // only separately accepted hosted/proxy feeds may claim feed-local isolation.
+    private const string MavenAssetSchema = """
+        CREATE TABLE IF NOT EXISTS maven_assets (
+            path TEXT NOT NULL PRIMARY KEY,
+            group_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
+            version TEXT NOT NULL, sha256 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size > 0),
+            media_type TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS maven_assets_coordinates
+            ON maven_assets(group_id,artifact_id,version);
         """;
 
     private static readonly (string Id, string Kind, string Name)[] Defaults =
@@ -182,6 +196,13 @@ public static class SchemaVersionGuard
             rawSchema.CommandText = RawSchema;
             rawSchema.ExecuteNonQuery();
         }
+        if (version < 6)
+        {
+            using var mavenSchema = connection.CreateCommand();
+            mavenSchema.Transaction = tx;
+            mavenSchema.CommandText = MavenAssetSchema;
+            mavenSchema.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -261,6 +282,11 @@ public static class SchemaVersionGuard
         {
             using var rawSchema = new NpgsqlCommand(RawSchema, connection, tx);
             rawSchema.ExecuteNonQuery();
+        }
+        if (version < 6)
+        {
+            using var mavenSchema = new NpgsqlCommand(MavenAssetSchema, connection, tx);
+            mavenSchema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",

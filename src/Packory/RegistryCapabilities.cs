@@ -23,6 +23,8 @@ public static class RegistryCapabilities
             "Hosted only; no PyPI proxy or complete Twine/pip matrix"),
         new("oci", "OCI Distribution v2", true, false, true, false, "experimental",
             "Docker smoke; Helm native compatibility independently gated; Bearer challenge not implemented"),
+        new("maven", "Maven 2 repository layout", true, false, false, false, "experimental",
+            "Native Maven consumption of hosted release files only; no native deploy, SNAPSHOT or proxy"),
         new("raw", "Packory generic byte API", true, false, false, false, "experimental",
             "Global versioned immutable assets; not a native package protocol or isolated feed"),
         new("skill", "Versioned Agent Skill ZIP import", true, false, false, false, "experimental",

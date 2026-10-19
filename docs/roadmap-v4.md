@@ -21,9 +21,9 @@ Packory should distribute packages through existing native package managers. A R
 | ID | Priority | Scope | Acceptance for the milestone | State at this plan |
 | --- | --- | --- | --- | --- |
 | E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Partial**: private NuGet only |
-| E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90**, experimental; final review/CI required |
-| E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90** adds smoke test; passing CI required |
-| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Not implemented** |
+| E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90 merged**, experimental; no production/provider qualification |
+| E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90 merged**, pinned CLI smoke passed; no universal Helm/Kubernetes conformance |
+| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** path parser merged in PR #92; global immutable release files, Maven GET/checksums, V6 metadata and native Maven consumer smoke proposed in follow-up PR; native deploy, private feeds, SNAPSHOT and proxy remain open |
 | E3 | P1 | Go Modules GOPROXY, module escaping, immutable .info/.mod/.zip and canonical versions; validated private ingest + public allowlisted mirror | Native go mod download/build with private and mirrored modules, checksum DB rules and retry/case tests | **Not implemented** |
 | E4 | P1 | RubyGems publish/read-through and Bundler Compact Index | gem push/install and bundle install with transitive deps, negative index/redirect tests | **Not implemented** |
 | E5 | P1 | Composer 2 metadata API and immutable distribution archives; hosted ingest and proxy | composer install/update from hosted and mirrored packages without remote credential exfiltration | **Not implemented** |
@@ -75,4 +75,4 @@ For each adapter, collect versioned evidence for:
 
 ## Current checkpoint: PR #90
 
-[PR #90](https://github.com/Cenn0/Packory/pull/90) introduces first E1 code, tests and conservative capability reporting on a feature branch. Its contents are not considered merged until GitHub confirms the merge; workflows must be green on the exact head. No E2–E9 ecosystem is delivered by this PR.
+[PR #90](https://github.com/Cenn0/Packory/pull/90) is merged after green CI; E1 Raw and bounded Helm OCI are experimental. [PR #92](https://github.com/Cenn0/Packory/pull/92) merged the Maven path parser and safety tests. E2 Maven release transport is developed in a separate follow-up PR; the native publish, proxy, SNAPSHOT and feed-isolation requirements remain open.

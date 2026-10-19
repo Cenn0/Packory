@@ -10,7 +10,7 @@ A **single modular ASP.NET Core 10 application** houses protocol adapters, share
 
 ```mermaid
 flowchart TB
-  C[NuGet, npm, Cargo, PyPI, OCI clients] --> A[Native registry adapters]
+  C[NuGet, npm, Cargo, PyPI, OCI, Maven clients] --> A[Native registry adapters]
   W[Dashboard and management clients] --> M[Management API and skill import]
   A --> P[Shared access and policy]
   M --> P
@@ -58,6 +58,10 @@ PostgreSQL and S3 are selectable providers. A PostgreSQL **single-writer advisor
 
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
 
+
+## Experimental global Maven adapter (V4 E2 partial)
+
+Maven release asset paths, POM identity validation and file-level SHA-256 ledger use V6 schema, shared blob providers and recovery intents. The Maven-compatible GET endpoint supports narrowly scoped native artifact consumption, not standard Maven deploy, private feeds or upstream proxy. See [Maven](maven.md).
 
 ## Experimental global Raw adapter (V4)
 

@@ -8,6 +8,10 @@ public interface IPackageDatabase
 {
     void Initialize();
     RawArtifactEntry? GetRawArtifact(string name, string version);
+    MavenAssetEntry? GetMavenAsset(string path);
+    IReadOnlyList<MavenAssetEntry> MavenAssets();
+    IReadOnlyList<string> MavenVersions(string groupId, string artifactId);
+    bool PublishMavenAsset(MavenAssetEntry asset, string actor);
     IReadOnlyList<RawArtifactEntry> RawArtifacts();
     bool PublishRaw(string name, string version, string mediaType,
         string sha256, long size, string actor);

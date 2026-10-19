@@ -25,6 +25,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             };
             if (key is null || !blobs.Contains(key)) missing++;
         }
+        foreach (var maven in database.MavenAssets())
+            if (!blobs.Contains(MavenEndpoints.Key(maven.Path))) missing++;
         foreach (var revision in database.FeedNugetRevisions())
         {
             if (!FeedDefinition.ValidId(revision.FeedId) || !Names.Nuget(revision.Name) ||
@@ -47,6 +49,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
+        "maven" when pending.Key == MavenEndpoints.Key(pending.Name) =>
+            database.GetMavenAsset(pending.Name) is { } asset && asset.Version == pending.Version,
         "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
         "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
         "pypi" => database.PyFiles(pending.Name).Any(
@@ -133,6 +137,18 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             }
         }
 
+        foreach (var maven in database.MavenAssets())
+        {
+            if (!MavenEndpoints.ValidRecord(maven))
+            {
+                missingHosted++;
+                logger.LogError("Invalid indexed Maven asset.");
+                continue;
+            }
+            var key = MavenEndpoints.Key(maven.Path);
+            known.Add(key);
+            if (!blobs.Contains(key)) missingHosted++;
+        }
         foreach (var revision in database.FeedNugetRevisions())
         {
             if (!FeedDefinition.ValidId(revision.FeedId) ||
@@ -199,7 +215,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                      key.EndsWith(".zip", StringComparison.Ordinal)) ||
                     key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
                     key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal) ||
-                     key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal);
+                     key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal) ||
+                    key.StartsWith("maven/", StringComparison.Ordinal);
                 if (!immutable || known.Contains(key) || pendingKeys.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

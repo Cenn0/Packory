@@ -209,6 +209,42 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(mod.SnapshotError):
                 mod.verify(root)
 
+    def test_raw_and_maven_snapshot_fingerprints_are_schema_versioned(self):
+        base = (*mod.CORE_TABLES, "packory_schema_version",
+                *mod.FEED_TABLES, *mod.DIGEST_TABLES, *mod.ISOLATED_FEED_TABLES)
+        for schema_version, newest, extra in (
+                (5, "raw_artifacts", mod.RAW_TABLES),
+                (6, "maven_assets", (*mod.RAW_TABLES, *mod.MAVEN_TABLES))):
+            with self.subTest(schema_version=schema_version):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / "metadata.dump").write_bytes(b"synthetic")
+                    table_names = (*base, *extra)
+                    fingerprints = {
+                        name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                        for name in table_names
+                    }
+                    manifest = {
+                        "schema": 2, "profile": "postgresql-s3-offline",
+                        "source": {"bucket": "synthetic", "prefix": "synthetic/",
+                                   "database": "synthetic"},
+                        "postgres": {"path": "metadata.dump", "size": 9,
+                                     "sha256": hashlib.sha256(b"synthetic").hexdigest(),
+                                     "table_counts": {name: 0 for name in fingerprints},
+                                     "table_fingerprints": fingerprints,
+                                     "database_schema_version": schema_version},
+                        "objects": [], "delete_markers": []
+                    }
+                    manifest_path = root / "manifest.json"
+                    manifest_path.write_text(json.dumps(manifest))
+                    self.assertEqual(schema_version,
+                                     mod.verify(root)["postgres"]["database_schema_version"])
+                    del fingerprints[newest]
+                    del manifest["postgres"]["table_counts"][newest]
+                    manifest_path.write_text(json.dumps(manifest))
+                    with self.assertRaises(mod.SnapshotError):
+                        mod.verify(root)
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")

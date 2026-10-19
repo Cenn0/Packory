@@ -71,6 +71,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('nuget_digests') IS NOT NULL
                     AND to_regclass('feed_nuget_versions') IS NOT NULL
                     AND to_regclass('raw_artifacts') IS NOT NULL
+                    AND to_regclass('maven_assets') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -154,6 +155,80 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         cmd.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public MavenAssetEntry? GetMavenAsset(string path)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT path,group_id,artifact_id,version,sha256,size,media_type,created_at
+            FROM maven_assets WHERE path=@path
+            """, null, ("path", path));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new MavenAssetEntry(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5), reader.GetString(6),
+            reader.GetString(7)) : null;
+    }
+
+    public IReadOnlyList<MavenAssetEntry> MavenAssets()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT path,group_id,artifact_id,version,sha256,size,media_type,created_at
+            FROM maven_assets ORDER BY path
+            """);
+        using var reader = cmd.ExecuteReader();
+        var result = new List<MavenAssetEntry>();
+        while (reader.Read())
+            result.Add(new MavenAssetEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                reader.GetInt64(5), reader.GetString(6), reader.GetString(7)));
+        return result;
+    }
+
+    public IReadOnlyList<string> MavenVersions(string groupId, string artifactId)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT DISTINCT version FROM maven_assets
+            WHERE group_id=@group AND artifact_id=@artifact
+                AND media_type='application/xml'
+            ORDER BY version
+            """, null, ("group", groupId), ("artifact", artifactId));
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public bool PublishMavenAsset(MavenAssetEntry asset, string actor)
+    {
+        if (!MavenEndpoints.ValidRecord(asset))
+            throw new ArgumentException("Invalid Maven asset metadata.", nameof(asset));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var put = Command(db, """
+            INSERT INTO maven_assets
+                (path,group_id,artifact_id,version,sha256,size,media_type,created_at)
+            VALUES(@path,@group,@artifact,@version,@sha,@size,@mime,@at)
+            ON CONFLICT DO NOTHING
+            """, tx, ("path", asset.Path), ("group", asset.GroupId),
+            ("artifact", asset.ArtifactId), ("version", asset.Version),
+            ("sha", asset.Sha256), ("size", asset.Size),
+            ("mime", asset.MediaType), ("at", asset.CreatedAt));
+        if (put.ExecuteNonQuery() != 1) return false;
+        using var catalog = Command(db, """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('maven',@name,@version,'Hosted Maven release','hosted',@at)
+            ON CONFLICT DO NOTHING
+            """, tx, ("name", asset.GroupId + ":" + asset.ArtifactId),
+            ("version", asset.Version), ("at", asset.CreatedAt));
+        catalog.ExecuteNonQuery();
+        Audit(db, tx, "publish", "maven",
+            asset.GroupId + ":" + asset.ArtifactId, asset.Version, actor);
+        tx.Commit();
+        return true;
     }
 
     public RawArtifactEntry? GetRawArtifact(string name, string version)
