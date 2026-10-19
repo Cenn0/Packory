@@ -58,7 +58,7 @@ printf '%s' "$TOKEN" | "$WORK/helm" registry login "$REGISTRY" \
 "$WORK/helm" create "$WORK/synthetic-chart" >/dev/null
 "$WORK/helm" package "$WORK/synthetic-chart" -d "$WORK" >/dev/null
 "$WORK/helm" push "$WORK/synthetic-chart-0.1.0.tgz" \
-  "oci://$REGISTRY/packory-smoke" --plain-http >"$WORK/push.txt"
+  "oci://$REGISTRY/packory-smoke" --plain-http >"$WORK/push.txt" 2>&1
 grep -q "Pushed:" "$WORK/push.txt"
 
 # Pull with a fresh client cache: bytes must match the chart we uploaded.
