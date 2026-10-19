@@ -14,6 +14,8 @@ public sealed record ManagedTokenRecord(string Id, string Hash, string Role, str
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record RawArtifactEntry(string Name, string Version, string MediaType,
     string Sha256, long Size, string CreatedAt);
+public sealed record MavenAssetEntry(string Path, string GroupId, string ArtifactId, string Version,
+    string Sha256, long Size, string MediaType, string CreatedAt);
 public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
     string Description, string Sha512, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
