@@ -59,6 +59,10 @@ PostgreSQL and S3 are selectable providers. A PostgreSQL **single-writer advisor
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
 
 
+## Experimental global Maven adapter (V4 E2 partial)
+
+Maven release asset paths, POM identity validation and file-level SHA-256 ledger use V6 schema, shared blob providers and recovery intents. The Maven-compatible GET endpoint supports narrowly scoped native artifact consumption, not standard Maven deploy, private feeds or upstream proxy. See [Maven](maven.md).
+
 ## Experimental global Raw adapter (V4)
 
 An immutable Raw transport maintains publication-time SHA-256 metadata in schema V5, durable intents and integrity/recovery references. This is a global namespace, not a feed-isolated native registry. See [Raw API](raw-registry.md).
