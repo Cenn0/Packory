@@ -31,8 +31,14 @@ test -f "$ROOT/src/Packory/bin/Release/net10.0/Packory.dll"
 # Resolve the pinned Maven consumer plugin before enabling a synthetic isolated mirror.
 # The plugin itself is downloaded from the normal public Maven distribution origin.
 mkdir -p "$WORK/m2"
+echo "Maven native smoke: priming pinned dependency consumer"
 mvn -B -q -Dmaven.repo.local="$WORK/m2" \
-  org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help >/dev/null
+  org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help >"$WORK/maven-prime.log" 2>&1 || {
+    echo "Maven plugin priming failed" >&2
+    grep -Ei 'error|fail|exception' "$WORK/maven-prime.log" | tail -n 12 >&2 || true
+    exit 1
+  }
+echo "Maven native smoke: plugin available"
 
 mkdir -p "$WORK/payload"
 cat >"$WORK/payload/sample-1.0.0.pom" <<'POM'
@@ -65,7 +71,8 @@ for n in $(seq 1 75); do
   if ! kill -0 "$PID" 2>/dev/null; then break; fi
   sleep 0.2
 done
-test "$READY" = true
+if [ "$READY" != true ]; then echo "Maven smoke server failed readiness" >&2; exit 1; fi
+echo "Maven native smoke: Packory ready"
 for extension in pom jar; do
   curl --fail-with-body -sS -X PUT \
     -H "Authorization: Bearer $TOKEN" \
@@ -73,6 +80,7 @@ for extension in pom jar; do
     --data-binary "@$WORK/payload/sample-1.0.0.$extension" \
     "$BASE/maven/com/packory/smoke/sample/1.0.0/sample-1.0.0.$extension" >/dev/null
 done
+echo "Maven native smoke: POM and JAR bytes published"
 
 # Mirror all Maven repositories to Packory for the actual dependency resolution.
 # Plug-in binaries have been primed in the isolated local Maven cache above.
@@ -87,12 +95,20 @@ cat >"$WORK/settings.xml" <<XML
   </mirrors>
 </settings>
 XML
-mvn -B -q --settings "$WORK/settings.xml" \
+mvn -B --settings "$WORK/settings.xml" \
   -Dmaven.repo.local="$WORK/m2" \
   org.apache.maven.plugins:maven-dependency-plugin:3.7.1:get \
   -Dartifact=com.packory.smoke:sample:1.0.0 \
-  -Dtransitive=false >/dev/null
+  -Dtransitive=false >"$WORK/maven-resolve.log" 2>&1 || {
+    echo "Native Maven artifact resolution failed" >&2
+    grep -Ei 'error|fail|unable|Could not|Downloading' "$WORK/maven-resolve.log" | tail -n 20 >&2 || true
+    exit 1
+  }
+echo "Maven native smoke: artifact dependency resolved"
 
-cmp "$WORK/payload/sample-1.0.0.jar" \
-  "$WORK/m2/com/packory/smoke/sample/1.0.0/sample-1.0.0.jar"
+if ! cmp "$WORK/payload/sample-1.0.0.jar" \
+  "$WORK/m2/com/packory/smoke/sample/1.0.0/sample-1.0.0.jar"; then
+  echo "Native Maven cache did not contain expected synthetic JAR bytes" >&2
+  exit 1
+fi
 echo "Native Maven 3 release consumer installed the Packory-hosted synthetic artifact."
