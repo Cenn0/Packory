@@ -82,28 +82,23 @@ for extension in pom jar; do
 done
 echo "Maven native smoke: POM and JAR bytes published"
 
-# Mirror all Maven repositories to Packory for the actual dependency resolution.
-# Plug-in binaries have been primed in the isolated local Maven cache above.
-cat >"$WORK/settings.xml" <<XML
-<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
-  <mirrors>
-    <mirror>
-      <id>packory-test</id>
-      <mirrorOf>*</mirrorOf>
-      <url>$BASE/maven/</url>
-    </mirror>
-  </mirrors>
-</settings>
-XML
-mvn -B --settings "$WORK/settings.xml" \
-  -Dmaven.repo.local="$WORK/m2" \
+# Maven itself needs its plugin and plugin dependency resolution through its
+# regular public Maven repository. Only the synthetic dependency coordinates are
+# resolved from Packory, with the exact request proven from server-side HTTP logs.
+mvn -B -Dmaven.repo.local="$WORK/m2" \
   org.apache.maven.plugins:maven-dependency-plugin:3.7.1:get \
   -Dartifact=com.packory.smoke:sample:1.0.0 \
+  "-DremoteRepositories=packory-test::default::$BASE/maven/" \
   -Dtransitive=false >"$WORK/maven-resolve.log" 2>&1 || {
     echo "Native Maven artifact resolution failed" >&2
     grep -Ei 'error|fail|unable|Could not|Downloading' "$WORK/maven-resolve.log" | tail -n 20 >&2 || true
     exit 1
   }
+# Fail if the client obtained its artifact from any source other than Packory.
+if ! grep -Eq 'GET http://127\.0\.0\.1:18085/maven/com/packory/smoke/sample/1\.0\.0/sample-1\.0\.0\.jar' "$WORK/server.log"; then
+  echo "Maven did not request the hosted JAR from Packory" >&2
+  exit 1
+fi
 echo "Maven native smoke: artifact dependency resolved"
 
 if ! cmp "$WORK/payload/sample-1.0.0.jar" \
