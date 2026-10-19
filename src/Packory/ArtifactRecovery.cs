@@ -25,6 +25,10 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             };
             if (key is null || !blobs.Contains(key)) missing++;
         }
+        foreach (var asset in database.MavenAssets())
+        {
+            if (!blobs.Contains(MavenEndpoints.BlobKey(asset.RelativePath))) missing++;
+        }
         foreach (var revision in database.FeedNugetRevisions())
         {
             if (!FeedDefinition.ValidId(revision.FeedId) || !Names.Nuget(revision.Name) ||
@@ -47,6 +51,11 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
+        "maven-asset" => MavenEndpoints.TryParseAsset(pending.Name, out var parsed) &&
+            parsed.Version == pending.Version &&
+            string.Equals(pending.Key, MavenEndpoints.BlobKey(pending.Name),
+                StringComparison.Ordinal) &&
+            database.MavenAsset(pending.Name) is not null,
         "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
         "oci-manifest" => database.OciManifest(pending.Name, pending.Version) is not null,
         "pypi" => database.PyFiles(pending.Name).Any(
@@ -152,6 +161,25 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             }
         }
 
+        foreach (var asset in database.MavenAssets())
+        {
+            var valid = MavenEndpoints.TryParseAsset(asset.RelativePath, out var parsed) &&
+                parsed.GroupId == asset.GroupId && parsed.ArtifactId == asset.ArtifactId &&
+                parsed.Version == asset.Version;
+            if (!valid)
+            {
+                missingHosted++;
+                logger.LogError("Invalid indexed Maven asset identity.");
+                continue;
+            }
+            var key = MavenEndpoints.BlobKey(asset.RelativePath);
+            known.Add(key);
+            if (!blobs.Contains(key))
+            {
+                missingHosted++;
+                logger.LogError("Hosted Maven asset missing: {Path}", asset.RelativePath);
+            }
+        }
         foreach (var file in database.PyFiles())
         {
             var key = PyPiEndpoints.Key(file.Name, file.Filename);
@@ -199,7 +227,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                      key.EndsWith(".zip", StringComparison.Ordinal)) ||
                     key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
                     key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal) ||
-                     key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal);
+                     key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal) ||
+                     key.StartsWith("maven/", StringComparison.Ordinal) &&
+                     (key.EndsWith(".pom", StringComparison.Ordinal) || key.EndsWith(".jar", StringComparison.Ordinal));
                 if (!immutable || known.Contains(key) || pendingKeys.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
