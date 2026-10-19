@@ -138,12 +138,10 @@ public static class MavenEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapMethods("/maven/{**path}", ["GET", "HEAD", "PUT"], async (
+        app.MapMethods("/maven/{**path}", ["GET", "HEAD"], async (
             string path, Settings cfg, IPackageDatabase db, BlobStore blobs,
-            ArtifactLocks locks, HttpContext ctx) =>
+            HttpContext ctx) =>
         {
-            if (ctx.Request.Method is "GET" or "HEAD")
-            {
                 if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
                 if (TryMetadataCoordinates(path, out var group, out var name, out var metadataChecksum))
                 {
@@ -192,8 +190,14 @@ public static class MavenEndpoints
                 if (ctx.Request.Headers.IfNoneMatch.ToString() == "\"" + asset.Sha256 + "\"")
                     return Results.StatusCode(StatusCodes.Status304NotModified);
                 return Results.File(local, asset.MediaType, enableRangeProcessing: true);
-            }
+        });
 
+        // Apply the mutation rate limiter only to writes: dependency resolution
+        // must not consume the expensive publishing request budget.
+        app.MapPut("/maven/{**path}", async (
+            string path, Settings cfg, IPackageDatabase db, BlobStore blobs,
+            ArtifactLocks locks, HttpContext ctx) =>
+        {
             if (Access.Require(ctx, cfg, write: true) is { } writeDenied) return writeDenied;
             if (!ValidAssetPath(path, out var coord) || coord is null)
                 return Results.BadRequest(new { error = "Unsupported Maven release artifact path" });
