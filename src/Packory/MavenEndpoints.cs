@@ -132,7 +132,13 @@ public static class MavenEndpoints
     private static async Task<IResult> Download(HttpContext ctx, Settings cfg,
         IPackageDatabase db, BlobStore blobs, string relativePath)
     {
-        if (Access.RequireGlobalArtifactRead(ctx, cfg) is { } denied) return denied;
+        if (Access.RequireGlobalArtifactRead(ctx, cfg) is { } denied)
+        {
+            if (denied is Microsoft.AspNetCore.Http.IStatusCodeHttpResult
+                { StatusCode: StatusCodes.Status401Unauthorized })
+                ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"Packory Maven\"";
+            return denied;
+        }
         if (relativePath.EndsWith("/maven-metadata.xml", StringComparison.Ordinal))
         {
             if (!TryParseMetadata(relativePath, out var group, out var artifact))
