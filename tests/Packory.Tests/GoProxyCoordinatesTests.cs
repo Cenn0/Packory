@@ -44,6 +44,7 @@ public sealed class GoProxyCoordinatesTests
     [InlineData("github.com/!azure/sdk/@v/v1.2.3.mod", "github.com/Azure/sdk", "mod", "v1.2.3")]
     [InlineData("github.com/!azure/sdk/@v/v1.2.3.zip", "github.com/Azure/sdk", "zip", "v1.2.3")]
     [InlineData("example.com/foo/v2/@v/v2.3.0.info", "example.com/foo/v2", "info", "v2.3.0")]
+    [InlineData("gopkg.in/yaml.v3/@v/v3.0.0.mod", "gopkg.in/yaml.v3", "mod", "v3.0.0")]
     [InlineData("example.com/foo/@v/v0.2.0-!beta.1.info", "example.com/foo", "info", "v0.2.0-Beta.1")]
     public void ParsesGoproxyRequestsWithoutImplicitUpstream(string path, string module,
         string operation, string? version)
@@ -63,6 +64,8 @@ public sealed class GoProxyCoordinatesTests
     [InlineData("example.com/foo/@v/v1.2.3-!Beta.info")]
     [InlineData("example.com/foo/@v/v1.2.3-!0.info")]
     [InlineData("example.com/foo/v2/@v/v1.0.0.mod")]
+    [InlineData("example.com/foo/v2/@v/v2.0.0+incompatible.mod")]
+    [InlineData("gopkg.in/yaml.v3/@v/v2.1.0.info")]
     [InlineData("example.com/foo/@latest")]
     [InlineData("example.com/foo/@v/..")]
     [InlineData("example.com/foo/@v/list?x=1")]
