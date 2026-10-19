@@ -20,6 +20,8 @@ public static class GoProxyCoordinates
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex ShortName = new(
         @"~[0-9]+\z", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GopkgMajor = new(
+        @"\.v([1-9][0-9]*)\z", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public sealed record ProxyRequest(
         string ModulePath, string EncodedModulePath, string Operation,
@@ -178,8 +180,17 @@ public static class GoProxyCoordinates
         var major = version[1..version.IndexOf('.')];
         var parts = module.Split('/');
         var suffix = parts[^1];
-        if (MajorPath.IsMatch(suffix) && suffix[1..] != major)
-            return false;
+        if (MajorPath.IsMatch(suffix))
+        {
+            if (suffix[1..] != major || version.EndsWith("+incompatible", StringComparison.Ordinal))
+                return false;
+        }
+        if (string.Equals(parts[0], "gopkg.in", StringComparison.Ordinal))
+        {
+            var gopkgMajor = GopkgMajor.Match(suffix);
+            if (gopkgMajor.Success && gopkgMajor.Groups[1].Value != major)
+                return false;
+        }
         request = new ProxyRequest(module, escaped, extension, version);
         return true;
     }
