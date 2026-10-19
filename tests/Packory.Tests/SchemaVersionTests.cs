@@ -121,6 +121,37 @@ public sealed class SchemaVersionTests
     }
 
     [Fact]
+    public void SqliteV5ToV6UpgradePreservesExistingRawMetadataAndAddsMavenLedger()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v6-migration-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var hash = new string('c', 64);
+            Assert.True(db.PublishRaw("synthetic.fixture", "1.0.0",
+                "application/octet-stream", hash, 123, "test"));
+            using (var connection = db.Open())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "DROP TABLE maven_assets";
+                command.ExecuteNonQuery();
+                command.CommandText = "UPDATE packory_schema_version SET version=5 WHERE slot=1";
+                Assert.Equal(1, command.ExecuteNonQuery());
+            }
+            db.Initialize();
+            Assert.Equal(hash, db.GetRawArtifact("synthetic.fixture", "1.0.0")?.Sha256);
+            Assert.Empty(db.MavenAssets());
+            using var check = db.Open();
+            using var read = check.CreateCommand();
+            read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(6, Convert.ToInt32(read.ExecuteScalar()));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void SqliteRejectsFutureVersionWithoutOverwritingMarker()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-schema-" + Guid.NewGuid().ToString("N"));
