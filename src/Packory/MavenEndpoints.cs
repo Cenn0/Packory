@@ -66,11 +66,14 @@ public static class MavenEndpoints
             });
             var document = XDocument.Load(reader, LoadOptions.None);
             var root = document.Root;
-            if (root?.Name.LocalName != "project") return false;
+            if (root?.Name.LocalName != "project" ||
+                root.Name.NamespaceName is not ("" or "http://maven.apache.org/POM/4.0.0"))
+                return false;
             string? Field(string name)
             {
                 var fields = root.Elements().Where(x => x.Name.LocalName == name).ToArray();
-                return fields.Length == 1 ? fields[0].Value : null;
+                return fields.Length == 1 && fields[0].Name.Namespace == root.Name.Namespace
+                    ? fields[0].Value : null;
             }
             return Field("groupId") == coordinates.GroupId &&
                 Field("artifactId") == coordinates.ArtifactId &&
