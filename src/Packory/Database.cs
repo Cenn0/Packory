@@ -14,6 +14,8 @@ public sealed record ManagedTokenRecord(string Id, string Hash, string Role, str
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record RawArtifactEntry(string Name, string Version, string MediaType,
     string Sha256, long Size, string CreatedAt);
+public sealed record MavenAssetEntry(string RelativePath, string GroupId,
+    string ArtifactId, string Version, string Sha256, long Size, string CreatedAt);
 public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
     string Description, string Sha512, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
@@ -121,6 +123,96 @@ public sealed class Database(Settings settings) : IPackageDatabase
         command.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public MavenAssetEntry? MavenAsset(string relativePath)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT relative_path,group_id,artifact_id,version,sha256,size,created_at
+            FROM maven_assets WHERE relative_path=$path
+            """;
+        cmd.Parameters.AddWithValue("$path", relativePath);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new MavenAssetEntry(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetString(4),
+            reader.GetInt64(5), reader.GetString(6)) : null;
+    }
+
+    public IReadOnlyList<MavenAssetEntry> MavenAssets()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT relative_path,group_id,artifact_id,version,sha256,size,created_at
+            FROM maven_assets ORDER BY relative_path
+            """;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<MavenAssetEntry>();
+        while (reader.Read())
+            rows.Add(new MavenAssetEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                reader.GetInt64(5), reader.GetString(6)));
+        return rows;
+    }
+
+    public IReadOnlyList<string> MavenVersions(string groupId, string artifactId)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT version FROM maven_assets
+            WHERE group_id=$group AND artifact_id=$artifact
+              AND relative_path LIKE '%.pom'
+            ORDER BY version
+            """;
+        cmd.Parameters.AddWithValue("$group", groupId);
+        cmd.Parameters.AddWithValue("$artifact", artifactId);
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public bool PublishMaven(MavenAssetEntry asset, string actor)
+    {
+        if (!MavenEndpoints.TryParseAsset(asset.RelativePath, out var parsed) ||
+            parsed.GroupId != asset.GroupId || parsed.ArtifactId != asset.ArtifactId ||
+            parsed.Version != asset.Version || !ArtifactDigests.ValidSha256(asset.Sha256) ||
+            asset.Size <= 0)
+            throw new ArgumentException("Invalid Maven asset or immutable checksum.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var assetInsert = db.CreateCommand();
+        assetInsert.Transaction = tx;
+        assetInsert.CommandText = """
+            INSERT OR IGNORE INTO maven_assets
+                (relative_path,group_id,artifact_id,version,sha256,size,created_at)
+            VALUES($path,$group,$artifact,$version,$sha,$size,$at)
+            """;
+        assetInsert.Parameters.AddWithValue("$path", asset.RelativePath);
+        assetInsert.Parameters.AddWithValue("$group", asset.GroupId);
+        assetInsert.Parameters.AddWithValue("$artifact", asset.ArtifactId);
+        assetInsert.Parameters.AddWithValue("$version", asset.Version);
+        assetInsert.Parameters.AddWithValue("$sha", asset.Sha256);
+        assetInsert.Parameters.AddWithValue("$size", asset.Size);
+        assetInsert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        if (assetInsert.ExecuteNonQuery() != 1) return false;
+        using var catalog = db.CreateCommand();
+        catalog.Transaction = tx;
+        catalog.CommandText = """
+            INSERT OR IGNORE INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('maven',$name,$version,'Maven release assets','hosted',$at)
+            """;
+        catalog.Parameters.AddWithValue("$name", asset.GroupId + "/" + asset.ArtifactId);
+        catalog.Parameters.AddWithValue("$version", asset.Version);
+        catalog.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        catalog.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "maven-asset",
+            asset.GroupId + "/" + asset.ArtifactId, asset.Version, actor);
+        tx.Commit();
+        return true;
     }
 
     public RawArtifactEntry? GetRawArtifact(string name, string version)
