@@ -14,6 +14,8 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Production blockers and real-provider recovery | [Release gates](release-gates.md) |
 | Deployment, TLS, tokens and backups | [Operations](operations.md) |
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
+| Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
+| Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
 | Current merged scope, CI verification, and outstanding exit gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
 | MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
 | Reviewed remote MCP server.json metadata and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
