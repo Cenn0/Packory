@@ -154,6 +154,30 @@ public sealed class RawArtifactTests
     }
 
     [Fact]
+    public async Task ScopedManagedTokenCannotReadGlobalRawArtifacts()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var bytes = Encoding.UTF8.GetBytes("synthetic scoped access test");
+        var uri = "/raw/global.asset/1.0.0";
+        using var create = await client.SendAsync(Request(HttpMethod.Put, uri, Admin, bytes));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var token = new string('b', 64);
+        var digest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        db.CreateManagedToken(new ManagedTokenRecord(
+            Guid.NewGuid().ToString("N"), digest, "read",
+            "feed:private-feed:read", DateTimeOffset.UtcNow.AddHours(1).ToString("O")));
+        using var scopedBytes = await client.SendAsync(Request(HttpMethod.Get, uri, token));
+        Assert.Equal(HttpStatusCode.Forbidden, scopedBytes.StatusCode);
+        using var scopedMetadata = await client.SendAsync(Request(HttpMethod.Get, uri + "/metadata", token));
+        Assert.Equal(HttpStatusCode.Forbidden, scopedMetadata.StatusCode);
+        using var unscopedRead = await client.SendAsync(Request(HttpMethod.Get, uri, Read));
+        Assert.Equal(HttpStatusCode.OK, unscopedRead.StatusCode);
+    }
+
+    [Fact]
     public void Raw_DatabaseMigrationAndRecoveryReferencesRemainVerifiable()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-raw-schema-" + Guid.NewGuid().ToString("N"));
