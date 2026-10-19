@@ -48,14 +48,31 @@ cat >"$WORK/payload/sample-1.0.0.pom" <<'POM'
   <artifactId>sample</artifactId>
   <version>1.0.0</version>
   <packaging>jar</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>com.packory.smoke</groupId>
+      <artifactId>helper</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+  </dependencies>
 </project>
 POM
-python3 - "$WORK/payload/sample-1.0.0.jar" <<'PY'
+cat >"$WORK/payload/helper-1.0.0.pom" <<'POM'
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.packory.smoke</groupId>
+  <artifactId>helper</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+</project>
+POM
+python3 - "$WORK/payload/sample-1.0.0.jar" "$WORK/payload/helper-1.0.0.jar" <<'PY'
 import sys
 import zipfile
-with zipfile.ZipFile(sys.argv[1], "w") as archive:
-    archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
-    archive.writestr("packory-proof.txt", "synthetic immutable Maven acceptance\n")
+for path in sys.argv[1:]:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+        archive.writestr("packory-proof.txt", "synthetic immutable Maven acceptance\n")
 PY
 
 PACKORY_DATA_DIRECTORY="$WORK/data" \
@@ -73,14 +90,16 @@ for n in $(seq 1 75); do
 done
 if [ "$READY" != true ]; then echo "Maven smoke server failed readiness" >&2; exit 1; fi
 echo "Maven native smoke: Packory ready"
-for extension in pom jar; do
-  curl --fail-with-body -sS -X PUT \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/octet-stream" \
-    --data-binary "@$WORK/payload/sample-1.0.0.$extension" \
-    "$BASE/maven/com/packory/smoke/sample/1.0.0/sample-1.0.0.$extension" >/dev/null
+for artifact in sample helper; do
+  for extension in pom jar; do
+    curl --fail-with-body -sS -X PUT \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/octet-stream" \
+      --data-binary "@$WORK/payload/$artifact-1.0.0.$extension" \
+      "$BASE/maven/com/packory/smoke/$artifact/1.0.0/$artifact-1.0.0.$extension" >/dev/null
+  done
 done
-echo "Maven native smoke: POM and JAR bytes published"
+echo "Maven native smoke: two POMs and JARs published"
 
 # Maven itself needs its plugin and plugin dependency resolution through its
 # regular public Maven repository. Only the synthetic dependency coordinates are
@@ -89,7 +108,7 @@ mvn -B -Dmaven.repo.local="$WORK/m2" \
   org.apache.maven.plugins:maven-dependency-plugin:3.7.1:get \
   -Dartifact=com.packory.smoke:sample:1.0.0 \
   "-DremoteRepositories=packory-test::default::$BASE/maven/" \
-  -Dtransitive=false >"$WORK/maven-resolve.log" 2>&1 || {
+  -Dtransitive=true >"$WORK/maven-resolve.log" 2>&1 || {
     echo "Native Maven artifact resolution failed" >&2
     grep -Ei 'error|fail|unable|Could not|Downloading' "$WORK/maven-resolve.log" | tail -n 20 >&2 || true
     exit 1
@@ -99,11 +118,17 @@ if ! grep -Eq 'GET http://127\.0\.0\.1:18085/maven/com/packory/smoke/sample/1\.0
   echo "Maven did not request the hosted JAR from Packory" >&2
   exit 1
 fi
-echo "Maven native smoke: artifact dependency resolved"
+if ! grep -Eq 'GET http://127\.0\.0\.1:18085/maven/com/packory/smoke/helper/1\.0\.0/helper-1\.0\.0\.jar' "$WORK/server.log"; then
+  echo "Maven did not request the transitive hosted JAR from Packory" >&2
+  exit 1
+fi
+echo "Maven native smoke: direct and transitive dependencies resolved"
 
 if ! cmp "$WORK/payload/sample-1.0.0.jar" \
   "$WORK/m2/com/packory/smoke/sample/1.0.0/sample-1.0.0.jar"; then
   echo "Native Maven cache did not contain expected synthetic JAR bytes" >&2
   exit 1
 fi
-echo "Native Maven 3 release consumer installed the Packory-hosted synthetic artifact."
+cmp "$WORK/payload/helper-1.0.0.jar" \
+  "$WORK/m2/com/packory/smoke/helper/1.0.0/helper-1.0.0.jar"
+echo "Native Maven 3 release consumer installed Packory-hosted direct and transitive artifacts."
