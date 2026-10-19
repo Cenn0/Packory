@@ -180,17 +180,19 @@ public static class GoProxyCoordinates
         var major = version[1..version.IndexOf('.')];
         var parts = module.Split('/');
         var suffix = parts[^1];
-        if (MajorPath.IsMatch(suffix))
-        {
-            if (suffix[1..] != major || version.EndsWith("+incompatible", StringComparison.Ordinal))
-                return false;
-        }
-        if (string.Equals(parts[0], "gopkg.in", StringComparison.Ordinal))
-        {
-            var gopkgMajor = GopkgMajor.Match(suffix);
-            if (gopkgMajor.Success && gopkgMajor.Groups[1].Value != major)
-                return false;
-        }
+        var incompatible = version.EndsWith("+incompatible", StringComparison.Ordinal);
+        var explicitMajor = MajorPath.IsMatch(suffix);
+        var gopkgMajor = string.Equals(parts[0], "gopkg.in", StringComparison.Ordinal)
+            ? GopkgMajor.Match(suffix) : Match.Empty;
+        if (explicitMajor && (suffix[1..] != major || incompatible))
+            return false;
+        if (gopkgMajor.Success && (gopkgMajor.Groups[1].Value != major || incompatible))
+            return false;
+        // Legacy v2+ without a semantic import-version path needs the explicit
+        // +incompatible marker; otherwise the Go loader rejects the module.
+        if (!explicitMajor && !gopkgMajor.Success &&
+            major is not ("0" or "1") && !incompatible)
+            return false;
         request = new ProxyRequest(module, escaped, extension, version);
         return true;
     }
