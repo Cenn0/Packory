@@ -12,14 +12,14 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Support matrix](docs/support-matrix.md) · [Release gates](docs/release-gates.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
 
 **A self-hosted distribution hub for developer packages and AI agent skills.**
 
 
 Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current implementation is an **ASP.NET Core / .NET 10 modular monolith**. SQLite and filesystem storage remain the default; PostgreSQL metadata storage and S3-compatible object storage are optional. No broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
 
-> **Status: experimental platform, not production-hardened.** The implemented adapters and optional backends have bounded test coverage; protocol, migration and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
+> **Status: experimental open-source platform.** Registry adapters and optional backends have bounded test coverage; full protocol interoperability, migration recovery and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
 
 ## Quick start
 
@@ -54,6 +54,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Agent skills (experimental)** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download; revocation and rescan |
 | **Packory MCP (experimental)** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension methods; no untrusted skill execution |
+| **MCP registry catalog (experimental)** | Stage/review/revoke immutable remote `server.json` metadata; read-only discovery only, with no remote connection or publisher verification |
 | **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
@@ -77,16 +78,22 @@ Publish operations require an appropriate token. [API examples](docs/api.md) exp
 
 ```mermaid
 flowchart LR
-  C[NuGet, npm, Cargo, PyPI, OCI clients] --> A[Packory ASP.NET Core]
-  K[Skill ZIP importer] --> A
-  O[Optional OIDC issuer] -.-> A
-  A --> N[Native protocol adapters]
-  A --> M[Catalog and management API]
-  N --> D[(SQLite or PostgreSQL metadata)]
-  M --> D
-  N --> B[(Filesystem or S3 objects)]
-  M --> B
-  N -.->|Configured HTTPS origins| U[nuget.org and npmjs.org]
+  C["NuGet, npm, Cargo, PyPI, OCI clients"] --> App["Packory ASP.NET Core"]
+  Dashboard["Browser dashboard and REST clients"] --> App
+  MCP["MCP clients"] --> ReadOnly["Read-only /mcp API"]
+  ReadOnly --> App
+  OIDC["Optional OIDC issuer"] -.-> App
+  App --> Protocol["Native registry adapters"]
+  App --> Catalog["Catalog, policies and reviews"]
+  Protocol --> DB[("SQLite or PostgreSQL metadata")]
+  Catalog --> DB
+  Protocol --> Blob[("Filesystem or S3 blobs")]
+  Catalog --> Blob
+  Protocol -. "Configured HTTPS origins" .-> Upstream["nuget.org and npmjs.org"]
+  Catalog --> Queue["Staged skill scan volumes"]
+  Queue --> Scanner["Offline SkillSpector sidecar"]
+  Scanner --> Result["Scan result volume"]
+  Result --> Catalog
 ```
 
 NuGet and npm keep their **own native protocols** while sharing the catalog and storage. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
