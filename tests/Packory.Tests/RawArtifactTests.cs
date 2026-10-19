@@ -174,6 +174,24 @@ public sealed class RawArtifactTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task CapabilityInventoryNeverPromotesExperimentalAdaptersToProduction()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        using var response = await client.GetAsync("/api/v1/registry-capabilities");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.False(payload.GetProperty("productionRecommended").GetBoolean());
+        var protocols = payload.GetProperty("protocols").EnumerateArray().ToArray();
+        var raw = Assert.Single(protocols.Where(x => x.GetProperty("ecosystem").GetString() == "raw"));
+        Assert.True(raw.GetProperty("hosted").GetBoolean());
+        Assert.False(raw.GetProperty("proxy").GetBoolean());
+        Assert.False(raw.GetProperty("nativePublish").GetBoolean());
+        Assert.False(raw.GetProperty("isolatedHostedFeed").GetBoolean());
+        Assert.All(protocols, entry => Assert.Equal("experimental", entry.GetProperty("level").GetString()));
+    }
+
     [Theory]
     [InlineData("valid.component", true)]
     [InlineData("scope-with-dash", true)]
