@@ -19,7 +19,7 @@
 
 Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatalog und ein einfaches Webdashboard. Die aktuelle Implementierung ist ein modularer Monolith mit **ASP.NET Core / .NET 10**. SQLite und lokaler Dateispeicher sind der Standard; PostgreSQL als Metadatenspeicher und S3-kompatibler Objektspeicher sind optional. Ein Message-Broker oder Kubernetes sind nicht erforderlich. Erste Härtungen umfassen Artefakt-Sperren innerhalb eines Prozesses, reservierte private Namensräume, einen Abgleich des Dateispeichers beim Start, **transaktionale Audit-Einträge erfolgreicher Veröffentlichungen** und nach Tokenrolle getrennte Ratenbegrenzung für Schreibvorgänge.
 
-> **Status: experimentelle Plattform, nicht produktionsgehärtet.** Implementierte Adapter und optionale Backends sind nur begrenzt qualifiziert; Protokoll-, Migrations- und Mehrinstanzgarantien sind unvollständig. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries.
+> **Status: experimentelles Open-Source-Projekt.** Die Adapter und optionalen Speicher-Backends sind nur begrenzt getestet; vollständige Protokollkompatibilität, Recovery nach Migrationen und Mehrinstanzgarantien sind nicht nachgewiesen. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries.
 
 ## Schnellstart
 
@@ -78,16 +78,22 @@ Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Be
 
 ```mermaid
 flowchart LR
-  C[NuGet-, npm-, Cargo-, PyPI- und OCI-Clients] --> A[Packory ASP.NET Core]
-  K[Skill-ZIP-Import] --> A
-  O[Optionaler OIDC-Issuer] -.-> A
-  A --> N[Native Protokolladapter]
-  A --> M[Katalog und Verwaltungs-API]
-  N --> D[(SQLite oder PostgreSQL)]
-  M --> D
-  N --> B[(Dateisystem oder S3)]
-  M --> B
-  N -.->|Konfigurierte HTTPS-Origins| U[nuget.org und npmjs.org]
+  C["NuGet-, npm-, Cargo-, PyPI- und OCI-Clients"] --> App["Packory ASP.NET Core"]
+  Web["Webdashboard und REST-Clients"] --> App
+  MCP["MCP-Clients"] --> Read["Nur lesende /mcp-API"]
+  Read --> App
+  OIDC["Optionaler OIDC-Issuer"] -.-> App
+  App --> Adapter["Native Registry-Adapter"]
+  App --> Catalog["Katalog, Richtlinien und Prüfung"]
+  Adapter --> DB[("SQLite oder PostgreSQL")]
+  Catalog --> DB
+  Adapter --> Blob[("Dateisystem oder S3")]
+  Catalog --> Blob
+  Adapter -. "Konfigurierte HTTPS-Origins" .-> U["nuget.org und npmjs.org"]
+  Catalog --> Queue["Skill-Scan-Volumes"]
+  Queue --> Scan["Offline SkillSpector-Sidecar"]
+  Scan --> Out["Scan-Ergebnis-Volume"]
+  Out --> Catalog
 ```
 
 NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architektur](docs/architecture.md).
