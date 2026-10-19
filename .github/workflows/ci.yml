@@ -65,7 +65,7 @@ jobs:
       - name: Verify dashboard ecosystem parity with implemented catalog
         run: python3 -m unittest discover -s tests -p test_dashboard_contract.py -v
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
       - name: Exercise real private multi-feed NuGet publish and restore
@@ -76,6 +76,8 @@ jobs:
         run: bash scripts/smoke-oci-docker.sh
       - name: Exercise immutable Raw publish/download against running Packory
         run: bash scripts/smoke-raw.sh
+      - name: Exercise native Maven release and transitive hosted resolution
+        run: bash scripts/smoke-maven.sh
       - name: Exercise real Helm OCI chart push and pull with pinned Helm 3
         run: bash scripts/smoke-oci-helm.sh
       - name: Exercise Docker with anonymous generic reads and forced OCI authenticated ping
