@@ -225,6 +225,45 @@ public sealed class MavenHostedTests
     }
 
     [Fact]
+    public async Task MavenOfflineIntegrityScannerUsesStoredPublisherDigest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-maven-integrity-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cfg = new Settings { DataDirectory = root };
+            var db = new Database(cfg);
+            db.Initialize();
+            var security = new SkillSecurityStore(cfg);
+            security.Initialize();
+            var blobs = new BlobStore(cfg);
+            var relative = "org/sample/example/2.0/example-2.0.jar";
+            var bytes = "synthetic integrity fixture"u8.ToArray();
+            var digest = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            var record = new MavenAssetEntry(relative, "org.sample", "example", "2.0",
+                digest, bytes.Length, "application/java-archive",
+                DateTimeOffset.UtcNow.ToString("O"));
+            Assert.True(db.PublishMavenAsset(record, "synthetic"));
+            await using (var source = new MemoryStream(bytes, writable: false))
+                Assert.True(await blobs.PutAsync(MavenEndpoints.Key(relative),
+                    source, 1024 * 1024, CancellationToken.None));
+            var scan = new ArtifactIntegrityScanner(db, blobs, security, cfg);
+            var positive = await scan.ScanAsync(0, 10, CancellationToken.None);
+            Assert.Single(positive.Items, item =>
+                item.Kind == "maven" && item.State == "digest_match" &&
+                item.DigestBasis == "sha256");
+
+            var path = Path.Combine(root, "blobs", "maven",
+                "org", "sample", "example", "2.0", "example-2.0.jar");
+            await File.WriteAllTextAsync(path, "tampered");
+            var negative = await scan.ScanAsync(0, 10, CancellationToken.None);
+            Assert.Single(negative.Items, item =>
+                item.Kind == "maven" && item.State == "digest_mismatch");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void MavenV6_SqliteMigrationTracksIndependentArtifactDigests()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-maven-schema-" +
