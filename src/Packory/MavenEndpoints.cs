@@ -204,7 +204,9 @@ public static class MavenEndpoints
             if (Access.RequireNamespace(ctx, cfg, "maven",
                 coord.GroupId + "/" + coord.ArtifactId) is { } namespaceDenied)
                 return namespaceDenied;
-            if (ctx.Request.ContentLength is <= 0)
+            if (ctx.Request.ContentLength is null)
+                return Results.StatusCode(StatusCodes.Status411LengthRequired);
+            if (ctx.Request.ContentLength <= 0)
                 return Results.BadRequest(new { error = "Empty Maven upload" });
             if (ctx.Request.ContentLength > cfg.MaxArtifactBytes)
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
