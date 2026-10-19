@@ -12,6 +12,8 @@ public sealed record QuarantineEvidence(string Key, string RecoveryKey, string S
     string SourceEtag, string CreatedAt, bool Completed);
 public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
+public sealed record RawArtifactEntry(string Name, string Version, string MediaType,
+    string Sha256, long Size, string CreatedAt);
 public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
     string Description, string Sha512, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
@@ -119,6 +121,70 @@ public sealed class Database(Settings settings) : IPackageDatabase
         command.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public RawArtifactEntry? GetRawArtifact(string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT name,version,media_type,sha256,size,created_at FROM raw_artifacts
+            WHERE name=$name AND version=$version
+            """;
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new RawArtifactEntry(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)) : null;
+    }
+
+    public IReadOnlyList<RawArtifactEntry> RawArtifacts()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT name,version,media_type,sha256,size,created_at FROM raw_artifacts ORDER BY name,version";
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<RawArtifactEntry>();
+        while (reader.Read())
+            rows.Add(new RawArtifactEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)));
+        return rows;
+    }
+
+    public bool PublishRaw(string name, string version, string mediaType, string sha256, long size, string actor)
+    {
+        if (!RawEndpoints.ValidName(name) || !RawEndpoints.ValidVersion(version) ||
+            !RawEndpoints.ValidMediaType(mediaType) ||
+            !ArtifactDigests.ValidSha256(sha256) || size < 0)
+            throw new ArgumentException("Invalid raw artifact metadata.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var catalog = db.CreateCommand();
+        catalog.Transaction = tx;
+        catalog.CommandText = """
+            INSERT OR IGNORE INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('raw',$name,$version,'Generic immutable artifact','hosted',$at)
+            """;
+        catalog.Parameters.AddWithValue("$name", name);
+        catalog.Parameters.AddWithValue("$version", version);
+        catalog.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        if (catalog.ExecuteNonQuery() != 1) return false;
+        using var payload = db.CreateCommand();
+        payload.Transaction = tx;
+        payload.CommandText = """
+            INSERT INTO raw_artifacts(name,version,media_type,sha256,size,created_at)
+            VALUES($name,$version,$mime,$sha,$size,$at)
+            """;
+        payload.Parameters.AddWithValue("$name", name);
+        payload.Parameters.AddWithValue("$version", version);
+        payload.Parameters.AddWithValue("$mime", mediaType);
+        payload.Parameters.AddWithValue("$sha", sha256);
+        payload.Parameters.AddWithValue("$size", size);
+        payload.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        payload.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "raw", name, version, actor);
+        tx.Commit();
+        return true;
     }
 
     public void UpsertPackage(string kind, string name, string version, string description, string origin)
@@ -711,7 +777,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT kind,name,version,origin FROM packages WHERE kind IN ('nuget','npm','skill','cargo')";
+        cmd.CommandText = "SELECT kind,name,version,origin FROM packages WHERE kind IN ('nuget','npm','skill','cargo','raw')";
         using var reader = cmd.ExecuteReader();
         var result = new List<StoredArtifact>();
         while (reader.Read())
