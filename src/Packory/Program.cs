@@ -480,6 +480,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
 FeedEndpoints.Map(app);
 FeedNugetEndpoints.Map(app);
 RawEndpoints.Map(app);
+RegistryCapabilities.Map(app);
 OciEndpoints.Map(app);
 CargoEndpoints.Map(app);
 PyPiEndpoints.Map(app);
