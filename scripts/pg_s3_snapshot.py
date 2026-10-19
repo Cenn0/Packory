@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 SCHEMA = 2
 LOCK = 0x5041434B4F525931  # PostgresSingleWriterLease.LockId
 CORE_TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_files",
-               "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers", "raw_artifacts",
+               "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers", "raw_artifacts", "maven_assets",
                "publication_intents", "recovery_quarantines", "audit_events", "managed_tokens")
 FEED_TABLES = ("feeds", "feed_namespaces", "feed_policies", "feed_upstreams")
 DIGEST_TABLES = ("nuget_digests",)
