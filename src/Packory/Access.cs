@@ -53,7 +53,7 @@ public static class Access
 
     // A per-feed or package namespace managed token must never become a global
     // Raw catalog reader when the instance disables anonymous reads.
-    public static IResult? RequireGlobalRaw(HttpContext context, Settings settings)
+    public static IResult? RequireGlobalArtifactRead(HttpContext context, Settings settings)
     {
         if (Require(context, settings) is { } denied) return denied;
         if (context.Items[RoleKey] is string role &&
@@ -215,7 +215,7 @@ public static class Access
         var sep = grant.IndexOf(':');
         if (sep <= 0 || sep == grant.Length - 1) return false;
         var kind = grant[..sep];
-        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw")) return false;
+        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw" or "maven")) return false;
         var value = grant[(sep + 1)..];
         var wildcard = value.EndsWith('*');
         if (wildcard) value = value[..^1];
