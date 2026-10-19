@@ -175,6 +175,45 @@ public sealed class MavenHostedTests
     }
 
     [Fact]
+    public async Task MavenPublicationJournalAndRecoveryDistinguishCommittedAndMissingBytes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-maven-recovery-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cfg = new Settings { DataDirectory = root };
+            var db = new Database(cfg);
+            db.Initialize();
+            var blobs = new BlobStore(cfg);
+            var path = "net/fixture/lib/1.0/lib-1.0.jar";
+            var key = MavenEndpoints.Key(path);
+            var bytes = "synthetic immutable recovery bytes"u8.ToArray();
+            var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            db.BeginPublication(key, "maven", path, "1.0");
+            await using (var source = new MemoryStream(bytes, writable: false))
+                Assert.True(await blobs.PutAsync(key, source, 1024 * 1024, CancellationToken.None));
+            var recovery = new ArtifactRecovery(cfg, db, blobs,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ArtifactRecovery>.Instance);
+            var pending = Assert.Single(db.PendingPublications());
+            Assert.Equal("uncommitted-object", recovery.State(pending));
+            Assert.True(db.PublishMavenAsset(new MavenAssetEntry(path, "net.fixture", "lib",
+                "1.0", hash, bytes.Length, "application/java-archive",
+                DateTimeOffset.UtcNow.ToString("O")), "synthetic"));
+            Assert.True(recovery.MetadataCommitted(pending));
+            Assert.Equal("committed", recovery.State(pending));
+            recovery.Reconcile();
+            Assert.Empty(db.PendingPublications());
+            Assert.Equal(0, recovery.MissingHostedCount());
+
+            // Absent authoritative bytes fail readiness and are never re-created.
+            File.Delete(Path.Combine(root, "blobs", "maven",
+                "net", "fixture", "lib", "1.0", "lib-1.0.jar"));
+            Assert.Equal(1, recovery.MissingHostedCount());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void MavenV6_SqliteMigrationTracksIndependentArtifactDigests()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-maven-schema-" +
