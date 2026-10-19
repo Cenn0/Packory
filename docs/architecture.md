@@ -10,7 +10,7 @@ A **single modular ASP.NET Core 10 application** houses protocol adapters, share
 
 ```mermaid
 flowchart TB
-  C[NuGet, npm, Cargo, PyPI, OCI clients] --> A[Native registry adapters]
+  C[NuGet, npm, Cargo, PyPI, OCI, Maven clients] --> A[Native registry adapters]
   W[Dashboard and management clients] --> M[Management API and skill import]
   A --> P[Shared access and policy]
   M --> P
