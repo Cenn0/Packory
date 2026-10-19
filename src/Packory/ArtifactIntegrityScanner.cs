@@ -72,6 +72,17 @@ public sealed class ArtifactIntegrityScanner(
             refs.Add(new Reference(artifact.Kind, artifact.Name, artifact.Version,
                 null, artifact.Origin, key));
         }
+        foreach (var asset in database.MavenAssets())
+        {
+            var valid = MavenEndpoints.TryParseAsset(asset.RelativePath, out var coordinates) &&
+                coordinates.GroupId == asset.GroupId && coordinates.ArtifactId == asset.ArtifactId &&
+                coordinates.Version == asset.Version;
+            refs.Add(new Reference("maven-asset",
+                asset.GroupId + "/" + asset.ArtifactId, asset.Version,
+                asset.RelativePath, "hosted",
+                valid ? MavenEndpoints.BlobKey(asset.RelativePath) : null,
+                valid ? asset.Sha256 : null, valid ? asset.Size : null));
+        }
         foreach (var privateRevision in database.FeedNugetRevisions())
         {
             var valid = FeedDefinition.ValidId(privateRevision.FeedId) &&
@@ -182,7 +193,7 @@ public sealed class ArtifactIntegrityScanner(
     {
         if (entry.KnownSha256 is { } known && ArtifactDigests.ValidSha256(known))
             return new Expected("sha256", Convert.FromHexString(known), entry.KnownSize);
-        if (entry.Kind is "oci-blob" or "oci-manifest" or "pypi")
+        if (entry.Kind is "oci-blob" or "oci-manifest" or "pypi" or "maven-asset")
             return null; // Invalid or missing metadata must never become a self-hash.
         if (entry.Kind == "raw")
         {
