@@ -33,7 +33,8 @@ public static class MavenCoordinates
             return false;
         var parts = path.Split('/');
         if (parts.Length < 4 || parts.Length > 20 ||
-            parts.Any(x => !ValidSegment(x))) return false;
+            parts.Any(x => !ValidSegment(x)) ||
+            parts[..^3].Any(x => x.Contains('.', StringComparison.Ordinal))) return false;
         var group = string.Join(".", parts[..^3]);
         var name = parts[^3];
         var version = parts[^2];
