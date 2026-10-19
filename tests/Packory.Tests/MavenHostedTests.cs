@@ -1,0 +1,198 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Xml.Linq;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Packory;
+using Xunit;
+
+namespace Packory.Tests;
+
+public sealed class MavenHostedTests
+{
+    private const string Admin = "maven-test-admin-token-of-sufficient-length";
+    private const string Reader = "maven-test-reader-token-of-sufficient-length";
+    private const string Writer = "maven-test-writer-token-of-sufficient-length";
+
+    private sealed class Host(Action<Settings>? configure = null) : WebApplicationFactory<Program>
+    {
+        private readonly string _data = Path.Combine(Path.GetTempPath(),
+            "packory-maven-tests-" + Guid.NewGuid().ToString("N"));
+        public string Root => _data;
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Packory:DataDirectory"] = _data,
+                    ["Packory:PublicBaseUrl"] = "http://localhost:8080",
+                    ["Packory:AdminToken"] = Admin,
+                    ["Packory:ReadToken"] = Reader,
+                    ["Packory:WriteToken"] = Writer,
+                    ["Packory:AnonymousRead"] = "false"
+                }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<Settings>();
+                var cfg = new Settings
+                {
+                    DataDirectory = _data,
+                    PublicBaseUrl = "http://localhost:8080",
+                    AdminToken = Admin, ReadToken = Reader,
+                    WriteToken = Writer, AnonymousRead = false,
+                    McpEnabled = false, MaxArtifactBytes = 1024 * 1024
+                };
+                configure?.Invoke(cfg);
+                cfg.Validate();
+                services.AddSingleton(cfg);
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing && Directory.Exists(_data))
+                Directory.Delete(_data, recursive: true);
+        }
+    }
+
+    private static HttpRequestMessage Auth(HttpMethod method, string path,
+        string token, byte[]? bytes = null)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (bytes is not null)
+        {
+            request.Content = new ByteArrayContent(bytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(
+                "application/octet-stream");
+        }
+        return request;
+    }
+
+    private static byte[] Pom(string group, string name, string version) =>
+        Encoding.UTF8.GetBytes($"""
+            <project xmlns="http://maven.apache.org/POM/4.0.0">
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>{group}</groupId><artifactId>{name}</artifactId>
+              <version>{version}</version><packaging>jar</packaging>
+            </project>
+            """);
+
+    [Fact]
+    public async Task MavenRelease_PomAndJar_ImmutableChecksumMetadataAndTampering()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var basePath = "/maven/com/example/demo/1.2.3/demo-1.2.3";
+        var pom = Pom("com.example", "demo", "1.2.3");
+        var jar = Encoding.UTF8.GetBytes("synthetic, non-executable Java archive fixture");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync(basePath + ".pom")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(Auth(HttpMethod.Put, basePath + ".pom", Reader, pom))).StatusCode);
+
+        using var p = await client.SendAsync(Auth(HttpMethod.Put, basePath + ".pom", Writer, pom));
+        Assert.Equal(HttpStatusCode.Created, p.StatusCode);
+        using var a = await client.SendAsync(Auth(HttpMethod.Put, basePath + ".jar", Writer, jar));
+        Assert.Equal(HttpStatusCode.Created, a.StatusCode);
+        using var duplicate = await client.SendAsync(Auth(HttpMethod.Put, basePath + ".jar", Writer, jar));
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+
+        using var result = await client.SendAsync(Auth(HttpMethod.Get, basePath + ".jar", Reader));
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(jar, await result.Content.ReadAsByteArrayAsync());
+        var expectedSha = Convert.ToHexStringLower(SHA256.HashData(jar));
+        Assert.Equal("\"" + expectedSha + "\"", result.Headers.ETag?.ToString());
+        using var sha = await client.SendAsync(Auth(HttpMethod.Get, basePath + ".jar.sha256", Reader));
+        Assert.Equal(HttpStatusCode.OK, sha.StatusCode);
+        Assert.Equal(expectedSha, await sha.Content.ReadAsStringAsync());
+
+        using var sha1 = await client.SendAsync(Auth(HttpMethod.Get, basePath + ".jar.sha1", Reader));
+        Assert.Equal(Convert.ToHexStringLower(SHA1.HashData(jar)),
+            await sha1.Content.ReadAsStringAsync());
+        using var head = await client.SendAsync(Auth(HttpMethod.Head, basePath + ".jar", Reader));
+        Assert.Equal(HttpStatusCode.OK, head.StatusCode);
+        using var metadata = await client.SendAsync(Auth(HttpMethod.Get,
+            "/maven/com/example/demo/maven-metadata.xml", Reader));
+        Assert.Equal(HttpStatusCode.OK, metadata.StatusCode);
+        var document = XDocument.Parse(await metadata.Content.ReadAsStringAsync());
+        Assert.Contains(document.Descendants(), x => x.Name.LocalName == "version" && x.Value == "1.2.3");
+
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        Assert.Equal(expectedSha, db.GetMavenAsset("com/example/demo/1.2.3/demo-1.2.3.jar")?.Sha256);
+        Assert.Contains(db.MavenAssets(), x => x.ArtifactId == "demo");
+        Assert.Equal("hosted", db.PackageOrigin("maven", "com.example:demo", "1.2.3"));
+
+        await File.WriteAllTextAsync(Path.Combine(host.Root, "blobs", "maven",
+            "com", "example", "demo", "1.2.3", "demo-1.2.3.jar"), "tampered");
+        using var corrupted = await client.SendAsync(Auth(HttpMethod.Get, basePath + ".jar", Reader));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, corrupted.StatusCode);
+        using var checksumCorrupted = await client.SendAsync(
+            Auth(HttpMethod.Get, basePath + ".jar.sha256", Reader));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, checksumCorrupted.StatusCode);
+    }
+
+    [Fact]
+    public async Task MavenRejectsMismatchedPomAndDisallowedSnapshotsAndNamespaces()
+    {
+        using var host = new Host(cfg => cfg.WriteNamespaces = ["maven:com.example/*"]);
+        using var client = host.CreateClient();
+        var good = "/maven/com/example/test/1.0/test-1.0.pom";
+        using var scopeDenied = await client.SendAsync(Auth(HttpMethod.Put,
+            "/maven/net/another/test/1.0/test-1.0.pom", Writer, Pom("net.another", "test", "1.0")));
+        Assert.Equal(HttpStatusCode.Forbidden, scopeDenied.StatusCode);
+        using var mismatch = await client.SendAsync(Auth(HttpMethod.Put, good,
+            Writer, Pom("com.example", "wrong", "1.0")));
+        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+        Assert.Null(host.Services.GetRequiredService<IPackageDatabase>().GetMavenAsset(
+            "com/example/test/1.0/test-1.0.pom"));
+
+        using var rejectedDtd = await client.SendAsync(Auth(HttpMethod.Put, good, Writer,
+            Encoding.UTF8.GetBytes("<!DOCTYPE project [<!ENTITY e SYSTEM 'file:///etc/passwd'>]><project>&e;</project>")));
+        Assert.Equal(HttpStatusCode.BadRequest, rejectedDtd.StatusCode);
+
+        using var snapshot = await client.SendAsync(Auth(HttpMethod.Put,
+            "/maven/com/example/test/1.1-SNAPSHOT/test-1.1-SNAPSHOT.pom",
+            Writer, Pom("com.example", "test", "1.1-SNAPSHOT")));
+        Assert.Equal(HttpStatusCode.BadRequest, snapshot.StatusCode);
+
+        using var allowed = await client.SendAsync(Auth(HttpMethod.Put, good,
+            Writer, Pom("com.example", "test", "1.0")));
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        using var invalid = await client.SendAsync(Auth(HttpMethod.Put,
+            "/maven/com..example/test/1.0/test-1.0.jar",
+            Admin, "invalid"u8.ToArray()));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
+    public void MavenV6_SqliteMigrationTracksIndependentArtifactDigests()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-maven-schema-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var record = new MavenAssetEntry("org/example/fixture/1.0/fixture-1.0.pom",
+                "org.example", "fixture", "1.0", new string('a', 64),
+                128, "application/xml", DateTimeOffset.UtcNow.ToString("O"));
+            Assert.True(db.PublishMavenAsset(record, "synthetic"));
+            Assert.False(db.PublishMavenAsset(record, "synthetic"));
+            Assert.Single(db.MavenVersions("org.example", "fixture"));
+            db.Initialize();
+            Assert.Equal(record, db.GetMavenAsset(record.Path));
+            Assert.Equal(6, SchemaVersionGuard.Current);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+}
