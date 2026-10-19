@@ -52,6 +52,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **npm** | Upstream metadata and tarball caching, scoped package handling and basic single-version publishing |
 | **OCI (experimental)** | Hosted Distribution v2 endpoints for SHA-256 blobs, chunk uploads, manifests, tags and referrers; incomplete client/auth support |
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
+| **Maven (experimental)** | Immutable hosted release files, POM identity checks, SHA-256, Maven-consumable URLs; no native deploy, SNAPSHOT, proxy or isolated Maven feeds |
 | **Raw / Generic (experimental)** | Immutable binary upload/download with SHA-256 metadata, authentication, ranged downloads; global namespace only, **no native package protocol** |
 | **Agent skills (experimental)** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download; revocation and rescan |
 | **Packory MCP (experimental)** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension methods; no untrusted skill execution |
