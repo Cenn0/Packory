@@ -7,6 +7,10 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    RawArtifactEntry? GetRawArtifact(string name, string version);
+    IReadOnlyList<RawArtifactEntry> RawArtifacts();
+    bool PublishRaw(string name, string version, string mediaType,
+        string sha256, long size, string actor);
     IReadOnlyList<FeedDefinition> Feeds(string? after, int limit);
     FeedDefinition? Feed(string id);
     bool TryCreateDraftFeed(FeedDefinition feed, string actor);

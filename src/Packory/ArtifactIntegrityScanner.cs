@@ -65,6 +65,8 @@ public sealed class ArtifactIntegrityScanner(
                     CargoEndpoints.Key(artifact.Name, artifact.Version),
                 "skill" when Names.Skill(artifact.Name) && versionOk =>
                     SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
+                "raw" when RawEndpoints.ValidName(artifact.Name) && RawEndpoints.ValidVersion(artifact.Version) =>
+                    RawEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             refs.Add(new Reference(artifact.Kind, artifact.Name, artifact.Version,
@@ -182,6 +184,13 @@ public sealed class ArtifactIntegrityScanner(
             return new Expected("sha256", Convert.FromHexString(known), entry.KnownSize);
         if (entry.Kind is "oci-blob" or "oci-manifest" or "pypi")
             return null; // Invalid or missing metadata must never become a self-hash.
+        if (entry.Kind == "raw")
+        {
+            var record = database.GetRawArtifact(entry.Name, entry.Version);
+            return record is not null && ArtifactDigests.ValidSha256(record.Sha256) && record.Size >= 0
+                ? new Expected("sha256", Convert.FromHexString(record.Sha256), record.Size)
+                : null;
+        }
         if (entry.Kind == "cargo")
         {
             var hash = ArtifactDigests.CargoExpected(

@@ -59,6 +59,10 @@ PostgreSQL and S3 are selectable providers. A PostgreSQL **single-writer advisor
 See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
 
 
+## Experimental global Raw adapter (V4)
+
+An immutable Raw transport maintains publication-time SHA-256 metadata in schema V5, durable intents and integrity/recovery references. This is a global namespace, not a feed-isolated native registry. See [Raw API](raw-registry.md).
+
 ## Experimental native registry adapters (Cargo and PyPI)
 
 The hosted Cargo alternate registry uses its own native sparse index and Cargo publish wire format; PyPI serves PEP 503/691 HTML/JSON and accepts legacy multipart uploads. Both share the selected metadata and blob providers, static-token/OIDC authorization, artifact locks and publish audit with the existing modules. Crate and distribution files are immutable per key. See [Cargo and PyPI](cargo-pypi.md) for missing protocol features, test coverage and security limits.

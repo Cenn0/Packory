@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 4;
+    public const int Current = 5;
 
     private static int RequireKnown(object? value)
     {
@@ -80,6 +80,17 @@ public static class SchemaVersionGuard
         );
         CREATE INDEX IF NOT EXISTS feed_nuget_names
             ON feed_nuget_versions(feed_id,name,version);
+        """;
+
+    // V5: global immutable raw artifacts with publication-time SHA-256.
+    // These are intentionally NOT isolated feeds; see docs/raw-registry.md.
+    private const string RawSchema = """
+        CREATE TABLE IF NOT EXISTS raw_artifacts (
+            name TEXT NOT NULL, version TEXT NOT NULL,
+            sha256 TEXT NOT NULL, size BIGINT NOT NULL CHECK(size>=0),
+            media_type TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY(name,version)
+        );
         """;
 
     private static readonly (string Id, string Kind, string Name)[] Defaults =
@@ -164,6 +175,13 @@ public static class SchemaVersionGuard
             feedVersions.CommandText = HostedFeedNugetSchema;
             feedVersions.ExecuteNonQuery();
         }
+        if (version < 5)
+        {
+            using var rawSchema = connection.CreateCommand();
+            rawSchema.Transaction = tx;
+            rawSchema.CommandText = RawSchema;
+            rawSchema.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -238,6 +256,11 @@ public static class SchemaVersionGuard
         {
             using var feedVersions = new NpgsqlCommand(HostedFeedNugetSchema, connection, tx);
             feedVersions.ExecuteNonQuery();
+        }
+        if (version < 5)
+        {
+            using var rawSchema = new NpgsqlCommand(RawSchema, connection, tx);
+            rawSchema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",

@@ -20,6 +20,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                 "npm" => NpmEndpoints.NpmKey(artifact.Name, artifact.Version),
                 "skill" => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
                 "cargo" => CargoEndpoints.Key(artifact.Name, artifact.Version),
+                "raw" => RawEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null || !blobs.Contains(key)) missing++;
@@ -113,6 +114,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                     => SkillEndpoints.SkillKey(artifact.Name, artifact.Version),
                 "cargo" when CargoEndpoints.IsName(artifact.Name) && CargoEndpoints.IsVersion(artifact.Version)
                     => CargoEndpoints.Key(artifact.Name, artifact.Version),
+                "raw" when RawEndpoints.ValidName(artifact.Name) && RawEndpoints.ValidVersion(artifact.Version)
+                    => RawEndpoints.Key(artifact.Name, artifact.Version),
                 _ => null
             };
             if (key is null)
@@ -195,7 +198,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                      key.EndsWith(".tar.gz", StringComparison.Ordinal) ||
                      key.EndsWith(".zip", StringComparison.Ordinal)) ||
                     key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
-                    key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal);
+                    key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal) ||
+                     key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal);
                 if (!immutable || known.Contains(key) || pendingKeys.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
