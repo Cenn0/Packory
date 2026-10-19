@@ -114,6 +114,43 @@ public static class GoProxyCoordinates
         return true;
     }
 
+    public static bool TryDecodeVersion(string? encoded, out string version)
+    {
+        version = "";
+        if (encoded is null || encoded.Length > 320 || encoded.Length == 0 ||
+            encoded.Contains('/') || encoded.Contains('%') ||
+            encoded.Contains('\\')) return false;
+        var decoded = new StringBuilder(encoded.Length);
+        for (var i = 0; i < encoded.Length; i++)
+        {
+            if (encoded[i] == '!')
+            {
+                if (++i >= encoded.Length || encoded[i] is not (>= 'a' and <= 'z'))
+                    return false;
+                decoded.Append(char.ToUpperInvariant(encoded[i]));
+            }
+            else
+            {
+                if (encoded[i] is >= 'A' and <= 'Z') return false;
+                decoded.Append(encoded[i]);
+            }
+        }
+        var normalized = decoded.ToString();
+        if (!ValidCanonicalVersion(normalized)) return false;
+        var canonicalEncoded = new StringBuilder(normalized.Length * 2);
+        foreach (var c in normalized)
+        {
+            if (c is >= 'A' and <= 'Z')
+                canonicalEncoded.Append('!').Append(char.ToLowerInvariant(c));
+            else
+                canonicalEncoded.Append(c);
+        }
+        if (!string.Equals(encoded, canonicalEncoded.ToString(), StringComparison.Ordinal))
+            return false;
+        version = normalized;
+        return true;
+    }
+
     public static bool TryParseRequest(string? path, out ProxyRequest? request)
     {
         request = null;
@@ -133,9 +170,10 @@ public static class GoProxyCoordinates
         }
         var dot = remainder.LastIndexOf('.');
         if (dot < 1) return false;
-        var version = remainder[..dot];
+        var encodedVersion = remainder[..dot];
         var extension = remainder[(dot + 1)..];
-        if (!ValidCanonicalVersion(version) || extension is not ("info" or "mod" or "zip"))
+        if (!TryDecodeVersion(encodedVersion, out var version) ||
+            extension is not ("info" or "mod" or "zip"))
             return false;
         var major = version[1..version.IndexOf('.')];
         var parts = module.Split('/');
