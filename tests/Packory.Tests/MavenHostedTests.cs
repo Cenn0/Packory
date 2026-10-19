@@ -160,6 +160,17 @@ public sealed class MavenHostedTests
             Encoding.UTF8.GetBytes("<!DOCTYPE project [<!ENTITY e SYSTEM 'file:///etc/passwd'>]><project>&e;</project>")));
         Assert.Equal(HttpStatusCode.BadRequest, rejectedDtd.StatusCode);
 
+        var foreignNamespace = """
+            <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:other="urn:untrusted">
+              <modelVersion>4.0.0</modelVersion>
+              <other:groupId>com.example</other:groupId>
+              <artifactId>test</artifactId><version>1.0</version>
+            </project>
+            """;
+        using var spoofed = await client.SendAsync(Auth(HttpMethod.Put, good, Writer,
+            Encoding.UTF8.GetBytes(foreignNamespace)));
+        Assert.Equal(HttpStatusCode.BadRequest, spoofed.StatusCode);
+
         using var snapshot = await client.SendAsync(Auth(HttpMethod.Put,
             "/maven/com/example/test/1.1-SNAPSHOT/test-1.1-SNAPSHOT.pom",
             Writer, Pom("com.example", "test", "1.1-SNAPSHOT")));
