@@ -70,6 +70,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_upstreams') IS NOT NULL
                     AND to_regclass('nuget_digests') IS NOT NULL
                     AND to_regclass('feed_nuget_versions') IS NOT NULL
+                    AND to_regclass('raw_artifacts') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -153,6 +154,59 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         cmd.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public RawArtifactEntry? GetRawArtifact(string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT name,version,media_type,sha256,size,created_at FROM raw_artifacts
+            WHERE name=@name AND version=@version
+            """, null, ("name", name), ("version", version));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new RawArtifactEntry(reader.GetString(0), reader.GetString(1),
+            reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)) : null;
+    }
+
+    public IReadOnlyList<RawArtifactEntry> RawArtifacts()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT name,version,media_type,sha256,size,created_at
+            FROM raw_artifacts ORDER BY name,version
+            """);
+        using var reader = cmd.ExecuteReader();
+        var result = new List<RawArtifactEntry>();
+        while (reader.Read())
+            result.Add(new RawArtifactEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)));
+        return result;
+    }
+
+    public bool PublishRaw(string name, string version, string mediaType, string sha256, long size, string actor)
+    {
+        if (!RawEndpoints.ValidName(name) || !RawEndpoints.ValidVersion(version) ||
+            !RawEndpoints.ValidMediaType(mediaType) ||
+            !ArtifactDigests.ValidSha256(sha256) || size < 0)
+            throw new ArgumentException("Invalid raw artifact metadata.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var catalog = Command(db, """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('raw',@name,@version,'Generic immutable artifact','hosted',@at)
+            ON CONFLICT DO NOTHING
+            """, tx, ("name", name), ("version", version),
+            ("at", DateTimeOffset.UtcNow.ToString("O")));
+        if (catalog.ExecuteNonQuery() != 1) return false;
+        using var payload = Command(db, """
+            INSERT INTO raw_artifacts(name,version,media_type,sha256,size,created_at)
+            VALUES(@name,@version,@mime,@sha,@size,@at)
+            """, tx, ("name", name), ("version", version), ("mime", mediaType),
+            ("sha", sha256), ("size", size), ("at", DateTimeOffset.UtcNow.ToString("O")));
+        payload.ExecuteNonQuery();
+        Audit(db, tx, "publish", "raw", name, version, actor);
+        tx.Commit();
+        return true;
     }
 
     public void UpsertPackage(string kind, string name, string version, string description, string origin)
@@ -443,7 +497,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         using var db = Open();
         using var cmd = Command(db, """
             SELECT kind,name,version,origin FROM packages
-            WHERE kind IN ('nuget','npm','skill','cargo')
+            WHERE kind IN ('nuget','npm','skill','cargo','raw')
             """);
         using var reader = cmd.ExecuteReader();
         var list = new List<StoredArtifact>();
