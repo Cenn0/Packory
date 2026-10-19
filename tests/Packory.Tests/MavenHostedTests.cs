@@ -131,6 +131,13 @@ public sealed class MavenHostedTests
         Assert.Equal(expectedSha, db.GetMavenAsset("com/example/demo/1.2.3/demo-1.2.3.jar")?.Sha256);
         Assert.Contains(db.MavenAssets(), x => x.ArtifactId == "demo");
         Assert.Equal("hosted", db.PackageOrigin("maven", "com.example:demo", "1.2.3"));
+        using var catalog = await client.SendAsync(Auth(HttpMethod.Get,
+            "/api/packages?kind=maven", Reader));
+        Assert.Equal(HttpStatusCode.OK, catalog.StatusCode);
+        Assert.Contains("com.example:demo", await catalog.Content.ReadAsStringAsync());
+        using var rawCatalog = await client.SendAsync(Auth(HttpMethod.Get,
+            "/api/packages?kind=raw", Reader));
+        Assert.Equal(HttpStatusCode.OK, rawCatalog.StatusCode);
 
         await File.WriteAllTextAsync(Path.Combine(host.Root, "blobs", "maven",
             "com", "example", "demo", "1.2.3", "demo-1.2.3.jar"), "tampered");
@@ -205,6 +212,9 @@ public sealed class MavenHostedTests
         using var deniedMetadata = await client.SendAsync(Auth(HttpMethod.Get,
             "/maven/org/sample/demo/maven-metadata.xml", token));
         Assert.Equal(HttpStatusCode.Forbidden, deniedMetadata.StatusCode);
+        using var deniedCatalog = await client.SendAsync(Auth(HttpMethod.Get,
+            "/api/packages?kind=maven", token));
+        Assert.Equal(HttpStatusCode.Forbidden, deniedCatalog.StatusCode);
         using var permitted = await client.SendAsync(Auth(HttpMethod.Get, path, Reader));
         Assert.Equal(HttpStatusCode.OK, permitted.StatusCode);
     }
