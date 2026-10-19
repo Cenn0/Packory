@@ -184,7 +184,7 @@ public sealed class RawArtifactTests
         var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         Assert.False(payload.GetProperty("productionRecommended").GetBoolean());
         var protocols = payload.GetProperty("protocols").EnumerateArray().ToArray();
-        var raw = Assert.Single(protocols.Where(x => x.GetProperty("ecosystem").GetString() == "raw"));
+        var raw = Assert.Single(protocols, x => x.GetProperty("ecosystem").GetString() == "raw");
         Assert.True(raw.GetProperty("hosted").GetBoolean());
         Assert.False(raw.GetProperty("proxy").GetBoolean());
         Assert.False(raw.GetProperty("nativePublish").GetBoolean());
