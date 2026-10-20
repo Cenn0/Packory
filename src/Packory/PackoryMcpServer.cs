@@ -26,11 +26,6 @@ public static class PackoryMcpCatalog
         public string ArchiveSha256 { get; init; } = "";
     }
 
-    public static IReadOnlyList<SkillEntry> Approved(IPackageDatabase db, SkillSecurityStore security,
-        Settings settings) =>
-        db.Skills().Where(x => !settings.SkillSecurityEnforced ||
-                security.IsApproved(x.Name, x.Version)).ToArray();
-
     public static string UriFor(string version, string name, string path = "SKILL.md") =>
         $"skill://packory/{version}/{name}/" +
         string.Join("/", path.Split('/').Select(Uri.EscapeDataString));
@@ -432,18 +427,41 @@ public sealed class PackoryMcpOptionsConfigurator(
                 var after = McpSkillCursor.Decode(cursor, "skills");
                 if (after is { } marker && (!Names.Skill(marker.First) || !Names.Version(marker.Second)))
                     throw McpSkillCursor.Invalid();
-                var ordered = PackoryMcpCatalog.Approved(db, security, settings)
-                    .Where(x => after is null || StringComparer.Ordinal.Compare(x.Name, after.Value.First) > 0 ||
-                        (x.Name == after.Value.First &&
-                         StringComparer.Ordinal.Compare(x.Version, after.Value.Second) > 0))
-                    .OrderBy(x => x.Name, StringComparer.Ordinal)
-                    .ThenBy(x => x.Version, StringComparer.Ordinal).Take(26).ToArray();
                 var array = new JsonArray();
-                foreach (var skill in ordered.Take(25))
+                // Bound the DB work and content verification per request. Invalid,
+                // missing or revoked archives still advance the opaque keyset.
+                const int MaxExamined = 200;
+                var examined = 0;
+                var nextName = after?.First;
+                var nextVersion = after?.Second;
+                var mayHaveMore = false;
+                while (array.Count < 25 && examined < MaxExamined)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var entry = PackoryMcpCatalog.Entry(skill.Name, skill.Version, db, blobs, security, settings);
-                    if (entry is not null) array.Add(entry);
+                    var batchLimit = Math.Min(26, MaxExamined - examined);
+                    var candidates = security.ReadablePage(nextName, nextVersion, batchLimit,
+                        settings.SkillSecurityEnforced);
+                    if (candidates.Count == 0)
+                    {
+                        mayHaveMore = false;
+                        break;
+                    }
+                    foreach (var skill in candidates)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        nextName = skill.Name;
+                        nextVersion = skill.Version;
+                        examined++;
+                        var entry = PackoryMcpCatalog.Entry(skill.Name, skill.Version,
+                            db, blobs, security, settings);
+                        if (entry is not null) array.Add(entry);
+                        if (array.Count == 25) break;
+                    }
+                    // A full DB batch or an early stop due to output capacity
+                    // may have more records. Consumers can safely request a
+                    // final empty page; a cursor never grants authorization.
+                    mayHaveMore = array.Count == 25 || candidates.Count == batchLimit;
+                    if (!mayHaveMore) break;
                 }
                 var response = new JsonObject
                 {
@@ -452,8 +470,8 @@ public sealed class PackoryMcpOptionsConfigurator(
                     ["cacheScope"] = "private",
                     ["ttlMs"] = 0
                 };
-                if (ordered.Length > 25)
-                    response["nextCursor"] = McpSkillCursor.Encode("skills", ordered[24].Name, ordered[24].Version);
+                if (mayHaveMore && nextName is not null && nextVersion is not null)
+                    response["nextCursor"] = McpSkillCursor.Encode("skills", nextName, nextVersion);
                 return ValueTask.FromResult<JsonNode?>(response);
             }
         });
@@ -507,9 +525,26 @@ public sealed class PackoryMcpTools
         McpArtifactCatalog.Search(settings, query, kind, limit, cursor);
 
     [McpServerTool(Name = "list_approved_skills", ReadOnly = true)]
-    [Description("Discover versioned, security-approved agent Skills available to read.")]
-    public static object ListApprovedSkills(IPackageDatabase db, SkillSecurityStore security, Settings settings) =>
-        new { items = PackoryMcpCatalog.Approved(db, security, settings) };
+    [Description("Discover versioned, approved agent Skills from a bounded database-side keyset page. Follow nextCursor to continue. No archive execution.")]
+    public static object ListApprovedSkills(SkillSecurityStore security, Settings settings,
+        int limit = 50, string? cursor = null)
+    {
+        if (limit is < 1 or > 99) throw McpSkillCursor.Invalid();
+        var marker = McpSkillCursor.Decode(cursor, "approved-skill-tool");
+        if (marker is { } selected &&
+            (!Names.Skill(selected.First) || !Names.Version(selected.Second)))
+            throw McpSkillCursor.Invalid();
+        var rows = security.ReadablePage(marker?.First, marker?.Second,
+            limit + 1, settings.SkillSecurityEnforced);
+        return new
+        {
+            items = rows.Take(limit).ToArray(),
+            nextCursor = rows.Count > limit
+                ? McpSkillCursor.Encode("approved-skill-tool",
+                    rows[limit - 1].Name, rows[limit - 1].Version)
+                : null
+        };
+    }
 
     [McpServerTool(Name = "verify_skill_integrity", ReadOnly = true)]
     [Description("Verify that a published, reviewed Skill ZIP still matches its immutable approved SHA-256. Does not execute or certify Skill instructions.")]
@@ -539,8 +574,7 @@ public sealed class PackoryMcpTools
         SkillSecurityStore security, Settings settings)
     {
         if (!Names.Skill(name) || !Names.Version(version)) return new { error = "Invalid skill identity" } as object;
-        var skill = PackoryMcpCatalog.Approved(db, security, settings)
-            .FirstOrDefault(x => x.Name == name && x.Version == version);
+        var skill = security.Readable(name, version, settings.SkillSecurityEnforced);
         if (skill is null) return new { error = "Skill is not available" };
         return new { skill.Name, skill.Version, skill.Description, manifestUri =
             PackoryMcpCatalog.UriFor(version, name), sha256 = security.Get(name, version)?.Sha256,
