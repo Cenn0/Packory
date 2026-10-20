@@ -33,10 +33,16 @@ Packory should distribute packages through existing native package managers. A R
 | E8.1 | P2 | APT Debian repository with suite/component/architecture and signed coherent metadata snapshots | isolated apt update/install; reject bad signature, incomplete index and wrong architecture | **Not implemented** |
 | E8.2 | P2 | RPM/DNF repository, signed repodata and architecture/epoch variants | isolated dnf makecache/install and fail-closed signature/checksum tests | **Not implemented** |
 | E9 | P3 | Optional Conda, Swift Package Registry, traditional Helm chart repository, Windows feeds | individual ADR, exact official protocol/client research and native proof for each | **Deferred / not implemented** |
-| E10 | Cross | Format-aware dashboard, catalog, setup instructions, auth, audited admin APIs, read-only MCP | Show accurate per-client support, forbid scoped metadata leakage, accessible UI/E2E | **Partial**: conservative static capability API in PR #90 |
+| E10 | Cross | Format-aware dashboard, catalog, setup instructions, auth, audited admin APIs, read-only MCP | Show accurate per-client support, forbid scoped metadata leakage, accessible UI/E2E | **Partial:** capability API #90; paginated global MCP artifact/version discovery including Maven/Raw, v0.1 MCP Registry reads and static Skill quality through MCP/REST/UI. Per-feed discovery, privileged browser sessions and broader client/accessibility acceptance remain open; [MCP continuation](mcp-roadmap.md) |
 | E11 | Cross | Production and per-adapter acceptance/CI/release | Specific client, OS, provider, operation, negative/fault test evidence; signed release/SBOM/security/DR | **Open** (inherits V3 gates) |
 
 Every milestone is separately gated. Enabling a previously absent row requires merging code and its evidence; merely creating its issue, schema, placeholder endpoint or screenshot does not satisfy the acceptance.
+
+### E10 MCP continuation
+
+The [MCP delivery roadmap](mcp-roadmap.md) connects E10 to V3 MS5. Delivered functions include strict paginated native MCP discovery, approval filtering before catalog page limits, reviewed remote Registry metadata and the [static Skill quality profile](skill-quality.md). Dashboard discovery supports subsequent pages and discards stale responses after credential changes; quality inspection also invalidates results after lifecycle changes. These features do not expand Maven's native publishing support or advertise a Go registry.
+
+Publisher proof, signature verification, upstream synchronization and broader Registry manifests remain separate MCP-R tasks. Additional independent SDK/client qualification and per-feed discovery remain MCP-P tasks. Durable quality history, agent/connector contracts and isolated behavior testing remain MCP-Q tasks; connecting to external servers remains the separate MCP-G gateway workstream. Completing a static quality report does not certify functional execution or production readiness.
 
 ## Delivery sequence and PR boundaries
 
@@ -81,6 +87,7 @@ For each adapter, collect versioned evidence for:
 - [PR #94](https://github.com/Cenn0/Packory/pull/94): strict Go GOPROXY coordinate parsing merged, **not** a serving endpoint.
 - [PR #95](https://github.com/Cenn0/Packory/pull/95): bounded Maven Central bootstrap retry merged without skipping native package validation.
 - Follow-up E3 ZIP preflight: conservative offline archive validation only, no persistence or wire behavior; see [Go design](go-proxy.md) and the [current checkpoint](roadmap-status-2026-10-20.md).
+- E10/MS5 MCP continuation: paginated global discovery including Maven/Raw, three v0.1 Registry read routes, strict native MCP/Skills Extension behavior and static Skill quality with dashboard integration. See [delivered functions and open acceptance](mcp-roadmap.md); neither E10 nor MS5 is complete.
 
 **Next dependency:** complete E0 feed-scoped authorization and immutable staged Go triplet persistence before advertising any Go endpoint. E11 real-provider release and DR gates remain open.
 

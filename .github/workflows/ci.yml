@@ -82,6 +82,26 @@ jobs:
         run: bash scripts/smoke-oci-helm.sh
       - name: Exercise Docker with anonymous generic reads and forced OCI authenticated ping
         run: PACKORY_SMOKE_ANONYMOUS_READ=true PACKORY_SMOKE_AUTHENTICATED_PING=true bash scripts/smoke-oci-docker.sh
+  dashboard:
+    name: MCP dashboard browser regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Install pinned browser test tooling
+        run: npm install --prefix "$RUNNER_TEMP/packory-dashboard-tools" --ignore-scripts --no-audit --no-fund playwright@1.62.1
+      - name: Install Chromium headless shell
+        run: '"$RUNNER_TEMP/packory-dashboard-tools/node_modules/.bin/playwright" install --with-deps chromium --only-shell'
+      - name: Verify real dashboard assets with synthetic API responses
+        env:
+          NODE_PATH: ${{ runner.temp }}/packory-dashboard-tools/node_modules
+        run: node scripts/test-mcp-dashboard.cjs
   container:
     name: Build Docker image
     runs-on: ubuntu-latest

@@ -44,3 +44,15 @@
 .mcp-panel #mcp-status{min-height:28px}
 .mcp-panel td:nth-child(3){overflow-wrap:anywhere}
 @media(max-width:680px){.mcp-panel{padding:16px}.mcp-panel #mcp-filter{width:100%}}
+
+.quality-panel{margin-top:28px;min-width:0;overflow-wrap:anywhere}
+.quality-panel[hidden],#mcp-more[hidden]{display:none}
+.quality-digest{overflow-wrap:anywhere;font-family:monospace;font-size:12px}
+.quality-finding{margin-top:18px;padding:16px;border:1px solid #325477;border-radius:10px}
+.quality-finding h3{font-size:15px;margin-top:0;overflow-wrap:anywhere}
+.quality-dimensions{padding-left:22px;line-height:1.7}
+.skill-row{flex-wrap:wrap;gap:10px}
+.grid-bottom>.panel,.skill-row>span{min-width:0;overflow-wrap:anywhere}
+.skill-row button{padding:7px 10px;cursor:pointer}
+#mcp-more{margin-top:14px;cursor:pointer}
+@media(max-width:680px){.quality-panel{padding:16px}.quality-finding{padding:12px}}

@@ -12,14 +12,14 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Go E3 groundwork](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go E3 groundwork](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
 
 **A self-hosted distribution hub for developer packages and AI agent skills.**
 
 
 Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current implementation is an **ASP.NET Core / .NET 10 modular monolith**. SQLite and filesystem storage remain the default; PostgreSQL metadata storage and S3-compatible object storage are optional. No broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
 
-> **Status: experimental open-source platform.** Registry adapters and optional backends have bounded test coverage; full protocol interoperability, migration recovery and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries.
+> **Status: active development with documented functional profiles.** Registry adapters and optional backends have bounded test coverage; full protocol interoperability, migration recovery and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries. See the [support matrix](docs/support-matrix.md) for each implemented and tested scope.
 
 ## Quick start
 
@@ -54,10 +54,11 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Maven (experimental)** | Immutable hosted release files, POM identity checks, SHA-256, Maven-consumable URLs; no native deploy, SNAPSHOT, proxy or isolated Maven feeds |
 | **Raw / Generic (experimental)** | Immutable binary upload/download with SHA-256 metadata, authentication, ranged downloads; global namespace only, **no native package protocol** |
-| **Agent skills (experimental)** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download; revocation and rescan |
-| **Packory MCP (experimental)** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension methods; no untrusted skill execution |
-| **MCP registry catalog (experimental)** | Stage/review/revoke immutable remote `server.json` metadata; read-only discovery only, with no remote connection or publisher verification |
-| **Dashboard/API** | Searchable catalog of cached/hosted artifacts and liveness/readiness endpoints |
+| **Agent Skills** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download under the enforcing policy; revocation and rescan |
+| **Static Skill quality** | Deterministic documentation findings, improvement suggestions and coverage for immutable published Skills through MCP, REST and dashboard; separate from safety and behavior checks |
+| **Packory MCP** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension; paginated global artifact/version discovery including Maven and Raw |
+| **MCP Registry catalog** | Stage/review/revoke immutable remote `server.json` metadata; three `/v0.1` read routes, MCP discovery tools and paginated dashboard; no remote execution or publisher ownership verification |
+| **Dashboard/API** | Searchable catalog of cached/hosted artifacts, MCP server discovery, Skill quality inspection and liveness/readiness endpoints |
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
 
@@ -76,7 +77,15 @@ dotnet nuget add source http://localhost:8080/nuget/v3/index.json \
 npm install --registry=http://localhost:8080/npm/ lodash
 ```
 
-Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. With skill security enforcement enabled, imports are **staged and unavailable for distribution until an authorized approval**. Offline static SkillSpector inspection is an input to human review, **not proof that a skill is safe to execute**. The experimental [MCP and SkillSpector implementation](docs/mcp-security-integration.md) and [delivery checkpoint](docs/roadmap-status-2026-10-18.md) describe the actual limitations.
+Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. With skill security enforcement enabled, imports are **staged and unavailable for distribution until an authorized approval**. Offline static SkillSpector inspection is an input to human review, **not proof that a skill is safe to execute**. The [MCP and SkillSpector implementation](docs/mcp-security-integration.md) and [20 October delivery checkpoint](docs/roadmap-status-2026-10-20.md) describe the runtime contract and remaining work.
+
+### MCP discovery and Skill quality
+
+Connect an authorized MCP client to `/mcp` to search global artifacts, traverse package versions and read published Skills. Native C# SDK tests cover protocol revisions **2025-06-18, 2025-11-25 and 2026-07-28**. Opaque cursors support complete catalog, Skill and directory traversal beyond the former 100-row catalog limit, including Maven and Raw artifacts. Private feed records remain outside the global MCP catalog. The [MCP Registry catalog](docs/mcp-registry-catalog.md) separately exposes reviewed remote server metadata through the three `/v0.1` read routes, Packory's management API and the dashboard.
+
+Use **`assess_skill_quality(name, version)`**, `GET /api/v1/skills/{name}/{version}/quality`, or **Assess quality** in the dashboard for static documentation checks. The report contains independent findings, concrete suggestions, exact source digests and incomplete-coverage indicators. It checks frontmatter, instruction text and recognized local Markdown references without running imported code or contacting external services. A completed report can contain defects; it does not certify safety, publisher identity or functional correctness. See [Static Skill quality](docs/skill-quality.md) for the profile, limits and authorization rules.
+
+The [MCP delivery roadmap](docs/mcp-roadmap.md) separates the delivered functions from publisher ownership proof, signature verification, upstream synchronization, broader manifests, additional SDK conformance and per-feed discovery. Behavioral agent/connector testing and an external MCP gateway require their own isolated execution boundaries and acceptance tests.
 
 ## Architecture overview
 
@@ -128,11 +137,6 @@ bash scripts/smoke-ecosystems.sh
 
 ## Documentation and contributions
 
-[Documentation index](docs/README.md) · [Go preflight (not a registry)](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go preflight (not a registry)](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
-
-
-### MCP server metadata catalog (experimental)
-
-Packory can stage, review, publish, revoke and discover immutable remote MCP server.json descriptors without connecting to or executing the referenced servers. Only reviewed metadata is discoverable; **publisher ownership and runtime safety are not verified**. See [MCP Registry Catalog](docs/mcp-registry-catalog.md) for scoped schema support, REST and MCP tools, and security limits.

@@ -31,6 +31,12 @@
       <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
     </section>
     <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
+    <section id="quality-panel" class="panel quality-panel" aria-labelledby="quality-title" hidden>
+      <p class="eyebrow">SKILL QUALITY</p><h2 id="quality-title">Skill quality</h2>
+      <p id="quality-status" role="status" aria-live="polite"></p>
+      <p class="muted">Checks cover published documentation and local file references. They do not execute the skill or establish behavioral correctness, publisher identity or malware safety.</p>
+      <div id="quality-detail"></div>
+    </section>
     <section class="panel mcp-panel" aria-labelledby="mcp-title">
       <div class="section-head">
         <div><p class="eyebrow">MCP DISCOVERY</p><h2 id="mcp-title">MCP server catalog</h2><p class="muted">Version-pinned remote server descriptions. Metadata review is not publisher verification or permission to connect.</p></div>
@@ -46,6 +52,7 @@
           <tbody id="mcp-table"></tbody>
         </table>
       </div>
+      <button id="mcp-more" type="button" aria-controls="mcp-table" hidden>Load more server revisions</button>
       <p class="muted">No automatic connection, package execution, token forwarding or remote verification. Administrative import and approval are intentionally API-only until a secure browser session/BFF is available.</p>
     </section>
     <section class="panel scanner-panel" aria-labelledby="scanner-title">
