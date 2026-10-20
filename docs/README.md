@@ -2,7 +2,7 @@
 
 [← English README](../README.md) · [Deutsch](../README.de.md)
 
-Packory is an **experimental self-hosted registry hub**, not a production-certified replacement for complete upstream registries. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI and Agent Skills, each with its own compatibility limitations.
+Packory is an **experimental self-hosted registry hub**, not a production-certified replacement for complete upstream registries. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. Go has offline validation groundwork only, not a native registry.
 
 | Goal | Guide |
 | --- | --- |
@@ -16,9 +16,11 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
 | Experimental Maven release files and unsupported native deploy | [Maven](maven.md) |
+| Go GOPROXY parser and ZIP preflight (**no registry endpoint**) | [Go E3 groundwork](go-proxy.md) |
 | Go GOPROXY parser groundwork (no serving endpoint) | [Go proxy](go-proxy.md) |
 | Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
-| Current merged scope, CI verification, and outstanding exit gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
+| Current V4 milestone progress and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |
+| Earlier delivery evidence and unfinished V3 gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
 | MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
 | Reviewed remote MCP server.json metadata and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
 | Merged implementation slices and explicitly open gates | [Delivery evidence](delivery-evidence-2026-10-17.md) |

@@ -2,7 +2,7 @@
 
 **Scope:** bounded **global** Maven 2 repository layout for immutable release files. Not full Maven/Gradle registry parity, not a native Maven deployment repository and not production-qualified.
 
-The adapter exposes an HTTP Maven repository URL for **native Maven artifact consumption**. It does **not** claim native Maven deploy lifecycle, SNAPSHOT publication, mutable metadata PUT, Gradle module metadata conformance, upstream proxy, private per-feed isolation or multi-node writers.
+The adapter exposes an HTTP Maven repository URL for **native Maven artifact consumption**. The CI smoke retries **only recognizable transient Maven Central plugin bootstrap transfer faults** (up to three attempts); artifact download, digest verification and consumer build failures are never treated as a successful retry. See [PR #95](https://github.com/Cenn0/Packory/pull/95). It does **not** claim native Maven deploy lifecycle, SNAPSHOT publication, mutable metadata PUT, Gradle module metadata conformance, upstream proxy, private per-feed isolation or multi-node writers.
 
 ## URLs and coordinates
 

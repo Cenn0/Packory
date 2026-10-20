@@ -1,6 +1,6 @@
 # Packory Roadmap V4 — Native package ecosystem expansion
 
-**Planning baseline:** 19 October 2026. **Status:** partial, experimental. This plan is not an implementation claim.
+**Planning baseline:** 19 October 2026; **implementation checkpoint updated:** 20 October 2026. **Status:** partial, experimental. This plan is not an implementation claim.
 **Depends on:** [V3 delivery roadmap](roadmap.md), [release gates](release-gates.md), [support matrix](support-matrix.md), real-provider restore qualification and secure feed authorization.
 
 ## Outcome and non-negotiable rules
@@ -23,8 +23,8 @@ Packory should distribute packages through existing native package managers. A R
 | E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Partial**: private NuGet only |
 | E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90 merged**, experimental; no production/provider qualification |
 | E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90 merged**, pinned CLI smoke passed; no universal Helm/Kubernetes conformance |
-| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** path parser merged in PR #92; global immutable release files, Maven GET/checksums, V6 metadata and native Maven consumer smoke proposed in follow-up PR; native deploy, private feeds, SNAPSHOT and proxy remain open |
-| E3 | P1 | Go Modules GOPROXY, module escaping, immutable .info/.mod/.zip and canonical versions; validated private ingest + public allowlisted mirror | Native go mod download/build with private and mirrored modules, checksum DB rules and retry/case tests | **Partial groundwork:** canonical GOPROXY coordinate parser and negative tests only; no wire routes, publication, native clients or support claim |
+| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** parser #92 and global immutable hosted release transport + V6 metadata/recovery + Maven native consume #93 merged; bounded Maven Central CI retry #95 merged. Native deploy, Gradle conformance, private feeds, SNAPSHOT, atomic multi-file release and proxy remain open |
+| E3 | P1 | Go Modules GOPROXY, module escaping, immutable .info/.mod/.zip and canonical versions; validated private ingest + public allowlisted mirror | Native go mod download/build with private and mirrored modules, checksum DB rules and retry/case tests | **Partial groundwork:** coordinate parser and negative tests #94 merged; conservative offline ZIP preflight in the 20 October continuation; no serving routes, publication, native clients, checksum database or support claim |
 | E4 | P1 | RubyGems publish/read-through and Bundler Compact Index | gem push/install and bundle install with transitive deps, negative index/redirect tests | **Not implemented** |
 | E5 | P1 | Composer 2 metadata API and immutable distribution archives; hosted ingest and proxy | composer install/update from hosted and mirrored packages without remote credential exfiltration | **Not implemented** |
 | E6.1 | P2 | Terraform/OpenTofu module registry protocol | terraform init with hosted module; auth/redirect/version tests | **Not implemented** |
@@ -73,6 +73,17 @@ For each adapter, collect versioned evidence for:
 - [OCI Distribution specification](https://github.com/opencontainers/distribution-spec): tags are mutable references; digests identify immutable bytes.
 - [V3 architecture](architecture.md), [current native support matrix](support-matrix.md), [release gates](release-gates.md), [Raw API](raw-registry.md).
 
-## Current checkpoint: PR #90
+## Implementation checkpoint: 20 October 2026
 
-[PR #90](https://github.com/Cenn0/Packory/pull/90) is merged after green CI; E1 Raw and bounded Helm OCI are experimental. [PR #92](https://github.com/Cenn0/Packory/pull/92) merged the Maven path parser and safety tests. E2 Maven release transport is developed in a separate follow-up PR; the native publish, proxy, SNAPSHOT and feed-isolation requirements remain open.
+- [PR #90](https://github.com/Cenn0/Packory/pull/90): Raw/Generic hosted bytes and pinned Helm-OCI CLI smoke merged; both remain experimental.
+- [PR #92](https://github.com/Cenn0/Packory/pull/92): Maven coordinate parser and negative tests merged.
+- [PR #93](https://github.com/Cenn0/Packory/pull/93): immutable global Maven release files, schema V6, recovery and a real Maven consumer smoke merged. No native deploy, SNAPSHOT, isolated feed or proxy.
+- [PR #94](https://github.com/Cenn0/Packory/pull/94): strict Go GOPROXY coordinate parsing merged, **not** a serving endpoint.
+- [PR #95](https://github.com/Cenn0/Packory/pull/95): bounded Maven Central bootstrap retry merged without skipping native package validation.
+- Follow-up E3 ZIP preflight: conservative offline archive validation only, no persistence or wire behavior; see [Go design](go-proxy.md) and the [current checkpoint](roadmap-status-2026-10-20.md).
+
+**Next dependency:** complete E0 feed-scoped authorization and immutable staged Go triplet persistence before advertising any Go endpoint. E11 real-provider release and DR gates remain open.
+
+## Previous checkpoint: PR #90
+
+[PR #90](https://github.com/Cenn0/Packory/pull/90) is merged after green CI; E1 Raw and bounded Helm OCI are experimental. [PR #92](https://github.com/Cenn0/Packory/pull/92) merged the Maven path parser and safety tests. E2 Maven global release transport has since merged in PR #93; native deploy, proxy, SNAPSHOT and feed-isolation requirements remain open.
