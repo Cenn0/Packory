@@ -12,14 +12,14 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Direkt zu:** [Schnellstart](#schnellstart) · [Funktionen](#umgesetzte-funktionen) · [Architektur](#architektur-im-überblick) · [Dokumentation](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Kompatibilitätsmatrix](docs/support-matrix.md)
+**Direkt zu:** [Schnellstart](#schnellstart) · [Funktionen](#umgesetzte-funktionen) · [Architektur](#architektur-im-überblick) · [Dokumentation](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP-Roadmap](docs/mcp-roadmap.md) · [Kompatibilitätsmatrix](docs/support-matrix.md)
 
 **Eine selbst gehostete Distributionszentrale für Entwicklerpakete und KI-Agent-Skills.**
 
 
 Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatalog und ein einfaches Webdashboard. Die aktuelle Implementierung ist ein modularer Monolith mit **ASP.NET Core / .NET 10**. SQLite und lokaler Dateispeicher sind der Standard; PostgreSQL als Metadatenspeicher und S3-kompatibler Objektspeicher sind optional. Ein Message-Broker oder Kubernetes sind nicht erforderlich. Erste Härtungen umfassen Artefakt-Sperren innerhalb eines Prozesses, reservierte private Namensräume, einen Abgleich des Dateispeichers beim Start, **transaktionale Audit-Einträge erfolgreicher Veröffentlichungen** und nach Tokenrolle getrennte Ratenbegrenzung für Schreibvorgänge.
 
-> **Status: experimentelles Open-Source-Projekt.** Die Adapter und optionalen Speicher-Backends sind nur begrenzt getestet; vollständige Protokollkompatibilität, Recovery nach Migrationen und Mehrinstanzgarantien sind nicht nachgewiesen. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries.
+> **Status: aktive Entwicklung mit dokumentiertem Funktionsumfang.** Die Adapter und optionalen Speicher-Backends sind nur begrenzt getestet; vollständige Protokollkompatibilität, Recovery nach Migrationen und Mehrinstanzgarantien sind nicht nachgewiesen. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries. Die [Support-Matrix](docs/support-matrix.md) nennt den jeweils implementierten und getesteten Umfang.
 
 ## Schnellstart
 
@@ -55,10 +55,11 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Helm 3 über OCI (experimentell)** | Native Helm-OCI-Push/Pull/Show/Template-Smoke-Tests mit festgelegter CLI-Version; kein allgemeiner Helm- oder Kubernetes-Konformitätsnachweis |
 | **Maven-Release-Dateien (experimentell)** | Globale unveränderliche Release-Dateien, POM-GAV-Prüfung, SHA-256, Versionsmetadaten und Maven-Verbrauchertest; kein Maven-Deploy, SNAPSHOT, Proxy oder separate Maven-Feeds |
 | **Raw / Generic (experimentell)** | Binärdateien über HTTP mit SHA-256, Metadaten und Range-Downloads; globaler Namensraum, kein natives Paketmanager-Protokoll |
-| **Agent Skills (experimentell)** | Versionierter ZIP-Import mit Quarantäne, offline statischer SkillSpector-Prüfung, expliziter Freigabe vor REST-/MCP-Auslieferung sowie Widerruf/erneuter Prüfung |
-| **Packory MCP (experimentell)** | Authentifizierter, nur lesender Streamable-HTTP-Endpunkt `/mcp` mit Tools, Ressourcen, Prompts und Skills Extension; keine Ausführung fremder Skills |
-| **MCP-Serververzeichnis (experimentell)** | Versionierte Remote-`server.json`-Metadaten, administrative Prüfung/Freigabe/Widerruf, nur lesende MCP-Tools und Dashboard-Suche. Keine externe Serverausführung und **keine verifizierte Herausgeberidentität**; [Details](docs/mcp-registry-catalog.md). |
-| **Dashboard/API** | Durchsuchbarer Katalog gecachter/gehosteter Artefakte sowie Liveness-/Readiness-Endpunkte |
+| **Agent Skills** | Versionierter ZIP-Import mit Quarantäne, offline statischer SkillSpector-Prüfung, expliziter Freigabe vor REST-/MCP-Auslieferung bei aktivierter Durchsetzung sowie Widerruf/erneuter Prüfung |
+| **Statische Skill-Qualität** | Deterministische Dokumentationsbefunde, Verbesserungsvorschläge und Prüfungsabdeckung für veröffentlichte unveränderliche Skills über MCP, REST und Dashboard; getrennt von Sicherheits- und Verhaltenstests |
+| **Packory MCP** | Authentifizierter, nur lesender Streamable-HTTP-Endpunkt `/mcp` mit Tools, Ressourcen, Prompts und Skills Extension; seitenweise globale Artefakt-/Versionssuche einschließlich Maven und Raw |
+| **MCP-Serververzeichnis** | Versionierte Remote-`server.json`-Metadaten mit administrativer Prüfung/Freigabe/Widerruf; drei lesende `/v0.1`-Routen, MCP-Tools und Dashboard mit Folgeseiten; keine externe Ausführung oder verifizierte Herausgeberidentität |
+| **Dashboard/API** | Durchsuchbarer Katalog gecachter/gehosteter Artefakte, MCP-Serververzeichnis, Skill-Qualitätsberichte sowie Liveness-/Readiness-Endpunkte |
 | **Zugriff** | Statische Read-/Write-/Admin-Tokens sowie optionale OIDC-JWT-Prüfung mit expliziten `packory.read`-, `packory.write`- und `packory.admin`-Scopes; noch kein Browser-SSO/BFF |
 | **Speicher** | SQLite und Dateisystem standardmäßig; optional PostgreSQL-Metadaten und S3-kompatible Blobs für neue Einzelinstanz-Installationen |
 
@@ -77,7 +78,15 @@ dotnet nuget add source http://localhost:8080/nuget/v3/index.json \
 npm install --registry=http://localhost:8080/npm/ lodash
 ```
 
-Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Beispiele](docs/api.md) zeigen NuGet Push, npm-Veröffentlichung und ZIP-Import für Agent Skills, ohne Zugangsdaten in versionierten Dateien abzulegen. Bei aktivierter Skill-Sicherheitsrichtlinie werden ZIPs **zunächst isoliert und erst nach autorisierter Freigabe ausgeliefert**. Die statische Offline-Prüfung durch SkillSpector unterstützt die Begutachtung, **ist aber kein Nachweis für sicher ausführbare Skills**. Siehe [MCP-/SkillSpector-Integration](docs/mcp-security-integration.md) und [Roadmap-Status](docs/roadmap-status-2026-10-18.md).
+Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Beispiele](docs/api.md) zeigen NuGet Push, npm-Veröffentlichung und ZIP-Import für Agent Skills, ohne Zugangsdaten in versionierten Dateien abzulegen. Bei aktivierter Skill-Sicherheitsrichtlinie werden ZIPs **zunächst isoliert und erst nach autorisierter Freigabe ausgeliefert**. Die statische Offline-Prüfung durch SkillSpector unterstützt die Begutachtung, **ist aber kein Nachweis für sicher ausführbare Skills**. Siehe [MCP-/SkillSpector-Integration](docs/mcp-security-integration.md) und [Checkpoint vom 20. Oktober](docs/roadmap-status-2026-10-20.md).
+
+### MCP-Suche und Skill-Qualität
+
+Ein autorisierter MCP-Client kann über `/mcp` globale Artefakte suchen, Paketversionen durchblättern und veröffentlichte Skills lesen. Native Tests mit dem C#-SDK decken die Protokollrevisionen **2025-06-18, 2025-11-25 und 2026-07-28** ab. Cursor für Folgeseiten ermöglichen die vollständige Abfrage von Katalog, Skills und Verzeichnisinhalten; die bisherige Kataloggrenze von 100 Einträgen entfällt. Maven und Raw sind einbezogen, private Feed-Einträge bleiben außerhalb des globalen MCP-Katalogs. Das [MCP-Serververzeichnis](docs/mcp-registry-catalog.md) stellt separat geprüfte Remote-Metadaten über die drei lesenden `/v0.1`-Routen, die Packory-Verwaltungs-API und das Dashboard bereit.
+
+Die statische Dokumentationsanalyse ist über **`assess_skill_quality(name, version)`**, `GET /api/v1/skills/{name}/{version}/quality` oder **Assess quality** im Dashboard verfügbar. Der Bericht enthält getrennte Befunde, konkrete Verbesserungsvorschläge, Hashes der exakten Quelldaten und Hinweise auf unvollständige Abdeckung. Geprüft werden Frontmatter, Anweisungstext und erkannte lokale Markdown-Verweise. Importierter Code wird nicht ausgeführt; externe Dienste werden nicht kontaktiert. Ein abgeschlossener Bericht kann Fehler enthalten und bestätigt weder Sicherheit noch Herausgeberidentität oder funktionale Korrektheit. [Statische Skill-Qualität](docs/skill-quality.md) beschreibt das Prüfprofil, seine Grenzen und Zugriffsregeln.
+
+Die [MCP-Roadmap](docs/mcp-roadmap.md) trennt diese gelieferten Funktionen von offenen Eigentumsnachweisen für Herausgeber, Signaturprüfung, Upstream-Synchronisierung, weiteren Manifesttypen, zusätzlicher SDK-Konformität und Feed-bezogener Suche. Verhaltenstests für Agents und Connectoren sowie ein externes MCP-Gateway benötigen eigene isolierte Ausführungsumgebungen und Abnahmetests.
 
 ## Architektur im Überblick
 
@@ -129,6 +138,6 @@ Die [CI](.github/workflows/ci.yml) führt Build-, Integrations- und [echte CLI-V
 
 ## Dokumentation und Mitwirkung
 
-[Dokumentationsindex](docs/README.md) · [Go-Vorprüfung](docs/go-proxy.md) · [Maven](docs/maven.md) · [Raw / Generic](docs/raw-registry.md) · [Support-Matrix](docs/support-matrix.md) · [Roadmap V4](docs/roadmap-v4.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
+[Dokumentationsindex](docs/README.md) · [MCP-Roadmap](docs/mcp-roadmap.md) · [Skill-Qualität](docs/skill-quality.md) · [Go-Vorprüfung](docs/go-proxy.md) · [Maven](docs/maven.md) · [Raw / Generic](docs/raw-registry.md) · [Support-Matrix](docs/support-matrix.md) · [Roadmap V4](docs/roadmap-v4.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
 
 Lizenziert unter [Apache-2.0](LICENSE). Beiträge und öffentliche Fehlermeldungen sind willkommen. Sicherheitslücken über den vertraulichen Meldeweg der Sicherheitsrichtlinie melden.

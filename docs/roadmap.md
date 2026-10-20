@@ -1,6 +1,6 @@
 # Packory roadmap V3 — evidence-based delivery plan
 
-**Baseline:** 17 October 2026; code review against [main at 5f0c6c44d0fba1de0ce41b292f06436aa5801687](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687). This is a delivery plan, not a statement that future features have shipped. The [support matrix](support-matrix.md) and [release gates](release-gates.md) are normative for support claims. The [18 October implementation checkpoint](roadmap-status-2026-10-18.md) records newer merged work and remaining gates; do not treat this historical baseline as the current implementation inventory.
+**Baseline:** 17 October 2026; code review against [main at 5f0c6c44d0fba1de0ce41b292f06436aa5801687](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687). This is a delivery plan, not a statement that future features have shipped. The [support matrix](support-matrix.md) and [release gates](release-gates.md) are normative for support claims. The [18 October implementation checkpoint](roadmap-status-2026-10-18.md) and [20 October continuation](roadmap-status-2026-10-20.md) record newer work and remaining gates; do not treat this historical baseline as the current implementation inventory. Current MCP functions and follow-up acceptance criteria are maintained in the [MCP delivery roadmap](mcp-roadmap.md).
 
 ## Product scope and architecture
 
@@ -111,7 +111,18 @@ Priority P0 = data-loss/security/release blocking; P1 = core platform; P2 = exte
 
 ### MS5 — AI distribution, Skills and MCP (P1/P2)
 
-The detailed, implementation-ready AI-agent backlog for NVIDIA SkillSpector scanning, quarantine, release gates and web UI is maintained in [Skill Security Roadmap](skill-security-roadmap.md). Its SS-001–SS-017 tasks refine M5.1/M5.6 and depend on the browser identity gates in M4.1/M4.2 for privileged UI actions.
+The historical NVIDIA SkillSpector scanning, quarantine, release-gate and web UI plan is maintained in [Skill Security Roadmap](skill-security-roadmap.md). Its SS-001–SS-017 tasks refine M5.1/M5.6 and depend on the browser identity gates in M4.1/M4.2 for privileged UI actions. The [MCP delivery roadmap](mcp-roadmap.md) is the current actionable continuation for platform MCP, Registry metadata, independent quality assessment and the optional gateway.
+
+**Implementation checkpoint — 20 October 2026: MS5 is partially delivered.** Skill approval is implemented; the historical baseline above must not be read as its current status.
+
+| Workstream | Delivered functional profile | Remaining acceptance |
+| --- | --- | --- |
+| M5.1 / M5.6 Skills | Immutable staged revisions, offline static scanning, explicit review/approval and revocation; [static quality findings and suggestions](skill-quality.md) with source digests and coverage through MCP/REST/UI | Pinned origin and publisher proof, verified signatures, broader evaluator qualification and separate agent/connector behavior tests |
+| M5.2 Registry | Remote `server.json` review/revoke plus all three v0.1 read routes, exact/latest versions and cursor pagination | Broader manifests, ownership/signatures, synchronization and full official publish/status lifecycle: MCP-R2–R6 |
+| M5.3 / E10 platform MCP | Read-only native MCP/Skills Extension; paginated global artifacts and exact versions including Maven/Raw, Skill/directory traversal and authorization/approval negatives | Broader independent SDK/client conformance, per-feed discovery and justified optional capabilities: MCP-P4–P7 |
+| M5.7 gateway | Separate design and acceptance backlog; no external MCP execution | Isolated connections, credential and tool policy, network controls and native runtime acceptance: MCP-G1–G5 |
+
+Security findings, static documentation quality, local distribution approval, byte integrity and behavioral execution remain independent results. The quality profile checks documentation without executing submitted Skills; it does not close the planned MCP-Q2–Q8 work for durable assessment history, agent/connector contracts or isolated functional tests.
 
 | ID | Work and acceptance | Evidence |
 | --- | --- | --- |

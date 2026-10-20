@@ -792,8 +792,9 @@ public sealed class ApiTests
                 (await client.SendAsync(WithToken(HttpMethod.Get, path))).StatusCode);
         Assert.Null(PackoryMcpCatalog.Get(name, version, database, blobs, security, settings));
         Assert.Null(PackoryMcpCatalog.Entry(name, version, database, blobs, security, settings));
-        Assert.Throws<ArgumentException>(() => PackoryMcpResources.SkillFile(
-            version, name, "SKILL.md", database, blobs, security, settings));
+        var resourceError = Assert.Throws<ModelContextProtocol.McpProtocolException>(() =>
+            PackoryMcpResources.SkillFile(version, name, "SKILL.md", database, blobs, security, settings));
+        Assert.Equal(ModelContextProtocol.McpErrorCode.InvalidParams, resourceError.ErrorCode);
         Assert.Equal("integrity_unavailable",
             JsonDocument.Parse(JsonSerializer.Serialize(PackoryMcpTools.VerifySkillIntegrity(
                 name, version, database, blobs, security, settings)))

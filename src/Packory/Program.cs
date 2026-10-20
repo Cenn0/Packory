@@ -147,6 +147,7 @@ if (settings.McpEnabled)
             options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
         })
         .WithTools<PackoryMcpTools>()
+        .WithTools<PackorySkillQualityTools>()
         .WithTools<McpRegistryMcpTools>()
         .WithResources<PackoryMcpResources>()
         .WithResources<McpRegistryMcpResources>()
@@ -163,6 +164,17 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 300, Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0, AutoReplenishment = true
+            }));
+    // Public quality reads cannot consume authenticated MCP transport capacity.
+    // Partitions are bounded credential roles, never arbitrary token strings.
+    options.AddPolicy("skill-quality", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            "skill-quality-" + Access.RateLimitPartition(context,
+                context.RequestServices.GetRequiredService<Settings>()),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60, Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0, AutoReplenishment = true
             }));
     options.AddPolicy("publish", context =>
@@ -272,6 +284,18 @@ app.Use(async (ctx, next) =>
                 ctx.Response.Headers.WWWAuthenticate =
                     McpOAuthResourceMetadata.Challenge(activeSettings);
             await denied.ExecuteAsync(ctx);
+            return;
+        }
+    }
+    if (HttpMethods.IsGet(ctx.Request.Method) &&
+        ctx.Request.Path.StartsWithSegments("/api/v1/skills") &&
+        ctx.Request.Path.Value?.EndsWith("/quality", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        ctx.Response.Headers.CacheControl = "no-store";
+        // Reject unauthorized reads before spending a role's quality budget.
+        if (SkillQualityEndpoints.RequireRead(ctx, activeSettings) is { } qualityDenied)
+        {
+            await qualityDenied.ExecuteAsync(ctx);
             return;
         }
     }
@@ -490,6 +514,7 @@ NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
+SkillQualityEndpoints.Map(app);
 McpOAuthResourceMetadata.Map(app);
 if (settings.McpEnabled) app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
