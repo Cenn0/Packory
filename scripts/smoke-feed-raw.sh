@@ -37,7 +37,7 @@ done
 test "$ready" = true || { echo "Raw feed server failed readiness" >&2; exit 1; }
 
 admin_post() {
-  curl --fail-with-body -fsS -H "Authorization: Bearer $ADMIN" \
+  curl --fail-with-body -sS -H "Authorization: Bearer $ADMIN" \
     -H "Content-Type: application/json" --data-binary "$2" "$BASE$1"
 }
 for feed in alpha-feed beta-feed; do
@@ -72,8 +72,8 @@ test "$(code -H "Authorization: Bearer $ALPHA_W" \
   -H "Content-Type: application/octet-stream" \
   --data-binary "@$WORK/beta" -X PUT "$A")" = 409
 
-curl --fail-with-body -fsS -H "Authorization: Bearer $ALPHA_R" "$A" -o "$WORK/a-read"
-curl --fail-with-body -fsS -H "Authorization: Bearer $BETA_R" "$B" -o "$WORK/b-read"
+curl --fail-with-body -sS -H "Authorization: Bearer $ALPHA_R" "$A" -o "$WORK/a-read"
+curl --fail-with-body -sS -H "Authorization: Bearer $BETA_R" "$B" -o "$WORK/b-read"
 cmp "$WORK/alpha" "$WORK/a-read"
 cmp "$WORK/beta" "$WORK/b-read"
 test "$(code -H "Authorization: Bearer $ALPHA_R" "$B")" = 403
