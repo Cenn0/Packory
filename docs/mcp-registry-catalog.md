@@ -34,7 +34,7 @@ The following public dummy metadata is inert. Do not treat it as a genuine verif
 }
 ~~~
 
-Package-only metadata is also accepted without \`remotes\`; it is **not** a runnable client installation configuration. For example:
+Package-only metadata is also accepted without `remotes`; it is **not** a runnable client installation configuration. For example:
 
 ~~~json
 {
@@ -53,7 +53,7 @@ Package-only metadata is also accepted without \`remotes\`; it is **not** a runn
 }
 ~~~
 
-A server may declare \`remotes\` using \`streamable-http\` or \`sse\`, with explicit \`variables\` and bounded \`headers\`. Sensitive headers must refer to declared secret variables instead of literal credentials. Package \`environmentVariables\`, \`packageArguments\` and \`runtimeArguments\` are stored as **untrusted descriptive strings only**; Packory does not spawn these commands. Packages can use \`stdio\` or an HTTPS transport. Icons and vendor extension data are never fetched or rendered as active markup by this service.
+A server may declare `remotes` using `streamable-http` or `sse`, with explicit `variables` and bounded `headers`. Sensitive headers must refer to declared secret variables instead of literal credentials. Package `environmentVariables`, `packageArguments` and `runtimeArguments` are stored as **untrusted descriptive strings only**; Packory does not spawn these commands. Packages can use `stdio` or an HTTPS transport. Icons and vendor extension data are never fetched or rendered as active markup by this service.
 
 Submit it as an administrator, using a runtime token that is never committed or logged:
 

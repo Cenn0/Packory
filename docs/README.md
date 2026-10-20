@@ -23,7 +23,7 @@ Packory is a **self-hosted registry hub in active development**. Current hosted 
 | Current V4/MS5 progress, MCP continuation and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |
 | Earlier delivery evidence and unfinished V3 gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
 | MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
-| Reviewed remote MCP server.json metadata, v0.1 read API and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
+| Reviewed inert MCP remote/package server.json metadata, v0.1 read API and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
 | Static Skill findings, improvement suggestions, source digests and coverage through MCP/REST/UI | [Skill quality](skill-quality.md) |
 | Merged implementation slices and explicitly open gates | [Delivery evidence](delivery-evidence-2026-10-17.md) |
 | Historical Agent Skill scanning and Security UI plan, with current delivery links | [Skill Security Roadmap (NVIDIA SkillSpector)](skill-security-roadmap.md) |
