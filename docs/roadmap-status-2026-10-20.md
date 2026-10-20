@@ -30,3 +30,8 @@ It does not register endpoints, alter database schema, introduce public network 
 **Evidence levels:** *implemented* = code exists; *tested* = named tests passed on a pinned commit; *Packory-supported* = documented client/operation/provider qualification; *production recommended* = security, recovery and operational gates satisfied. None imply upstream vendor endorsement.
 
 **Public source privacy:** no personal identities, private email addresses, secrets, internal URLs, private projects or production logs in code, docs, PRs or CI artifacts; test fixtures use example domains and noreply Git identities.
+
+
+## Additional V4 E3 hosted delivery — PR #97
+
+The new hosted Go adapter uses an authenticated multipart importer, immutable version triplets, V7 SQLite/PostgreSQL metadata and journal recovery, plus standard hosted GOPROXY reads (list, info, mod, zip, latest). A real native Go CLI smoke is required before a client support claim. There is no public mirror, per-feed Go isolation, comprehensive Go ZIP compatibility or production recommendation. See [Go hosted](go-proxy.md) and [PR #97](https://github.com/Cenn0/Packory/pull/97).

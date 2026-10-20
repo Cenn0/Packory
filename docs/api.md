@@ -1,6 +1,6 @@
 # API and native client compatibility (experimental)
 
-**Go V4 E3 is not an API:** the Go coordinate parser and ZIP preflight are internal code only. Do **not** configure GOPROXY to Packory or treat a generic Raw URL as a Go module registry. See [Go groundwork](go-proxy.md).
+**Go hosted:** publish using authenticated multipart POST `/api/go/modules` (module, version, mod, zip, optional time). Native clients consume `/go/{encoded-module}/@v/list`, `.info`, `.mod`, `.zip`, and `/@latest`. See [Go hosted guide](go-proxy.md). Upstream mirroring and per-feed Go isolation are not implemented.
 
 All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `http://localhost:8080` for loopback-only development. Registry URLs embed the configured public origin and must be routable by the client.
 

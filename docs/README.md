@@ -2,7 +2,7 @@
 
 [← English README](../README.md) · [Deutsch](../README.de.md)
 
-Packory is an **experimental self-hosted registry hub**, not a production-certified replacement for complete upstream registries. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. Go has offline validation groundwork only, not a native registry.
+Packory is an **experimental self-hosted registry hub**, not a production-certified replacement for complete upstream registries. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. Hosted Go modules now expose real GOPROXY downloads and an authenticated importer; public mirrors and generalized private Go feeds are not available.
 
 | Goal | Guide |
 | --- | --- |
@@ -16,7 +16,7 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
 | Experimental Maven release files and unsupported native deploy | [Maven](maven.md) |
-| Go GOPROXY parser and ZIP preflight (**no registry endpoint**) | [Go E3 groundwork](go-proxy.md) |
+| Hosted Go GOPROXY, import procedure, archive limits and native CLI acceptance | [Go hosted registry](go-proxy.md) |
 | Go GOPROXY parser groundwork (no serving endpoint) | [Go proxy](go-proxy.md) |
 | Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
 | Current V4 milestone progress and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |

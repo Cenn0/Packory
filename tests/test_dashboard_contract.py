@@ -33,7 +33,7 @@ class StaticDashboardContractTests(unittest.TestCase):
         page = PAGE.read_text(encoding="utf-8")
         parser = RegistryParser()
         parser.feed(page)
-        expected = {"nuget", "npm", "cargo", "pypi", "oci", "maven", "raw", "skill"}
+        expected = {"nuget", "npm", "cargo", "pypi", "oci", "maven", "go", "raw", "skill"}
         self.assertEqual(expected, set(parser.options) - {""})
         self.assertEqual(len(expected) + 1, len(parser.options))
         program = SERVER.read_text(encoding="utf-8")
@@ -58,7 +58,7 @@ class StaticDashboardContractTests(unittest.TestCase):
         self.assertNotIn("hub · MVP", page)
         self.assertIn("Experimental · Single-writer reference", page)
         for url in ("/nuget/v3/index.json", "/npm/", "/cargo/index/",
-                    "/pypi/simple/", "/v2/", "/maven/", "/raw/", "/api/skills"):
+                    "/pypi/simple/", "/v2/", "/maven/", "/go/", "/raw/", "/api/skills"):
             self.assertIn("<code>" + url + "</code>", page)
         self.assertIn("docs/support-matrix.md", page)
 

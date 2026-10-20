@@ -76,10 +76,12 @@ public sealed class GoHostedTests
             if (includesMod)
             {
                 var goMod = zip.CreateEntry(module + "@" + version + "/go.mod");
+                goMod.LastWriteTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
                 using var writer = goMod.Open();
                 writer.Write(Encoding.UTF8.GetBytes(mod));
             }
             var code = zip.CreateEntry(module + "@" + version + "/hello/hello.go");
+            code.LastWriteTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
             using (var writer = code.Open())
                 writer.Write("package hello\nfunc Name() string { return \"ok\" }\n"u8);
         }
@@ -161,8 +163,8 @@ public sealed class GoHostedTests
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(archived)),
             record.ZipSha256);
         Assert.Equal("hosted", db.PackageOrigin("go", Module, "v1.2.3"));
-        Assert.Equal(1, db.GoModules().Count);
-        Assert.Equal(0, db.PendingPublications().Count);
+        Assert.Single(db.GoModules());
+        Assert.Empty(db.PendingPublications());
         Assert.Contains(db.AuditEvents(null, 30), x => x.Kind == "go" && x.Version == "v1.2.3");
 
         var blobPath = Path.Combine(host.Root, "blobs",

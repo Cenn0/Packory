@@ -185,7 +185,7 @@ public sealed class RawArtifactTests
         {
             var db = new Database(new Settings { DataDirectory = root });
             db.Initialize();
-            Assert.Equal(7, SchemaVersionGuard.Current);
+            Assert.Equal(6, SchemaVersionGuard.Current);
             Assert.True(db.PublishRaw("example", "1.0.0", "application/octet-stream",
                 new string('a', 64), 2, "synthetic"));
             db.Initialize();
@@ -213,7 +213,12 @@ public sealed class RawArtifactTests
         Assert.False(raw.GetProperty("proxy").GetBoolean());
         Assert.False(raw.GetProperty("nativePublish").GetBoolean());
         Assert.False(raw.GetProperty("isolatedHostedFeed").GetBoolean());
-        Assert.All(protocols, entry => Assert.Equal("experimental", entry.GetProperty("level").GetString()));
+        Assert.All(protocols.Where(entry => entry.GetProperty("ecosystem").GetString() != "go"),
+            entry => Assert.Equal("experimental", entry.GetProperty("level").GetString()));
+        var go = Assert.Single(protocols, x => x.GetProperty("ecosystem").GetString() == "go");
+        Assert.Equal("native-client-tested", go.GetProperty("level").GetString());
+        Assert.False(go.GetProperty("nativePublish").GetBoolean());
+        Assert.False(go.GetProperty("proxy").GetBoolean());
     }
 
     [Theory]
