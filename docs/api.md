@@ -154,7 +154,10 @@ credentials and tokens for other feeds do not grant private feed access.
 See [feed operations](feeds.md) for precise limitations.
 
 
-## MCP artifact and Skill discovery
+## MCP
+
+The MCP Registry accepts a bounded, inert `server.json` descriptor with remote and/or package distributions; package descriptors never trigger installation, execution, interpolation or outbound requests. See [Registry profile and rejected shapes](mcp-registry-catalog.md). Full official schema conformance, publisher verification and signatures remain separate roadmap tasks.
+ artifact and Skill discovery
 
 The authenticated Streamable HTTP endpoint is `/mcp`. It requires an explicit global Bearer read credential even when REST reads are anonymous. Managed credentials restricted to a feed or publishing namespace receive 403. Native C# SDK tests cover MCP revisions 2025-06-18, 2025-11-25 and 2026-07-28.
 
