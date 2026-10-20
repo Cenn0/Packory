@@ -22,7 +22,7 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 
-SCHEMA = 2
+SCHEMA = 3
 LOCK = 0x5041434B4F525931  # PostgresSingleWriterLease.LockId
 CORE_TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_files",
                "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers",
@@ -33,9 +33,14 @@ ISOLATED_FEED_TABLES = ("feed_nuget_versions",)
 RAW_TABLES = ("raw_artifacts",)
 MAVEN_TABLES = ("maven_assets",)
 GO_TABLES = ("go_modules",)
+# Authoritative security and reviewed MCP metadata are independent of core package schema.
+# The v7 application initializes these tables, so an absent table must abort a new backup.
+SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
+                            "mcp_registry_manifests", "mcp_registry_review_audit")
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
-    *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES, *GO_TABLES))
+    *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
+    *GO_TABLES, *SECURITY_REGISTRY_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -101,13 +106,18 @@ def metadata_tables(connection):
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
     if not row or type(row[0]) is not int or row[0] not in (1, 2, 3, 4, 5, 6, 7):
         raise SnapshotError("Unknown Packory database schema version")
+    if row[0] >= 7:
+        for table in SECURITY_REGISTRY_TABLES:
+            if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is None:
+                raise SnapshotError("Missing authoritative Skill/MCP security metadata table")
     return (CORE_TABLES + ("packory_schema_version",) +
             (FEED_TABLES if row[0] >= 2 else ()) +
             (DIGEST_TABLES if row[0] >= 3 else ()) +
             (ISOLATED_FEED_TABLES if row[0] >= 4 else ()) +
             (RAW_TABLES if row[0] >= 5 else ()) +
             (MAVEN_TABLES if row[0] >= 6 else ()) +
-            (GO_TABLES if row[0] >= 7 else ()))
+            (GO_TABLES if row[0] >= 7 else ()) +
+            (SECURITY_REGISTRY_TABLES if row[0] >= 7 else ()))
 
 
 def counts(connection):
@@ -343,7 +353,7 @@ def verify(folder):
             raise SnapshotError("Snapshot manifest too large")
         manifest = json.loads(payload, object_pairs_hook=unique_json, parse_constant=invalid_json_constant)
         if (not isinstance(manifest, dict) or type(manifest.get("schema")) is not int or
-                manifest["schema"] not in (1, SCHEMA) or manifest.get("profile") != "postgresql-s3-offline"):
+                manifest["schema"] not in (1, 2, SCHEMA) or manifest.get("profile") != "postgresql-s3-offline"):
             raise SnapshotError("Unknown snapshot format")
         pg = manifest["postgres"]
         if (not isinstance(pg, dict) or pg.get("path") != "metadata.dump" or
@@ -353,7 +363,7 @@ def verify(folder):
         if (not isinstance(table_counts, dict) or not set(table_counts) <= ALLOWED_TABLES or
                 any(not nonnegative_integer(count) for count in table_counts.values())):
             raise SnapshotError("Invalid PostgreSQL row counts")
-        if manifest["schema"] == SCHEMA:
+        if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
             if type(db_version) is not int or db_version not in (0, 1, 2, 3, 4, 5, 6, 7):
                 raise SnapshotError("Unknown Packory database schema version")
@@ -372,6 +382,8 @@ def verify(folder):
                 required.update(MAVEN_TABLES)
             if db_version >= 7:
                 required.update(GO_TABLES)
+                if manifest["schema"] == SCHEMA:
+                    required.update(SECURITY_REGISTRY_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or
@@ -508,7 +520,7 @@ def restore(directory, s3, target_bucket):
         expected, actual = manifest["postgres"]["table_counts"], counts(pg)
         if {name: actual.get(name) for name in expected} != expected:
             raise SnapshotError("Restored PostgreSQL row counts disagree with snapshot")
-        if manifest["schema"] == SCHEMA:
+        if manifest["schema"] >= 2:
             if metadata_fingerprints(pg) != manifest["postgres"]["table_fingerprints"]:
                 raise SnapshotError("Restored PostgreSQL row values disagree with snapshot")
         return restored
@@ -549,7 +561,7 @@ def main():
                 raise SnapshotError("Restore requires isolated-target confirmation and destination bucket")
             number = restore(args.snapshot, s3, args.target_bucket)
             print(f"Isolated restore checked: {number} current S3 objects copied; database " +
-                  ("rows and SHA-256 fingerprints checked." if verify(args.snapshot)["schema"] == SCHEMA
+                  ("rows and SHA-256 fingerprints checked." if verify(args.snapshot)["schema"] >= 2
                    else "row counts only (legacy snapshot; NOT full metadata-integrity evidence)."))
         return 0
     except Exception as error:
