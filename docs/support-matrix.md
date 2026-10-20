@@ -1,6 +1,6 @@
 # Packory protocol and deployment support matrix
 
-**Evidence baseline:** [main 5f0c6c4](https://github.com/Cenn0/Packory/commit/5f0c6c44d0fba1de0ce41b292f06436aa5801687), 17 October 2026. This matrix is a record of test *coverage*, not an official certification by NuGet, npm, Docker, Cargo, PyPI or S3 vendors. **Re-run and update this file when changing the released code.**
+**Evidence baseline:** 20 October 2026; merged Maven native consumer [#93](https://github.com/Cenn0/Packory/pull/93), Go parser [#94](https://github.com/Cenn0/Packory/pull/94) and Maven CI reliability [#95](https://github.com/Cenn0/Packory/pull/95). The offline ZIP inspector is not native interoperability evidence. This matrix is a record of test *coverage*, not an official certification by NuGet, npm, Docker, Cargo, PyPI or S3 vendors. **Re-run and update this file when changing the released code.**
 
 ## Definitions
 
@@ -13,7 +13,8 @@
 | Cargo | Hosted alternate sparse registry | Native `cargo publish` and consumption in hosted/CI smoke | cargo versions unpinned, yank, crates.io replacement proxy |
 | PyPI | Hosted Simple API HTML/JSON + upload | Native pip hosted transitive wheel install with Python 3.12 and 3.13 contexts | Twine versions, multiple files/metadata sidecars, yanks, PyPI proxy, multiple operating systems |
 | OCI | Hosted v2 blobs, manifests, tags, referrers | Docker login/push/pull scratch-image and pinned Helm 3 OCI push/pull/show/template smoke plus API integration | ORAS, standard bearer-token server, broad Helm/Kubernetes conformance, cross-restart chunk sessions and client/OS matrix |
-| Maven (release hosted files) | Global immutable release assets, POM GAV validation, version metadata and SHA-256; V6 | .NET API negatives; native Maven 3 consumption smoke in PR | No native deploy or SNAPSHOT, no Maven Central proxy, no Gradle variant conformance, no independent feed isolation |
+| Maven (release hosted files) | Global immutable release assets, POM GAV validation, version metadata and SHA-256; V6 | .NET API negatives and native Maven 3 dependency consumption with direct/transitive byte proof in merged PR #93; Maven Central bootstrap network retry in #95 | No native deploy or SNAPSHOT, no Maven Central proxy, no Gradle variant conformance, no independent feed isolation |
+| Go Modules (offline groundwork **only**) | GOPROXY coordinate parser and offline ZIP archive preflight; **no Go HTTP endpoint** | xUnit case/major-version and negative path/archive tests; **no native Go CLI proof** | **Not a Go registry:** no triplet persistence, sumdb policy, native install, private feed or upstream proxy |
 | Raw / Generic | Global immutable hosted bytes and SHA-256 metadata (V5) | PR #90: .NET negative/identity tests, real-process HTTP smoke, SQLite and PostgreSQL/S3 emulator matrix | No per-feed isolation, no native client protocol, no real-provider restore or production recommendation |
 | Agent Skills | ZIP validation + immutable named versions | API upload/download and malicious-archive regression subset | Verified provenance/publisher, approval workflow, signatures, complete Agent Skills standard conformance |
 | Managed API tokens | SHA-256 hashed expiring/revocable read/write, namespace policy and **exact per-feed read/publish grants for private NuGet** | Existing API auth lifecycle integration | Full tenant policy model, cross-protocol feed IAM and audit/denial coverage |

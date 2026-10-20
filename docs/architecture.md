@@ -1,16 +1,18 @@
 # Packory runtime architecture
 
-Status: **experimental modular monolith; optional PostgreSQL, S3 and OIDC plus hosted Cargo, PyPI and OCI adapters** · October 2026
+Status: **experimental modular monolith; optional PostgreSQL, S3 and OIDC plus hosted Cargo, PyPI, OCI, global Maven release and Raw adapters** · October 2026
 
 ## Decision
 
 A **single modular ASP.NET Core 10 application** houses protocol adapters, shared artifact persistence, access control, management API and static dashboard. This keeps the first deployable version simple enough to self-host and operate without an external message broker or orchestrator. Each registry protocol has its own URLs and adapter to avoid pretending NuGet and npm share a wire protocol. They share **only** the catalog, blob store and administration interfaces.
 
+Go E3 currently contributes only a canonical GOPROXY-coordinate parser and offline ZIP preflight. It does not add runtime HTTP routing, storage, a service or an advertised package ecosystem.
+
 ## Components and boundaries
 
 ```mermaid
 flowchart TB
-  C[NuGet, npm, Cargo, PyPI, OCI, Maven clients] --> A[Native registry adapters]
+  C[NuGet, npm, Cargo, PyPI, OCI, Maven, Raw clients] --> A[Native registry adapters]
   W[Dashboard and management clients] --> M[Management API and skill import]
   A --> P[Shared access and policy]
   M --> P

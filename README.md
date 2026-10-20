@@ -12,7 +12,7 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Go E3 groundwork](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
 
 **A self-hosted distribution hub for developer packages and AI agent skills.**
 
@@ -61,6 +61,8 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
 
+**Not a supported Go registry:** V4 E3 currently includes a strict GOPROXY request-coordinate parser and an offline Go ZIP preflight (bounded entry inspection, path safety, identity and compressed ZIP SHA-256). These are development building blocks only: **no GOPROXY HTTP endpoint, publication workflow, native Go client interoperability, checksum database verification or private Go feed** is available. See [Go groundwork](docs/go-proxy.md) and the [20 October delivery checkpoint](docs/roadmap-status-2026-10-20.md).
+
 ### Use Packory as a registry
 
 NuGet service index: `http://localhost:8080/nuget/v3/index.json`.
@@ -80,7 +82,7 @@ Publish operations require an appropriate token. [API examples](docs/api.md) exp
 
 ```mermaid
 flowchart LR
-  C["NuGet, npm, Cargo, PyPI, OCI clients"] --> App["Packory ASP.NET Core"]
+  C["NuGet, npm, Cargo, PyPI, OCI, Maven, Raw clients"] --> App["Packory ASP.NET Core"]
   Dashboard["Browser dashboard and REST clients"] --> App
   MCP["MCP clients"] --> ReadOnly["Read-only /mcp API"]
   ReadOnly --> App
@@ -106,7 +108,7 @@ NuGet and npm keep their **own native protocols** while sharing the catalog and 
 - Search covers locally indexed artifacts. Fresh upstream metadata and uncached downloads may require connectivity.
 - Static tokens are not individual user accounts. **OIDC JWT validation is implemented but browser SSO/BFF, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The existing admin-only log records **successful hosted publishes**, not every action or denied attempt.
 - Reserved NuGet ID prefixes and npm scopes can prevent configured private namespaces from falling back to public upstreams. This is **not** a comprehensive package-policy or malware-scanning solution. Signature enforcement, cache eviction and automatic license compliance are also absent.
-- **Cargo, PyPI and OCI hosted adapters are implemented experimentally.** PostgreSQL and S3 are selectable backends, but automatic SQLite/filesystem migration, distributed metadata/blob transactions and multi-node services are **not** implemented.
+- **Cargo, PyPI, OCI and global Maven release adapters are experimental.** PostgreSQL and S3 are selectable backends. Automatic SQLite/filesystem migration and distributed DB/blob transactions are absent. A constrained PostgreSQL/S3 read-only multi-instance profile is tested; **multiple active writers are not supported**.
 
 Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **the selected metadata database and artifact storage consistently**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
 
@@ -126,7 +128,7 @@ bash scripts/smoke-ecosystems.sh
 
 ## Documentation and contributions
 
-[Documentation index](docs/README.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [Go preflight (not a registry)](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
 
