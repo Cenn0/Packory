@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Data.Sqlite;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -441,4 +442,67 @@ public sealed class McpProtocolTests
         Assert.Equal(-32602, error.RootElement.GetProperty("error").GetProperty("code").GetInt32());
         Assert.DoesNotContain("\"skills\":", content, StringComparison.Ordinal);
     }
+    [Fact]
+    public async Task SkillsExtensionResumesAfterBoundedPageOfMissingApprovedArchives()
+    {
+        using var host = new Host();
+        using var http = host.CreateClient();
+        var settings = host.Services.GetRequiredService<Settings>();
+        // Test-only database fixtures omit ZIP blobs deliberately. The first
+        // page is empty, but its opaque marker must advance after 200 checked
+        // candidates rather than looping forever or skipping a later real Skill.
+        using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = Path.Combine(settings.DataDirectory, "packory.sqlite") }.ToString()))
+        {
+            db.Open();
+            using var tx = db.BeginTransaction();
+            using var command = db.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = """
+                INSERT INTO skills(name,version,description,updated_at)
+                VALUES(@name,'1.0.0','Synthetic invalid-blob fixture',@now);
+                INSERT INTO skill_security_revisions
+                    (name,version,description,sha256,staging_key,state,updated_at)
+                VALUES(@name,'1.0.0','Synthetic invalid-blob fixture',@digest,
+                       'synthetic-no-blob','APPROVED',@now)
+                """;
+            command.Parameters.AddWithValue("@name", "");
+            command.Parameters.AddWithValue("@now", "2026-01-01T00:00:00.0000000+00:00");
+            command.Parameters.AddWithValue("@digest", new string('a', 64));
+            for (var i = 0; i < 205; i++)
+            {
+                command.Parameters["@name"].Value = "broken-" +
+                    i.ToString("D3", System.Globalization.CultureInfo.InvariantCulture);
+                command.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        var valid = await host.Publish("zz-visible");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var mcp = await Connect(http, timeout.Token);
+        var first = await Request(mcp, "skills/list", new JsonObject(), timeout.Token);
+        AssertFreshPrivate(first);
+        Assert.Empty(SkillUris(first));
+        var cursor = first.GetProperty("nextCursor").GetString();
+        Assert.False(string.IsNullOrEmpty(cursor));
+
+        var second = await Request(mcp, "skills/list",
+            new JsonObject { ["cursor"] = cursor }, timeout.Token);
+        AssertFreshPrivate(second);
+        Assert.Single(SkillUris(second));
+        Assert.Contains(PackoryMcpCatalog.UriFor("1.0.0", "zz-visible"), SkillUris(second));
+        Assert.False(second.TryGetProperty("nextCursor", out _));
+
+        // A cursor from one operation cannot be replayed against the other.
+        var rejected = await Assert.ThrowsAsync<McpProtocolException>(() =>
+            Request(mcp, "skills/list",
+                new JsonObject { ["cursor"] = McpSkillCursor.Encode(
+                    "approved-skill-tool", "broken-199", "1.0.0") }, timeout.Token));
+        Assert.Equal(McpErrorCode.InvalidParams, rejected.ErrorCode);
+        host.Revoke("zz-visible", valid.Digest);
+        var afterRevoke = await Request(mcp, "skills/list",
+            new JsonObject { ["cursor"] = cursor }, timeout.Token);
+        Assert.Empty(SkillUris(afterRevoke));
+    }
+
 }
