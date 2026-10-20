@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Packory;
 using Xunit;
 
@@ -31,7 +32,7 @@ public sealed class ApiTests
     }
 
     private sealed class Host(Func<HttpRequestMessage, HttpResponseMessage>? upstream = null,
-        Action<Settings>? configure = null) : WebApplicationFactory<Program>
+        Action<Settings>? configure = null, bool backgroundSkillScanning = true) : WebApplicationFactory<Program>
     {
         private readonly string _data = Path.Combine(Path.GetTempPath(), "packory-tests-" + Guid.NewGuid().ToString("N"));
         public string DataDirectory => _data;
@@ -62,6 +63,7 @@ public sealed class ApiTests
                 configure?.Invoke(cfg);
                 cfg.Validate();
                 services.AddSingleton(cfg);
+                if (!backgroundSkillScanning) services.DisableBackgroundSkillScanning();
                 services.AddHttpClient("upstream")
                     .ConfigurePrimaryHttpMessageHandler(() => new FakeUpstream(upstream ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
             });
@@ -94,6 +96,20 @@ public sealed class ApiTests
             writer.Write($"<package><metadata><id>{name}</id><version>{version}</version><authors>Test</authors><description>Example library</description></metadata></package>");
         }
         return memory.ToArray();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ManualScanIsolationPreservesSecurityEnforcementAndDefaultWorker(bool backgroundSkillScanning)
+    {
+        using var host = backgroundSkillScanning ? new Host() : new Host(backgroundSkillScanning: false);
+        using var client = host.CreateClient();
+        var coordinator = host.Services.GetRequiredService<SkillScanCoordinator>();
+        Assert.True(host.Services.GetRequiredService<Settings>().SkillSecurityEnforced);
+        Assert.Equal(backgroundSkillScanning,
+            host.Services.GetServices<IHostedService>().Contains(coordinator));
+        Assert.Equal(backgroundSkillScanning, coordinator.ExecuteTask is not null);
     }
 
     [Fact]
@@ -635,7 +651,7 @@ public sealed class ApiTests
     [Fact]
     public async Task Skills_EnforcedUploadIsQueuedAndNeverPublicBeforeReview()
     {
-        using var host = new Host();
+        using var host = new Host(backgroundSkillScanning: false);
         using var client = host.CreateClient();
         static byte[] Zip()
         {
@@ -731,7 +747,7 @@ public sealed class ApiTests
     [Fact]
     public async Task ApprovedSkillTamperingFailsClosedAcrossRestAndMcp()
     {
-        using var host = new Host();
+        using var host = new Host(backgroundSkillScanning: false);
         using var client = host.CreateClient();
         var settings = host.Services.GetRequiredService<Settings>();
         var database = host.Services.GetRequiredService<IPackageDatabase>();
@@ -890,7 +906,7 @@ public sealed class ApiTests
             return data.ToArray();
         }
 
-        using var host = new Host();
+        using var host = new Host(backgroundSkillScanning: false);
         using var client = host.CreateClient();
         var bytes = Archive();
         using var form = new MultipartFormDataContent();

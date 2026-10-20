@@ -210,6 +210,7 @@ public sealed class SkillQualityAssessmentTests
                     DataDirectory = _data, PublicBaseUrl = "http://localhost:8080",
                     AdminToken = Admin, ReadToken = Reader, AnonymousRead = anonymousRead
                 });
+                services.DisableBackgroundSkillScanning();
             });
         }
         protected override void Dispose(bool disposing)

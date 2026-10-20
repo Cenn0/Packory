@@ -54,6 +54,7 @@ public sealed class McpProtocolTests
                 };
                 settings.Validate();
                 services.AddSingleton(settings);
+                services.DisableBackgroundSkillScanning();
             });
         }
 
