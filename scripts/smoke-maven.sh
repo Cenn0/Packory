@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bounded native Maven 3 release-consumer acceptance.
-# Hosted bytes are uploaded using Packory PUT, NOT the native Maven deploy plugin.
-# A native Maven deploy would also PUT mutable maven-metadata.xml: still unsupported.
+# Hosted bytes and verified immutable checksum sidecars use Packory PUT, not
+# the native Maven deploy plugin. Mutable maven-metadata.xml PUT is unsupported.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
@@ -118,9 +118,24 @@ for artifact in sample helper; do
       -H "Content-Type: application/octet-stream" \
       --data-binary "@$WORK/payload/$artifact-1.0.0.$extension" \
       "$BASE/maven/com/packory/smoke/$artifact/1.0.0/$artifact-1.0.0.$extension" >/dev/null
+    # Maven sends artifact checksum PUTs during deployment. Validate a
+    # generated SHA-256 against Packory's own committed immutable digest.
+    digest="$(openssl dgst -sha256 -r "$WORK/payload/$artifact-1.0.0.$extension")"
+    digest="${digest%% *}"
+    curl --fail-with-body -sS -X PUT \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: text/plain" \
+      --data-binary "$digest" \
+      "$BASE/maven/com/packory/smoke/$artifact/1.0.0/$artifact-1.0.0.$extension.sha256" >/dev/null
+    actual="$(curl --fail-with-body -sS \
+      "$BASE/maven/com/packory/smoke/$artifact/1.0.0/$artifact-1.0.0.$extension.sha256")"
+    if [ "$actual" != "$digest" ]; then
+      echo "Maven sidecar checksum differs from the committed artifact" >&2
+      exit 1
+    fi
   done
 done
-echo "Maven native smoke: two POMs and JARs published"
+echo "Maven native smoke: two POMs, JARs and verified SHA-256 sidecars published"
 
 # Maven itself needs its plugin and plugin dependency resolution through its
 # regular public Maven repository. Only the synthetic dependency coordinates are
