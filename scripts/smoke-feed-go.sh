@@ -117,11 +117,12 @@ GO
 for feed in go-alpha go-beta; do
   if [ "$feed" = go-alpha ]; then READ="$A_READ"; EXPECT=alpha; else READ="$B_READ"; EXPECT=beta; fi
   mkdir -p "$WORK/$feed/home" "$WORK/$feed/modcache"
+  cp -a "$WORK/consumer" "$WORK/$feed/consumer"
   chmod 700 "$WORK/$feed/home"
   printf 'machine 127.0.0.1 login packory password %s\n' "$READ" >"$WORK/$feed/home/.netrc"
   chmod 600 "$WORK/$feed/home/.netrc"
   (
-    cd "$WORK/consumer"
+    cd "$WORK/$feed/consumer"
     HOME="$WORK/$feed/home" GOPROXY="$BASE/feeds/$feed/go" \
       GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
       GOMODCACHE="$WORK/$feed/modcache" GOTOOLCHAIN=local \
