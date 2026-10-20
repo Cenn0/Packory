@@ -434,7 +434,7 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     {
         var feedId = feedGrant.Split(':')[1];
         if (db.Feed(feedId) is not
-            { Kind: "nuget", Mode: "hosted", Visibility: "private", Enabled: true })
+            { Kind: "nuget" or "raw", Mode: "hosted", Visibility: "private", Enabled: true })
             return Results.BadRequest(new { error = "Feed grants require an active private hosted NuGet feed" });
     }
     var id = Guid.NewGuid().ToString("N");
@@ -503,6 +503,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
 }).RequireRateLimiting("publish");
 FeedEndpoints.Map(app);
 FeedNugetEndpoints.Map(app);
+FeedRawEndpoints.Map(app);
 RawEndpoints.Map(app);
 MavenEndpoints.Map(app);
 GoEndpoints.Map(app);
