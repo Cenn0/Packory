@@ -223,6 +223,84 @@ public sealed class SchemaVersionTests
     }
 
     [Fact]
+    public void SqliteV8ToV9WidensFeedAssetsWithoutLosingImmutableRawRows()
+    {
+        var root = Path.Combine(Path.GetTempPath(),
+            "packory-v9-feed-upgrade-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            const string feed = "v9-raw";
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(feed, "raw",
+                "hosted", "private", "Synthetic v8 to v9", false, at, at),
+                "synthetic"));
+            Assert.True(db.TrySetHostedFeedEnabled(feed, "raw", true, "synthetic"));
+            var asset = new FeedAssetEntry(feed, "raw", "same.name/1.0.0",
+                "same.name", "1.0.0", "application/octet-stream",
+                new string('a', 64), 123, at);
+            Assert.True(db.PublishFeedAsset(asset, "synthetic"));
+
+            using (var connection = db.Open())
+            {
+                using (var pragma = connection.CreateCommand())
+                {
+                    pragma.CommandText = "PRAGMA foreign_keys=OFF";
+                    pragma.ExecuteNonQuery();
+                }
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = """
+                        CREATE TABLE feed_assets_old_v8 (
+                            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+                            kind TEXT NOT NULL CHECK(kind IN ('raw','maven')),
+                            path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+                            media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+                            size BIGINT NOT NULL CHECK(size > 0), created_at TEXT NOT NULL,
+                            PRIMARY KEY(feed_id,kind,path)
+                        );
+                        INSERT INTO feed_assets_old_v8 SELECT * FROM feed_assets;
+                        DROP TABLE feed_assets;
+                        ALTER TABLE feed_assets_old_v8 RENAME TO feed_assets;
+                        CREATE INDEX feed_assets_identity
+                            ON feed_assets(feed_id,kind,name,version);
+                        UPDATE packory_schema_version SET version=8 WHERE slot=1;
+                        """;
+                    command.ExecuteNonQuery();
+                }
+                using var enable = connection.CreateCommand();
+                enable.CommandText = "PRAGMA foreign_keys=ON";
+                enable.ExecuteNonQuery();
+            }
+
+            db.Initialize();
+            Assert.Equal(asset, db.GetFeedAsset(feed, "raw", asset.Path));
+            using var check = db.Open();
+            using var version = check.CreateCommand();
+            version.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(9, Convert.ToInt32(version.ExecuteScalar()));
+            version.CommandText = "PRAGMA foreign_key_check";
+            using var violations = version.ExecuteReader();
+            Assert.False(violations.Read());
+
+            // A new V9 Go ledger row is legal without weakening the already
+            // persisted private Raw row or its primary-key isolation.
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v9-go", "go",
+                "hosted", "private", "Synthetic Go", false, at, at), "synthetic"));
+            Assert.True(db.TrySetHostedFeedEnabled("v9-go", "go", true, "synthetic"));
+            var goEntry = new FeedAssetEntry("v9-go", "go",
+                "example.com/hello/@v/v1.2.3.zip", "example.com/hello",
+                "v1.2.3", "application/vnd.packory.go-module-bundle+zip",
+                new string('b', 64), 512, at);
+            Assert.True(FeedAssetEntry.Valid(goEntry));
+            Assert.True(db.PublishFeedAsset(goEntry, "synthetic"));
+            Assert.Equal(goEntry, db.GetFeedAsset("v9-go", "go", goEntry.Path));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void SqliteRejectsFutureVersionWithoutOverwritingMarker()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-schema-" + Guid.NewGuid().ToString("N"));
