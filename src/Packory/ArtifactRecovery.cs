@@ -89,7 +89,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         var feedId = pending.Name[..sep];
         var name = pending.Name[(sep + 1)..];
         if (!FeedDefinition.ValidId(feedId)) return false;
-        var kind = pending.Kind == "feed-raw" ? "raw" : "maven";
+        var kind = pending.Kind switch { "feed-raw" => "raw", "feed-maven" => "maven", "feed-go" => "go", _ => "" };
         var path = kind == "raw" ? FeedAssetEntry.RawPath(name, pending.Version) : name;
         var asset = database.GetFeedAsset(feedId, kind, path);
         return asset is not null && asset.Version == pending.Version &&
