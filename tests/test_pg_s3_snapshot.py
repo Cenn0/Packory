@@ -217,6 +217,8 @@ class SnapshotTests(unittest.TestCase):
                 (6, "maven_assets", (*mod.RAW_TABLES, *mod.MAVEN_TABLES)),
             (7, "go_modules", (*mod.RAW_TABLES, *mod.MAVEN_TABLES, *mod.GO_TABLES)),
             (8, "feed_assets", (*mod.RAW_TABLES, *mod.MAVEN_TABLES,
+                                *mod.GO_TABLES, *mod.FEED_ASSET_TABLES)),
+            (9, "feed_assets", (*mod.RAW_TABLES, *mod.MAVEN_TABLES,
                                 *mod.GO_TABLES, *mod.FEED_ASSET_TABLES))):
             with self.subTest(schema_version=schema_version):
                 with tempfile.TemporaryDirectory() as directory:
