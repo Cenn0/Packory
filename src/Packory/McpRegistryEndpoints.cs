@@ -160,7 +160,7 @@ public static class McpRegistryEndpoints
             try { manifest = McpRegistryManifest.Parse(bytes); }
             catch (InvalidDataException)
             {
-                return Results.BadRequest(new { error = "Unsupported or invalid remote-only server.json" });
+                return Results.BadRequest(new { error = "Unsupported or invalid inert server.json" });
             }
             if (!store.Stage(manifest))
                 return Results.Conflict(new { error = "Immutable name/version already exists" });

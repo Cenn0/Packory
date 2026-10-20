@@ -43,7 +43,7 @@ internal static class McpRegistryManifestShapes
     {
         if (value.ValueKind != JsonValueKind.String) throw new InvalidDataException("Expected string.");
         var text = value.GetString()!;
-        if (text.Length is 0 or > 0 && text.Length > max ||
+        if (text.Length == 0 || text.Length > max ||
             text.Any(c => char.IsControl(c) ||
                 char.GetUnicodeCategory(c) == UnicodeCategory.Format))
             throw new InvalidDataException("Unsafe or oversized manifest text.");
@@ -143,7 +143,7 @@ internal static class McpRegistryManifestShapes
             if (kind == "named")
             {
                 var name = Field(input, "name", 100);
-                if (!name.StartsWith('-', StringComparison.Ordinal) ||
+                if (!name.StartsWith("-", StringComparison.Ordinal) ||
                     name.Any(char.IsWhiteSpace))
                     Fail("Invalid named argument.");
                 if (input.TryGetProperty("valueHint", out _))
