@@ -16,6 +16,7 @@ Packory is an **experimental self-hosted registry hub**, not a production-certif
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
 | Experimental Maven release files and unsupported native deploy | [Maven](maven.md) |
+| Go GOPROXY parser groundwork (no serving endpoint) | [Go proxy](go-proxy.md) |
 | Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
 | Current merged scope, CI verification, and outstanding exit gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
 | MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
