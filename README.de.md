@@ -83,7 +83,7 @@ Zum Veröffentlichen von Paketen wird ein passender Token benötigt. Die [API-Be
 
 ```mermaid
 flowchart LR
-  C["NuGet-, npm-, Cargo-, PyPI- und OCI-Clients"] --> App["Packory ASP.NET Core"]
+  C["NuGet-, npm-, Cargo-, PyPI-, OCI-, Maven- und Raw-Clients"] --> App["Packory ASP.NET Core"]
   Web["Webdashboard und REST-Clients"] --> App
   MCP["MCP-Clients"] --> Read["Nur lesende /mcp-API"]
   Read --> App

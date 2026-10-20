@@ -82,7 +82,7 @@ Publish operations require an appropriate token. [API examples](docs/api.md) exp
 
 ```mermaid
 flowchart LR
-  C["NuGet, npm, Cargo, PyPI, OCI clients"] --> App["Packory ASP.NET Core"]
+  C["NuGet, npm, Cargo, PyPI, OCI, Maven, Raw clients"] --> App["Packory ASP.NET Core"]
   Dashboard["Browser dashboard and REST clients"] --> App
   MCP["MCP clients"] --> ReadOnly["Read-only /mcp API"]
   ReadOnly --> App
@@ -108,7 +108,7 @@ NuGet and npm keep their **own native protocols** while sharing the catalog and 
 - Search covers locally indexed artifacts. Fresh upstream metadata and uncached downloads may require connectivity.
 - Static tokens are not individual user accounts. **OIDC JWT validation is implemented but browser SSO/BFF, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The existing admin-only log records **successful hosted publishes**, not every action or denied attempt.
 - Reserved NuGet ID prefixes and npm scopes can prevent configured private namespaces from falling back to public upstreams. This is **not** a comprehensive package-policy or malware-scanning solution. Signature enforcement, cache eviction and automatic license compliance are also absent.
-- **Cargo, PyPI and OCI hosted adapters are implemented experimentally.** PostgreSQL and S3 are selectable backends, but automatic SQLite/filesystem migration, distributed metadata/blob transactions and multi-node services are **not** implemented.
+- **Cargo, PyPI, OCI and global Maven release adapters are experimental.** PostgreSQL and S3 are selectable backends. Automatic SQLite/filesystem migration and distributed DB/blob transactions are absent. A constrained PostgreSQL/S3 read-only multi-instance profile is tested; **multiple active writers are not supported**.
 
 Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **the selected metadata database and artifact storage consistently**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
 

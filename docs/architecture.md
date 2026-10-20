@@ -12,7 +12,7 @@ Go E3 currently contributes only a canonical GOPROXY-coordinate parser and offli
 
 ```mermaid
 flowchart TB
-  C[NuGet, npm, Cargo, PyPI, OCI, Maven clients] --> A[Native registry adapters]
+  C[NuGet, npm, Cargo, PyPI, OCI, Maven, Raw clients] --> A[Native registry adapters]
   W[Dashboard and management clients] --> M[Management API and skill import]
   A --> P[Shared access and policy]
   M --> P
