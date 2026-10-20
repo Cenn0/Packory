@@ -246,6 +246,84 @@ class SnapshotTests(unittest.TestCase):
                     with self.assertRaises(mod.SnapshotError):
                         mod.verify(root)
 
+    def test_schema_three_v7_includes_approval_and_registry_evidence(self):
+        """Current snapshots must not silently omit release decisions or registry review."""
+        class OneRow:
+            def __init__(self, value):
+                self.value = value
+
+            def fetchone(self):
+                return (self.value,)
+
+        class MetadataConnection:
+            def __init__(self, missing=None):
+                self.missing = missing
+
+            def execute(self, query, args=None):
+                if "to_regclass('packory_schema_version')" in query:
+                    return OneRow("packory_schema_version")
+                if query.startswith("SELECT version FROM packory_schema_version"):
+                    return OneRow(7)
+                if query == "SELECT to_regclass(%s)":
+                    return OneRow(None if args[0] == self.missing else args[0])
+                raise AssertionError("Unexpected test metadata SQL: " + query)
+
+        tables = mod.metadata_tables(MetadataConnection())
+        self.assertTrue(set(mod.SECURITY_REGISTRY_TABLES).issubset(tables))
+        for table in mod.SECURITY_REGISTRY_TABLES:
+            with self.subTest(missing=table):
+                with self.assertRaisesRegex(mod.SnapshotError, "Missing authoritative"):
+                    mod.metadata_tables(MetadataConnection(table))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "metadata.dump").write_bytes(b"synthetic")
+            fingerprints = {
+                name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+                for name in tables
+            }
+            manifest = {
+                "schema": 3, "profile": "postgresql-s3-offline",
+                "source": {"bucket": "test-bucket", "prefix": "test/", "database": "test-db"},
+                "postgres": {"path": "metadata.dump", "size": 9,
+                             "sha256": hashlib.sha256(b"synthetic").hexdigest(),
+                             "table_counts": {name: 0 for name in tables},
+                             "table_fingerprints": fingerprints,
+                             "database_schema_version": 7},
+                "objects": [], "delete_markers": []
+            }
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            self.assertEqual(3, mod.verify(root)["schema"])
+            for table in mod.SECURITY_REGISTRY_TABLES:
+                with self.subTest(omitted=table):
+                    altered = json.loads(json.dumps(manifest))
+                    del altered["postgres"]["table_counts"][table]
+                    del altered["postgres"]["table_fingerprints"][table]
+                    manifest_path.write_text(json.dumps(altered))
+                    with self.assertRaises(mod.SnapshotError):
+                        mod.verify(root)
+            manifest_path.write_text(json.dumps(manifest))
+            for table in mod.SECURITY_REGISTRY_TABLES:
+                with self.subTest(fingerprint_mismatch=table):
+                    altered = json.loads(json.dumps(manifest))
+                    altered["postgres"]["table_fingerprints"][table]["sha256"] = "a" * 64
+                    manifest_path.write_text(json.dumps(altered))
+                    # The format validator checks schema/key/count, but not
+                    # source SQL rows until the target restore is compared.
+                    self.assertEqual(3, mod.verify(root)["schema"])
+                    self.assertNotEqual(
+                        altered["postgres"]["table_fingerprints"][table]["sha256"],
+                        manifest["postgres"]["table_fingerprints"][table]["sha256"])
+            # Old v2 manifests remain verifiable under their explicitly weaker
+            # contract. They are not equivalent to modern complete v3 evidence.
+            old = json.loads(json.dumps(manifest))
+            old["schema"] = 2
+            for table in mod.SECURITY_REGISTRY_TABLES:
+                del old["postgres"]["table_counts"][table]
+                del old["postgres"]["table_fingerprints"][table]
+            manifest_path.write_text(json.dumps(old))
+            self.assertEqual(2, mod.verify(root)["schema"])
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")
