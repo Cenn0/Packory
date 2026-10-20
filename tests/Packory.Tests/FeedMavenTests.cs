@@ -196,7 +196,7 @@ public sealed class FeedMavenTests
         Assert.Empty(db.PendingPublications());
         Assert.Equal(0, host.Services.GetRequiredService<ArtifactRecovery>().MissingHostedCount());
         var result = await host.Services.GetRequiredService<ArtifactIntegrityScanner>()
-            .ScanAsync(0, 20, CancellationToken.None);
+            .ScanAsync(0, 10, CancellationToken.None);
         Assert.Equal(2, result.Items.Count(x => x.Kind == "feed-maven" &&
             x.State == "digest_match"));
 
