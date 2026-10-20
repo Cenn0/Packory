@@ -12,7 +12,7 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go E3 groundwork](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go hosted registry](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
 
 **A self-hosted distribution hub for developer packages and AI agent skills.**
 
@@ -53,6 +53,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **OCI (experimental)** | Hosted Distribution v2 endpoints for SHA-256 blobs, chunk uploads, manifests, tags and referrers; incomplete client/auth support |
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Maven (experimental)** | Immutable hosted release files, POM identity checks, SHA-256, Maven-consumable URLs; no native deploy, SNAPSHOT, proxy or isolated Maven feeds |
+| **Go modules (hosted experimental)** | Authenticated multipart import and native GOPROXY reads for immutable module versions; bounded Go CLI smoke; no mirror, per-feed isolation or full protocol qualification |
 | **Raw / Generic (experimental)** | Immutable binary upload/download with SHA-256 metadata, authentication, ranged downloads; global namespace only, **no native package protocol** |
 | **Agent Skills** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download under the enforcing policy; revocation and rescan |
 | **Static Skill quality** | Deterministic documentation findings, improvement suggestions and coverage for immutable published Skills through MCP, REST and dashboard; separate from safety and behavior checks |
@@ -62,7 +63,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
 
-**Not a supported Go registry:** V4 E3 currently includes a strict GOPROXY request-coordinate parser and an offline Go ZIP preflight (bounded entry inspection, path safety, identity and compressed ZIP SHA-256). These are development building blocks only: **no GOPROXY HTTP endpoint, publication workflow, native Go client interoperability, checksum database verification or private Go feed** is available. See [Go groundwork](docs/go-proxy.md) and the [20 October delivery checkpoint](docs/roadmap-status-2026-10-20.md).
+**Go modules (experimental hosted profile):** Packory provides authenticated module import and native GOPROXY hosted download endpoints for immutable `.info`, `.mod` and `.zip` revisions. This profile does not include an upstream mirror, checksum-database service, private Go feeds or general protocol certification. See [Go hosted registry](docs/go-proxy.md) and the [20 October checkpoint](docs/roadmap-status-2026-10-20.md).
 
 ### Use Packory as a registry
 
@@ -91,7 +92,7 @@ The [MCP delivery roadmap](docs/mcp-roadmap.md) separates the delivered function
 
 ```mermaid
 flowchart LR
-  C["NuGet, npm, Cargo, PyPI, OCI, Maven, Raw clients"] --> App["Packory ASP.NET Core"]
+  C["NuGet, npm, Cargo, PyPI, OCI, Maven, Go, Raw clients"] --> App["Packory ASP.NET Core"]
   Dashboard["Browser dashboard and REST clients"] --> App
   MCP["MCP clients"] --> ReadOnly["Read-only /mcp API"]
   ReadOnly --> App
@@ -137,6 +138,6 @@ bash scripts/smoke-ecosystems.sh
 
 ## Documentation and contributions
 
-[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go preflight (not a registry)](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go hosted registry](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.

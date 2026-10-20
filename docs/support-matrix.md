@@ -1,6 +1,6 @@
 # Packory protocol and deployment support matrix
 
-**Evidence baseline:** 20 October 2026; merged Maven native consumer [#93](https://github.com/Cenn0/Packory/pull/93), Go parser [#94](https://github.com/Cenn0/Packory/pull/94) and Maven CI reliability [#95](https://github.com/Cenn0/Packory/pull/95). The offline ZIP inspector is not native interoperability evidence. This matrix is a record of test *coverage*, not an official certification by NuGet, npm, Docker, Cargo, PyPI or S3 vendors. **Re-run and update this file when changing the released code.**
+**Evidence baseline:** 20 October 2026; merged Maven native consumer [#93](https://github.com/Cenn0/Packory/pull/93), Go parser [#94](https://github.com/Cenn0/Packory/pull/94) and Maven CI reliability [#95](https://github.com/Cenn0/Packory/pull/95). The hosted Go implementation in PR #97 adds native client coverage beyond the earlier offline ZIP preflight; re-run on merged main before advertising its matrix row as merged evidence. This matrix is a record of test *coverage*, not an official certification by NuGet, npm, Docker, Cargo, PyPI or S3 vendors. **Re-run and update this file when changing the released code.**
 
 The [20 October checkpoint](roadmap-status-2026-10-20.md) also records the MCP functional continuation. The [MCP roadmap](mcp-roadmap.md) distinguishes delivered read/discovery/quality profiles from broader Registry, client, execution and release work.
 

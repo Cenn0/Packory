@@ -27,6 +27,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         }
         foreach (var maven in database.MavenAssets())
             if (!blobs.Contains(MavenEndpoints.Key(maven.Path))) missing++;
+        foreach (var module in database.GoModules())
+            if (!GoModuleBundle.ValidRecord(module) ||
+                !blobs.Contains(GoModuleBundle.Key(module.Name, module.Version))) missing++;
         foreach (var revision in database.FeedNugetRevisions())
         {
             if (!FeedDefinition.ValidId(revision.FeedId) || !Names.Nuget(revision.Name) ||
@@ -49,6 +52,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
+        "go" when GoModuleBundle.ValidCoordinates(pending.Name, pending.Version) &&
+            pending.Key == GoModuleBundle.Key(pending.Name, pending.Version) =>
+            database.GetGoModule(pending.Name, pending.Version) is not null,
         "maven" when pending.Key == MavenEndpoints.Key(pending.Name) =>
             database.GetMavenAsset(pending.Name) is { } asset && asset.Version == pending.Version,
         "oci-blob" => database.OciHasBlob(pending.Name, pending.Version),
@@ -137,6 +143,22 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             }
         }
 
+        foreach (var module in database.GoModules())
+        {
+            if (!GoModuleBundle.ValidRecord(module))
+            {
+                missingHosted++;
+                logger.LogError("Invalid hosted Go module ledger entry.");
+                continue;
+            }
+            var key = GoModuleBundle.Key(module.Name, module.Version);
+            known.Add(key);
+            if (!blobs.Contains(key))
+            {
+                missingHosted++;
+                logger.LogError("Hosted Go module bundle missing from blob store.");
+            }
+        }
         foreach (var maven in database.MavenAssets())
         {
             if (!MavenEndpoints.ValidRecord(maven))
@@ -216,7 +238,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                     key.StartsWith("oci/blobs/", StringComparison.Ordinal) && key.EndsWith(".blob", StringComparison.Ordinal) ||
                     key.StartsWith("oci/manifests/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal) ||
                      key.StartsWith("raw/", StringComparison.Ordinal) && key.EndsWith("/payload.blob", StringComparison.Ordinal) ||
-                    key.StartsWith("maven/", StringComparison.Ordinal);
+                    key.StartsWith("maven/", StringComparison.Ordinal) ||
+                    key.StartsWith("go/modules/", StringComparison.Ordinal) &&
+                        key.EndsWith(".bundle", StringComparison.Ordinal);
                 if (!immutable || known.Contains(key) || pendingKeys.Contains(key)) continue;
                 var destination = Path.Combine(quarantine, key.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

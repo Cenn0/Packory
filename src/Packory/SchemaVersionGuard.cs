@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 6;
+    public const int Current = 7;
 
     private static int RequireKnown(object? value)
     {
@@ -105,6 +105,19 @@ public static class SchemaVersionGuard
         );
         CREATE INDEX IF NOT EXISTS maven_assets_coordinates
             ON maven_assets(group_id,artifact_id,version);
+        """;
+
+    // V7: immutable Go .info/.mod/.zip triplet committed as one blob/metadata revision.
+    // Global hosted only, no cross-protocol feed isolation claim.
+    private const string GoModuleSchema = """
+        CREATE TABLE IF NOT EXISTS go_modules (
+            name TEXT NOT NULL, version TEXT NOT NULL,
+            bundle_sha256 TEXT NOT NULL, bundle_size BIGINT NOT NULL CHECK(bundle_size > 0),
+            zip_sha256 TEXT NOT NULL, zip_size BIGINT NOT NULL CHECK(zip_size > 0),
+            mod_sha256 TEXT NOT NULL, mod_size BIGINT NOT NULL CHECK(mod_size > 0),
+            published_at TEXT NOT NULL, PRIMARY KEY(name,version)
+        );
+        CREATE INDEX IF NOT EXISTS go_modules_by_name ON go_modules(name,version);
         """;
 
     private static readonly (string Id, string Kind, string Name)[] Defaults =
@@ -203,6 +216,13 @@ public static class SchemaVersionGuard
             mavenSchema.CommandText = MavenAssetSchema;
             mavenSchema.ExecuteNonQuery();
         }
+        if (version < 7)
+        {
+            using var goSchema = connection.CreateCommand();
+            goSchema.Transaction = tx;
+            goSchema.CommandText = GoModuleSchema;
+            goSchema.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -287,6 +307,11 @@ public static class SchemaVersionGuard
         {
             using var mavenSchema = new NpgsqlCommand(MavenAssetSchema, connection, tx);
             mavenSchema.ExecuteNonQuery();
+        }
+        if (version < 7)
+        {
+            using var goSchema = new NpgsqlCommand(GoModuleSchema, connection, tx);
+            goSchema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",

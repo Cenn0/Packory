@@ -72,6 +72,14 @@ public sealed class ArtifactIntegrityScanner(
             refs.Add(new Reference(artifact.Kind, artifact.Name, artifact.Version,
                 null, artifact.Origin, key));
         }
+        foreach (var module in database.GoModules())
+        {
+            var valid = GoModuleBundle.ValidRecord(module);
+            refs.Add(new Reference("go", module.Name, module.Version, null,
+                "hosted", valid ? GoModuleBundle.Key(module.Name, module.Version) : null,
+                valid ? module.BundleSha256 : null,
+                valid ? module.BundleSize : null));
+        }
         foreach (var maven in database.MavenAssets())
         {
             var valid = MavenEndpoints.ValidRecord(maven);

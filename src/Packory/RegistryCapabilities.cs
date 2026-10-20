@@ -25,6 +25,8 @@ public static class RegistryCapabilities
             "Docker smoke; Helm native compatibility independently gated; Bearer challenge not implemented"),
         new("maven", "Maven 2 repository layout", true, false, false, false, "experimental",
             "Native Maven consumption of hosted release files only; no native deploy, SNAPSHOT or proxy"),
+        new("go", "Go GOPROXY hosted", true, false, false, false, "native-client-tested",
+            "Packory-specific import and Go native consumer; no mirror, isolated feeds, pseudo-versions or full ZIP parity"),
         new("raw", "Packory generic byte API", true, false, false, false, "experimental",
             "Global versioned immutable assets; not a native package protocol or isolated feed"),
         new("skill", "Versioned Agent Skill ZIP import", true, false, false, false, "experimental",

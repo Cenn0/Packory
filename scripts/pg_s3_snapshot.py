@@ -32,9 +32,10 @@ DIGEST_TABLES = ("nuget_digests",)
 ISOLATED_FEED_TABLES = ("feed_nuget_versions",)
 RAW_TABLES = ("raw_artifacts",)
 MAVEN_TABLES = ("maven_assets",)
+GO_TABLES = ("go_modules",)
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
-    *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES))
+    *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES, *GO_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -98,14 +99,15 @@ def metadata_tables(connection):
         return CORE_TABLES
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in (1, 2, 3, 4, 5, 6):
+    if not row or type(row[0]) is not int or row[0] not in (1, 2, 3, 4, 5, 6, 7):
         raise SnapshotError("Unknown Packory database schema version")
     return (CORE_TABLES + ("packory_schema_version",) +
             (FEED_TABLES if row[0] >= 2 else ()) +
             (DIGEST_TABLES if row[0] >= 3 else ()) +
             (ISOLATED_FEED_TABLES if row[0] >= 4 else ()) +
             (RAW_TABLES if row[0] >= 5 else ()) +
-            (MAVEN_TABLES if row[0] >= 6 else ()))
+            (MAVEN_TABLES if row[0] >= 6 else ()) +
+            (GO_TABLES if row[0] >= 7 else ()))
 
 
 def counts(connection):
@@ -353,10 +355,10 @@ def verify(folder):
             raise SnapshotError("Invalid PostgreSQL row counts")
         if manifest["schema"] == SCHEMA:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in (0, 1, 2, 3, 4, 5, 6):
+            if type(db_version) is not int or db_version not in (0, 1, 2, 3, 4, 5, 6, 7):
                 raise SnapshotError("Unknown Packory database schema version")
             required = set(CORE_TABLES)
-            if db_version in (1, 2, 3, 4, 5, 6):
+            if db_version in (1, 2, 3, 4, 5, 6, 7):
                 required.add("packory_schema_version")
             if db_version >= 2:
                 required.update(FEED_TABLES)
@@ -368,6 +370,8 @@ def verify(folder):
                 required.update(RAW_TABLES)
             if db_version >= 6:
                 required.update(MAVEN_TABLES)
+            if db_version >= 7:
+                required.update(GO_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or
@@ -423,7 +427,10 @@ def backup(directory, s3, bucket, prefix, max_bytes):
                              "sha256": checksum(staged / "metadata.dump"),
                              "table_counts": {name: value["count"] for name, value in final.items()},
                              "table_fingerprints": final,
-                             "database_schema_version": (4 if "feed_nuget_versions" in tables else
+                             "database_schema_version": (7 if "go_modules" in tables else
+                                                         6 if "maven_assets" in tables else
+                                                         5 if "raw_artifacts" in tables else
+                                                         4 if "feed_nuget_versions" in tables else
                                                          3 if "nuget_digests" in tables else
                                                          2 if "feeds" in tables else
                                                          1 if "packory_schema_version" in tables else 0)},

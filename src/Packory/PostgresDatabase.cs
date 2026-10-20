@@ -72,6 +72,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_nuget_versions') IS NOT NULL
                     AND to_regclass('raw_artifacts') IS NOT NULL
                     AND to_regclass('maven_assets') IS NOT NULL
+                    AND to_regclass('go_modules') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -155,6 +156,76 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         cmd.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public GoModuleRevision? GetGoModule(string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT name,version,bundle_sha256,bundle_size,zip_sha256,zip_size,
+                mod_sha256,mod_size,published_at FROM go_modules
+            WHERE name=@name AND version=@version
+            """, null, ("name", name), ("version", version));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadGo(reader) : null;
+    }
+
+    private static GoModuleRevision ReadGo(NpgsqlDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetInt64(3), reader.GetString(4), reader.GetInt64(5),
+            reader.GetString(6), reader.GetInt64(7), reader.GetString(8));
+
+    public IReadOnlyList<GoModuleRevision> GoModules()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT name,version,bundle_sha256,bundle_size,zip_sha256,zip_size,
+                mod_sha256,mod_size,published_at FROM go_modules ORDER BY name,version
+            """);
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<GoModuleRevision>();
+        while (reader.Read()) rows.Add(ReadGo(reader));
+        return rows;
+    }
+
+    public IReadOnlyList<string> GoModuleVersions(string name)
+    {
+        using var db = Open();
+        using var cmd = Command(db,
+            "SELECT version FROM go_modules WHERE name=@name ORDER BY version",
+            null, ("name", name));
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public bool PublishGoModule(GoModuleRevision entry, string actor)
+    {
+        if (!GoModuleBundle.ValidRecord(entry))
+            throw new ArgumentException("Invalid immutable Go metadata.", nameof(entry));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            INSERT INTO go_modules(name,version,bundle_sha256,bundle_size,
+                zip_sha256,zip_size,mod_sha256,mod_size,published_at)
+            VALUES(@name,@version,@bundle,@bundleSize,@zip,@zipSize,@mod,@modSize,@at)
+            ON CONFLICT DO NOTHING
+            """, tx, ("name", entry.Name), ("version", entry.Version),
+            ("bundle", entry.BundleSha256), ("bundleSize", entry.BundleSize),
+            ("zip", entry.ZipSha256), ("zipSize", entry.ZipSize),
+            ("mod", entry.ModSha256), ("modSize", entry.ModSize),
+            ("at", entry.PublishedAt));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        using var catalog = Command(db, """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('go',@name,@version,'Hosted Go module','hosted',@at)
+            """, tx, ("name", entry.Name), ("version", entry.Version),
+            ("at", entry.PublishedAt));
+        catalog.ExecuteNonQuery();
+        Audit(db, tx, "publish", "go", entry.Name, entry.Version, actor);
+        tx.Commit();
+        return true;
     }
 
     public MavenAssetEntry? GetMavenAsset(string path)

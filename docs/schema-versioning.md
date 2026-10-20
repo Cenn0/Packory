@@ -53,3 +53,8 @@ database schema V4, and strict verification refuses a V4 snapshot
 without it. Previous schema-version-specific snapshot formats remain
 separately recognized. No rollback is supported without a pre-upgrade
 coordinated offline database+object restore.
+
+
+## V7: Hosted Go modules
+
+SQLite and PostgreSQL now include `go_modules`, recording immutable module/version identity, bundled triplet SHA-256, ZIP and go.mod digests, byte counts and release timestamp. One blob holds all three GOPROXY responses, made visible by a single metadata+catalog+audit transaction. Publication intents preserve incomplete-write evidence. PostgreSQL/S3 offline snapshots fingerprint `go_modules` at V7. Forward schema migration is tested; a rollback and real-provider restore are separate requirements.

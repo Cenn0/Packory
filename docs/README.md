@@ -2,7 +2,7 @@
 
 [← English README](../README.md) · [Deutsch](../README.de.md)
 
-Packory is a **self-hosted registry hub in active development**. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. The read-only MCP server, reviewed MCP Registry metadata and static Skill quality assessment have separate documented functional profiles. The support matrix records their tested scope and remaining gaps; no complete upstream interoperability or production certification is implied. Go has offline validation groundwork only, not a native registry.
+Packory is a **self-hosted registry hub in active development**. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. The read-only MCP server, reviewed MCP Registry metadata and static Skill quality assessment have separate documented functional profiles. The support matrix records their tested scope and remaining gaps; no complete upstream interoperability or production certification is implied. Go provides a limited hosted GOPROXY download and authenticated import profile; see [Go hosted](go-proxy.md) for the exact acceptance boundary.
 
 | Goal | Guide |
 | --- | --- |
@@ -17,8 +17,7 @@ Packory is a **self-hosted registry hub in active development**. Current hosted 
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
 | Delivered MCP functions, remaining Registry/protocol work, quality and optional gateway | [MCP delivery roadmap](mcp-roadmap.md) |
 | Experimental Maven release files and unsupported native deploy | [Maven](maven.md) |
-| Go GOPROXY parser and ZIP preflight (**no registry endpoint**) | [Go E3 groundwork](go-proxy.md) |
-| Go GOPROXY parser groundwork (no serving endpoint) | [Go proxy](go-proxy.md) |
+| Go hosted GOPROXY, module importer and native client test profile | [Go hosted registry](go-proxy.md) |
 | Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
 | Current V4/MS5 progress, MCP continuation and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |
 | Earlier delivery evidence and unfinished V3 gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
