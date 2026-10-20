@@ -18,6 +18,8 @@ public static class MavenEndpoints
 
     public static string Key(string path) => "maven/" + path;
 
+    public static string? AssetMediaType(string extension) => MediaType(extension);
+
     private static string? MediaType(string extension) => extension switch
     {
         "pom" => "application/xml",
