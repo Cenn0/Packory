@@ -7,6 +7,10 @@ namespace Packory;
 public interface IPackageDatabase
 {
     void Initialize();
+    GoModuleRevision? GetGoModule(string name, string version);
+    IReadOnlyList<GoModuleRevision> GoModules();
+    IReadOnlyList<string> GoModuleVersions(string name);
+    bool PublishGoModule(GoModuleRevision revision, string actor);
     RawArtifactEntry? GetRawArtifact(string name, string version);
     MavenAssetEntry? GetMavenAsset(string path);
     IReadOnlyList<MavenAssetEntry> MavenAssets();

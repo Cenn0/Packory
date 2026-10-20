@@ -16,6 +16,9 @@ public sealed record RawArtifactEntry(string Name, string Version, string MediaT
     string Sha256, long Size, string CreatedAt);
 public sealed record MavenAssetEntry(string Path, string GroupId, string ArtifactId, string Version,
     string Sha256, long Size, string MediaType, string CreatedAt);
+public sealed record GoModuleRevision(string Name, string Version, string BundleSha256,
+    long BundleSize, string ZipSha256, long ZipSize,
+    string ModSha256, long ModSize, string PublishedAt);
 public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
     string Description, string Sha512, long Size);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
@@ -123,6 +126,90 @@ public sealed class Database(Settings settings) : IPackageDatabase
         command.ExecuteNonQuery();
         SchemaVersionGuard.Stamp(db);
         SchemaVersionGuard.Upgrade(db);
+    }
+
+    public GoModuleRevision? GetGoModule(string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT name,version,bundle_sha256,bundle_size,zip_sha256,zip_size,
+                mod_sha256,mod_size,published_at FROM go_modules
+            WHERE name=$name AND version=$version
+            """;
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadGo(reader) : null;
+    }
+
+    private static GoModuleRevision ReadGo(SqliteDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetInt64(3), reader.GetString(4), reader.GetInt64(5),
+            reader.GetString(6), reader.GetInt64(7), reader.GetString(8));
+
+    public IReadOnlyList<GoModuleRevision> GoModules()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT name,version,bundle_sha256,bundle_size,zip_sha256,zip_size,
+                mod_sha256,mod_size,published_at FROM go_modules ORDER BY name,version
+            """;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<GoModuleRevision>();
+        while (reader.Read()) rows.Add(ReadGo(reader));
+        return rows;
+    }
+
+    public IReadOnlyList<string> GoModuleVersions(string name)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT version FROM go_modules WHERE name=$name ORDER BY version";
+        cmd.Parameters.AddWithValue("$name", name);
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
+    public bool PublishGoModule(GoModuleRevision entry, string actor)
+    {
+        if (!GoModuleBundle.ValidRecord(entry))
+            throw new ArgumentException("Invalid immutable Go metadata.", nameof(entry));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO go_modules(name,version,bundle_sha256,bundle_size,
+                zip_sha256,zip_size,mod_sha256,mod_size,published_at)
+            VALUES($name,$version,$bundle,$bundleSize,$zip,$zipSize,$mod,$modSize,$at)
+            """;
+        cmd.Parameters.AddWithValue("$name", entry.Name);
+        cmd.Parameters.AddWithValue("$version", entry.Version);
+        cmd.Parameters.AddWithValue("$bundle", entry.BundleSha256);
+        cmd.Parameters.AddWithValue("$bundleSize", entry.BundleSize);
+        cmd.Parameters.AddWithValue("$zip", entry.ZipSha256);
+        cmd.Parameters.AddWithValue("$zipSize", entry.ZipSize);
+        cmd.Parameters.AddWithValue("$mod", entry.ModSha256);
+        cmd.Parameters.AddWithValue("$modSize", entry.ModSize);
+        cmd.Parameters.AddWithValue("$at", entry.PublishedAt);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        using var catalog = db.CreateCommand();
+        catalog.Transaction = tx;
+        catalog.CommandText = """
+            INSERT INTO packages(kind,name,version,description,origin,updated_at)
+            VALUES('go',$name,$version,'Hosted Go module','hosted',$at)
+            """;
+        catalog.Parameters.AddWithValue("$name", entry.Name);
+        catalog.Parameters.AddWithValue("$version", entry.Version);
+        catalog.Parameters.AddWithValue("$at", entry.PublishedAt);
+        catalog.ExecuteNonQuery();
+        InsertAudit(db, tx, "publish", "go", entry.Name, entry.Version, actor);
+        tx.Commit();
+        return true;
     }
 
     public MavenAssetEntry? GetMavenAsset(string path)
