@@ -27,7 +27,7 @@ public static class GoModuleZipInspector
 
     public sealed record Inspection(
         string ModulePath, string Version, int Files,
-        long UncompressedBytes, bool HasGoMod, string ZipSha256);
+        long UncompressedBytes, bool HasGoMod, string ZipSha256, string ZipH1);
 
     /// <param name="archive">Bounded, readable, seekable ZIP stream. Position is restored.</param>
     /// <param name="requestPath">Canonical wire coordinate, e.g. example.com/mod/@v/v1.2.3.zip.</param>
@@ -57,6 +57,7 @@ public static class GoModuleZipInspector
             var prefix = coordinate.ModulePath + "@" + coordinate.Version + "/";
             var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var fileDigests = new List<(string Name, string Digest)>();
             long uncompressed = 0;
             var foundGoMod = false;
             var buffer = new byte[8192];
@@ -99,6 +100,7 @@ public static class GoModuleZipInspector
                     throw new InvalidDataException("Go ZIP entry exceeds the preflight size budget.");
 
                 using var data = entry.Open();
+                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 using var goMod = isGoMod ? new MemoryStream() : null;
                 long actual = 0;
                 int n;
@@ -110,10 +112,13 @@ public static class GoModuleZipInspector
                         (isGoMod && actual > MaxGoModBytes))
                         throw new InvalidDataException("Go ZIP decompression exceeded declared limits.");
                     goMod?.Write(buffer, 0, n);
+                    hasher.AppendData(buffer, 0, n);
                 }
                 if (actual != entry.Length)
                     throw new InvalidDataException("Go ZIP entry length is inconsistent.");
                 uncompressed += actual;
+                fileDigests.Add((entry.FullName,
+                    Convert.ToHexStringLower(hasher.GetHashAndReset())));
                 if (isGoMod)
                 {
                     foundGoMod = true;
@@ -121,8 +126,18 @@ public static class GoModuleZipInspector
                 }
             }
 
+            // Go's dirhash.HashZip/Hash1 hashes the uncompressed entry contents,
+            // sorted by full ZIP entry name (including module@version/).
+            // ZIP compression, timestamps and entry order are not inputs.
+            // This local digest is NOT checksum-database verification.
+            var manifest = new StringBuilder();
+            foreach (var (name, fileDigest) in fileDigests.OrderBy(
+                item => item.Name, StringComparer.Ordinal))
+                manifest.Append(fileDigest).Append("  ").Append(name).Append('\n');
+            var h1 = "h1:" + Convert.ToBase64String(
+                SHA256.HashData(Encoding.UTF8.GetBytes(manifest.ToString())));
             return new Inspection(coordinate.ModulePath, coordinate.Version,
-                files.Count, uncompressed, foundGoMod, digest);
+                files.Count, uncompressed, foundGoMod, digest, h1);
         }
         finally
         {

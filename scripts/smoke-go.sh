@@ -136,6 +136,20 @@ go_consume() {
   test "$("$WORK/client")" = packory-go-ok
 }
 go_consume "$WORK/modcache1"
+# Independently compare Packory's server-computed h1 to the native Go
+# client's go.sum entry. ZIP SHA-256 alone is not the Go module content hash.
+python3 - "$WORK/created.json" "$WORK/consumer/go.sum" "$MODULE" "$VERSION" <<'PY'
+import json
+import pathlib
+import sys
+response = json.loads(pathlib.Path(sys.argv[1]).read_text())
+lines = [line.split() for line in pathlib.Path(sys.argv[2]).read_text().splitlines()]
+matches = [parts[2] for parts in lines
+           if len(parts) == 3 and parts[0] == sys.argv[3] and parts[1] == sys.argv[4]]
+assert len(matches) == 1, "native Go module h1 checksum is missing"
+assert response["zipH1"].startswith("h1:"), "invalid Packory h1 envelope"
+assert response["zipH1"] == matches[0], "Go module h1 mismatch against native go.sum"
+PY
 (
   cd "$WORK/consumer"
   GOPROXY="$BASE/go" GOPRIVATE="example.com" GONOPROXY="none" \

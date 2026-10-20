@@ -1,6 +1,6 @@
 # API and native client compatibility (experimental)
 
-**Go hosted:** publish using authenticated multipart POST `/api/go/modules` (module, version, mod, zip, optional time). Native clients consume `/go/{encoded-module}/@v/list`, `.info`, `.mod`, `.zip`, and `/@latest`. See [Go hosted guide](go-proxy.md). Upstream mirroring and per-feed Go isolation are not implemented.
+**Go hosted:** publish using authenticated multipart POST `/api/go/modules` (module, version, mod, zip, optional time). A 201 response includes `zipSha256` (compressed archive digest) and `zipH1` (Go's locally computed module-content hash; not checksum-database verification). Native clients consume `/go/{encoded-module}/@v/list`, `.info`, `.mod`, `.zip`, and `/@latest`. See [Go hosted guide](go-proxy.md). Upstream mirroring and per-feed Go isolation are not implemented.
 
 All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `http://localhost:8080` for loopback-only development. Registry URLs embed the configured public origin and must be routable by the client.
 

@@ -46,7 +46,25 @@ public sealed class GoModuleZipInspectorTests
         Assert.Equal(3, result.Files);
         Assert.True(result.HasGoMod);
         Assert.Equal(64, result.ZipSha256.Length);
+        Assert.Equal("h1:fDumM9tojWfK3amoLyIreXFecxVda9OvhNSFQOYn7Hk=", result.ZipH1);
         Assert.Equal(7, input.Position);
+    }
+
+    [Fact]
+    public void GoH1IsIndependentOfZipEntryOrderButBoundToFileContents()
+    {
+        var first = File(Prefix + "go.mod", "module example.com/mod\n\ngo 1.23\n");
+        var second = File(Prefix + "lib/main.go", "package lib\n");
+        var ordered = GoModuleZipInspector.Inspect(
+            new MemoryStream(Zip(first, second)), Request);
+        var reversed = GoModuleZipInspector.Inspect(
+            new MemoryStream(Zip(second, first)), Request);
+        var tampered = GoModuleZipInspector.Inspect(
+            new MemoryStream(Zip(first, File(Prefix + "lib/main.go", "package other\n"))),
+            Request);
+        Assert.Equal(ordered.ZipH1, reversed.ZipH1);
+        Assert.NotEqual(ordered.ZipSha256, reversed.ZipSha256);
+        Assert.NotEqual(ordered.ZipH1, tampered.ZipH1);
     }
 
     [Fact]

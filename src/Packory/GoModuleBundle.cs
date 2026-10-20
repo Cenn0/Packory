@@ -89,7 +89,7 @@ public static class GoModuleBundle
     }
 
     public sealed record Package(byte[] Bundle, string BundleSha256, string ZipSha256,
-        long ZipSize, string ModSha256, long ModSize, string PublishedAt);
+        long ZipSize, string ModSha256, long ModSize, string PublishedAt, string ZipH1);
 
     public static Package Create(string name, string version, byte[] mod, byte[] zip,
         DateTimeOffset timestamp)
@@ -97,11 +97,13 @@ public static class GoModuleBundle
         if (!ValidCoordinates(name, version))
             throw new ArgumentException("Invalid Go module coordinates.");
         VerifyGoMod(mod, name);
+        string zipH1;
         using (var input = new MemoryStream(zip, writable: false))
         {
             var inspected = GoModuleZipInspector.Inspect(input,
                 GoProxyCoordinates.EncodeModulePath(name) + "/@v/" +
                 EncodedVersion(version) + ".zip");
+            zipH1 = inspected.ZipH1;
             if (inspected.HasGoMod)
             {
                 using var nested = new ZipArchive(new MemoryStream(zip, writable: false),
@@ -132,7 +134,7 @@ public static class GoModuleBundle
         return new Package(bytes,
             Convert.ToHexStringLower(SHA256.HashData(bytes)),
             Convert.ToHexStringLower(SHA256.HashData(zip)), zip.LongLength,
-            Convert.ToHexStringLower(SHA256.HashData(mod)), mod.LongLength, iso);
+            Convert.ToHexStringLower(SHA256.HashData(mod)), mod.LongLength, iso, zipH1);
     }
 
     private static void Put(ZipArchive outer, string name, byte[] bytes)
