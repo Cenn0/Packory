@@ -149,6 +149,72 @@ public sealed class MavenHostedTests
     }
 
     [Fact]
+    public async Task MavenChecksumPutsValidateOnlyCommittedImmutableArtifactBytes()
+    {
+        using var host = new Host(cfg => cfg.WriteNamespaces = ["maven:com.example/demo"]);
+        using var client = host.CreateClient();
+        var artifact = "/maven/com/example/demo/1.0/demo-1.0.jar";
+        var bytes = "synthetic immutable Maven sidecar fixture"u8.ToArray();
+        var sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        var sha1 = Convert.ToHexStringLower(SHA1.HashData(bytes));
+        var md5 = Convert.ToHexStringLower(MD5.HashData(bytes));
+
+        async Task<HttpStatusCode> Put(string url, string token, byte[] data)
+        {
+            using var result = await client.SendAsync(Auth(HttpMethod.Put, url, token, data));
+            return result.StatusCode;
+        }
+
+        Assert.Equal(HttpStatusCode.Created, await Put(artifact, Writer, bytes));
+        Assert.Equal(HttpStatusCode.NoContent, await Put(
+            artifact + ".sha256", Writer, Encoding.ASCII.GetBytes(sha256.ToUpperInvariant() + "\r\n")));
+        Assert.Equal(HttpStatusCode.NoContent, await Put(
+            artifact + ".sha1", Writer, Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(HttpStatusCode.NoContent, await Put(
+            artifact + ".md5", Writer, Encoding.ASCII.GetBytes(md5 + "\n")));
+        // Idempotence: uploading a correct checksum is only a validation,
+        // not a second immutable package publication.
+        Assert.Equal(HttpStatusCode.NoContent, await Put(
+            artifact + ".sha1", Writer, Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(sha256, await (await client.SendAsync(Auth(HttpMethod.Get,
+            artifact + ".sha256", Reader))).Content.ReadAsStringAsync());
+        Assert.Equal(sha1, await (await client.SendAsync(Auth(HttpMethod.Get,
+            artifact + ".sha1", Reader))).Content.ReadAsStringAsync());
+        Assert.Equal(md5, await (await client.SendAsync(Auth(HttpMethod.Get,
+            artifact + ".md5", Reader))).Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Conflict, await Put(
+            artifact + ".sha1", Writer, Encoding.ASCII.GetBytes(new string('0', 40))));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(
+            artifact + ".sha256", Writer, Encoding.ASCII.GetBytes("  " + sha256)));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(
+            artifact + ".sha1", Writer, Encoding.ASCII.GetBytes(sha1 + "\n" + sha1)));
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, await Put(
+            artifact + ".sha1", Writer, new byte[131]));
+        Assert.Equal(HttpStatusCode.NotFound, await Put(
+            "/maven/com/example/demo/2.0/demo-2.0.jar.sha1", Writer,
+            Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(
+            "/maven/com/example/demo/maven-metadata.xml.sha1", Writer,
+            Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(HttpStatusCode.Forbidden, await Put(
+            "/maven/org/other/demo/1.0/demo-1.0.jar.sha1", Writer,
+            Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(HttpStatusCode.Forbidden, await Put(
+            artifact + ".sha1", Reader, Encoding.ASCII.GetBytes(sha1)));
+        using var unauthenticated = await client.PutAsync(artifact + ".sha1",
+            new ByteArrayContent(Encoding.ASCII.GetBytes(sha1)));
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        Assert.Single(host.Services.GetRequiredService<IPackageDatabase>().MavenAssets());
+        Assert.Empty(host.Services.GetRequiredService<IPackageDatabase>().PendingPublications());
+
+        await File.WriteAllTextAsync(Path.Combine(host.Root, "blobs", "maven",
+            "com", "example", "demo", "1.0", "demo-1.0.jar"), "tampered");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, await Put(
+            artifact + ".sha1", Writer, Encoding.ASCII.GetBytes(sha1)));
+    }
+
+    [Fact]
     public async Task MavenRejectsMismatchedPomAndDisallowedSnapshotsAndNamespaces()
     {
         using var host = new Host(cfg => cfg.WriteNamespaces = ["maven:com.example/*"]);
