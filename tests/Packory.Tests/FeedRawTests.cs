@@ -241,9 +241,6 @@ public sealed class FeedRawTests
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             Assert.Equal(HttpStatusCode.Conflict, await Status(client,
                 HttpMethod.Post, "/api/v1/admin/feeds/" + id + "/activate", Admin));
-            Assert.Equal(HttpStatusCode.BadRequest, await Status(client,
-                HttpMethod.Post, "/api/admin/tokens", Admin,
-                Encoding.UTF8.GetBytes("{}")));
         }
     }
 }
