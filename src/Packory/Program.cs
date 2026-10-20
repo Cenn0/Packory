@@ -504,6 +504,7 @@ app.MapPost("/api/admin/publications/reconcile", async (Settings cfg, Publicatio
 FeedEndpoints.Map(app);
 FeedNugetEndpoints.Map(app);
 FeedRawEndpoints.Map(app);
+FeedMavenEndpoints.Map(app);
 RawEndpoints.Map(app);
 MavenEndpoints.Map(app);
 GoEndpoints.Map(app);
