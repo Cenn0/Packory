@@ -496,8 +496,10 @@ public sealed class McpProtocolTests
         // A cursor from one operation cannot be replayed against the other.
         var rejected = await Assert.ThrowsAsync<McpProtocolException>(() =>
             Request(mcp, "skills/list",
-                new JsonObject { ["cursor"] = McpSkillCursor.Encode(
-                    "approved-skill-tool", "broken-199", "1.0.0") }, timeout.Token));
+                new JsonObject { ["cursor"] = "s1." + Convert.ToBase64String(
+                    JsonSerializer.SerializeToUtf8Bytes(new[]
+                        { "approved-skill-tool", "broken-199", "1.0.0" }))
+                    .TrimEnd('=').Replace('+', '-').Replace('/', '_') }, timeout.Token));
         Assert.Equal(McpErrorCode.InvalidParams, rejected.ErrorCode);
         host.Revoke("zz-visible", valid.Digest);
         var afterRevoke = await Request(mcp, "skills/list",
