@@ -1,4 +1,4 @@
-# Feed control plane — E0 private hosted NuGet and Raw (experimental)
+# Feed control plane — E0 private hosted NuGet, Raw and Maven (experimental)
 
 Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and explicitly activated, private NuGet and Raw hosted adapters. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
 
@@ -15,7 +15,7 @@ Packory exposes a versioned **admin-only feed inventory**, disabled drafts for a
 
 `GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `{apiVersion:"v1",items:[...],nextCursor, isolationSupported:false}`. Valid limits are 1–100; invalid cursors or IDs fail closed. `GET /api/v1/admin/feeds/{id}` returns one descriptor or 404. Admin API tokens or correctly scoped OIDC admin access are required; a read or publish credential is forbidden. Responses use `Cache-Control: no-store`.
 
-## Staged administrative drafts (only reviewed private NuGet or Raw hosted feeds can be activated)
+## Staged administrative drafts (only reviewed private NuGet, Raw or Maven hosted feeds can be activated)
 
 Admins may **prepare disabled, private** feed descriptors for review. This
 capability is a database-backed metadata staging step, **not** hosted/proxy
@@ -49,7 +49,7 @@ for an operating feed.
 
 ## Non-goals and pending MS2 gates
 
-This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet and Raw hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
+This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet, Raw and Maven hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
 
 
 ## V4 experimental private hosted NuGet feeds — first operational slice
@@ -166,6 +166,51 @@ neither reads nor publishes. Deleting a referenced disabled feed is refused.
 Recovery and integrity enumeration include the V8 ledger; the PostgreSQL/S3
 snapshot tool requires row fingerprints for `feed_assets`. CLI/API and
 SQLite/PostgreSQL coverage are **experimental**, not real S3-provider DR
-certification. This slice does not implement native Maven or Go feed routes,
+certification. This slice does not implement Go feeds,
 other private ecosystem adapters, cross-feed search, per-feed quotas,
 browser-based permissions or production-grade multiwriter semantics.
+
+## V4 E0 private Maven hosted release transport (experimental)
+
+Private Maven feeds use the same disabled-draft and administrator-activation
+lifecycle as Raw. Create a draft with `kind: "maven"`, `mode: "hosted"`,
+then explicitly activate it. Proxy drafts are not activatable; supplying
+an upstream URL to a draft is not supported.
+
+For a private feed `alpha-maven`, the native repository root is
+`/feeds/alpha-maven/maven/`. This is independently authorized, without
+upstream or legacy namespace fallback. Use exact managed token grants
+`feed:alpha-maven:read` for consumers and `feed:alpha-maven:publish`
+for uploaders. The latter also permits same-feed reads. Native Maven 3
+consumers can use a configured server ID and Basic password containing
+the scoped token. Every request requires authentication even when
+anonymous reads are enabled for the legacy global `/maven/` route.
+
+Available operations:
+
+- `PUT /feeds/{feedId}/maven/{groupPath}/{artifact}/{version}/{file}`
+  accepts validated immutable Maven release POM and binary/classifier files.
+  POMs must match the requested group/artifact/version; XML external entities
+  and DTDs are rejected. Duplicate assets return 409.
+- `GET|HEAD` at the same path verifies the stored SHA-256 and length
+  before delivery. Missing/tampered artifacts fail closed.
+- The `.sha256`, `.sha1` and `.md5` GET sidecars are derived from
+  verified immutable stored bytes. Matching checksum PUT acknowledgements
+  are accepted only after the corresponding asset is committed; they never
+  mutate bytes or trust client-provided digests.
+- `GET|HEAD {groupPath}/{artifact}/maven-metadata.xml` returns a
+  synthesized private version list only from the requested feed.
+  Checksum GETs are supported for that synthetic metadata.
+
+Files use `feeds/<feedId>/maven/<canonical-path>` keys with immutable
+`feed_assets` metadata, transactional audit and a durable
+`feed-maven` publication intent for cross-store reconciliation.
+No private coordinate appears in the global Maven catalog or the
+legacy `/maven/` namespace. Deactivation disables requests while
+retaining the immutable metadata and bytes.
+
+**Not supported:** native Maven `mvn deploy` (mutable metadata PUT),
+SNAPSHOT, private Maven upstream proxy, full Gradle conformance,
+per-feed quotas, multi-writer coordination, real-provider S3 disaster
+recovery or production suitability. The CI native Maven dependency
+consumption is a bounded test of the specified client/operation only.
