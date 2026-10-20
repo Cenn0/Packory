@@ -17,9 +17,9 @@ namespace Packory.Tests;
 
 public sealed class FeedMavenTests
 {
-    private const string Admin = "synthetic-e0-maven-admin";
-    private const string Reader = "synthetic-e0-maven-global-reader";
-    private const string Writer = "synthetic-e0-maven-global-writer";
+    private const string Admin = "synthetic-e0-maven-admin-token-long-enough-for-tests";
+    private const string Reader = "synthetic-e0-maven-global-reader-token-long-enough";
+    private const string Writer = "synthetic-e0-maven-global-writer-token-long-enough";
     private const string Artifact = "com/example/demo/1.0.0/demo-1.0.0.jar";
     private const string Pom = "com/example/demo/1.0.0/demo-1.0.0.pom";
     private const string Metadata = "com/example/demo/maven-metadata.xml";
