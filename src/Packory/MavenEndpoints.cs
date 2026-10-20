@@ -139,6 +139,77 @@ public static class MavenEndpoints
         return Convert.ToHexStringLower(bytes);
     }
 
+    // Maven deploy clients also PUT optional checksum sidecars for release
+    // artifacts. Accept them only as a validation of already committed,
+    // immutable bytes. Sidecars are never trusted as authoritative digests
+    // and never stored separately from the artifact.
+    private static bool TryArtifactChecksumPath(string path, out string assetPath,
+        out string algorithm, out MavenCoordinates.Artifact? coordinates)
+    {
+        assetPath = algorithm = "";
+        coordinates = null;
+        foreach (var suffix in new[] { ".sha256", ".sha1", ".md5" })
+        {
+            if (!path.EndsWith(suffix, StringComparison.Ordinal)) continue;
+            var candidate = path[..^suffix.Length];
+            if (!ValidAssetPath(candidate, out coordinates)) return false;
+            assetPath = candidate;
+            algorithm = suffix[1..];
+            return true;
+        }
+        return false;
+    }
+
+    private static async Task<IResult> VerifyArtifactChecksumPut(
+        string assetPath, string algorithm, MavenCoordinates.Artifact coordinate,
+        Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx)
+    {
+        if (Access.RequireNamespace(ctx, cfg, "maven",
+            coordinate.GroupId + "/" + coordinate.ArtifactId) is { } namespaceDenied)
+            return namespaceDenied;
+
+        if (ctx.Request.ContentLength is null)
+            return Results.StatusCode(StatusCodes.Status411LengthRequired);
+        if (ctx.Request.ContentLength <= 0)
+            return Results.BadRequest(new { error = "Empty Maven checksum" });
+        if (ctx.Request.ContentLength > 130)
+            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+        byte[] body;
+        try { body = await BlobStore.ReadBoundedAsync(ctx.Request.Body, 130, ctx.RequestAborted); }
+        catch (PayloadTooLargeException)
+        { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+
+        // ASCII hex, optionally terminated by one LF or CRLF. No leading
+        // whitespace, comments, multiple lines or arbitrary suffix bytes.
+        var checksum = Encoding.ASCII.GetString(body);
+        if (checksum.EndsWith("\r\n", StringComparison.Ordinal))
+            checksum = checksum[..^2];
+        else if (checksum.EndsWith("\n", StringComparison.Ordinal))
+            checksum = checksum[..^1];
+        var expectedLength = algorithm switch { "sha256" => 64, "sha1" => 40, _ => 32 };
+        if (checksum.Length != expectedLength || !checksum.All(Uri.IsHexDigit))
+            return Results.BadRequest(new { error = "Invalid Maven checksum body" });
+
+        var asset = db.GetMavenAsset(assetPath);
+        if (asset is null) return Results.NotFound();
+        if (!ValidRecord(asset) || asset.Size > cfg.MaxArtifactBytes)
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var local = blobs.Existing(Key(assetPath));
+        if (local is null || !await ArtifactDigests.MatchesSha256Async(
+            local, asset.Sha256, asset.Size, ctx.RequestAborted))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+        var expected = algorithm == "sha256" ? asset.Sha256 :
+            await ChecksumAsync(local, algorithm, ctx.RequestAborted);
+        if (!string.Equals(checksum, expected, StringComparison.OrdinalIgnoreCase))
+            return Results.Conflict(new { error = "Checksum does not match committed Maven artifact" });
+
+        // The client checksum is a validated compatibility acknowledgement,
+        // not new metadata, a mutable overwrite or an extra publish intent.
+        return Results.NoContent();
+    }
+
     public static void Map(WebApplication app)
     {
         app.MapMethods("/maven/{**path}", ["GET", "HEAD"], async (
@@ -202,6 +273,10 @@ public static class MavenEndpoints
             ArtifactLocks locks, HttpContext ctx) =>
         {
             if (Access.Require(ctx, cfg, write: true) is { } writeDenied) return writeDenied;
+            if (TryArtifactChecksumPath(path, out var assetPath, out var algorithm,
+                out var checksumCoordinate) && checksumCoordinate is not null)
+                return await VerifyArtifactChecksumPut(assetPath, algorithm,
+                    checksumCoordinate, cfg, db, blobs, ctx);
             if (!ValidAssetPath(path, out var coord) || coord is null)
                 return Results.BadRequest(new { error = "Unsupported Maven release artifact path" });
             if (Access.RequireNamespace(ctx, cfg, "maven",
