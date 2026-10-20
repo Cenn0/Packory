@@ -58,3 +58,29 @@ coordinated offline database+object restore.
 ## V7: Hosted Go modules
 
 SQLite and PostgreSQL now include `go_modules`, recording immutable module/version identity, bundled triplet SHA-256, ZIP and go.mod digests, byte counts and release timestamp. One blob holds all three GOPROXY responses, made visible by a single metadata+catalog+audit transaction. Publication intents preserve incomplete-write evidence. PostgreSQL/S3 offline snapshots fingerprint `go_modules` at V7. Forward schema migration is tested; a rollback and real-provider restore are separate requirements.
+
+## V8: isolated shared hosted feed assets
+
+V8 expands the permitted `feeds.kind` values to include staged `raw`,
+`maven` and `go` descriptors. It creates the immutable `feed_assets`
+metadata ledger with composite key `(feed_id,kind,path)`, canonical
+coordinate/media validation, published SHA-256/size, and a restricted
+foreign key to the existing administrative feed record. **Only private
+hosted Raw is activated in this delivery; Maven and Go remain drafts.**
+Existing default/global registries retain their original routes and bytes.
+
+SQLite upgrades reconstruct the constrained `feeds` table using the
+documented create/copy/drop/rename procedure with foreign-key enforcement
+temporarily suspended **before** the migration transaction, verify every
+foreign key before commit, and restore enforcement. The PostgreSQL upgrade
+transaction expands the `feeds_kind_check` constraint and creates the
+same V8 ledger. Both implementations atomically publish an asset metadata
+revision together with a privacy-safe audit entry, and block deletion of
+feeds referenced by immutable revisions. Crashes between blob persistence
+and metadata commit are tracked through durable intents and read-only
+recovery/integrity inspection.
+
+A V8 PostgreSQL/S3 snapshot requires `feed_assets` row fingerprints.
+Rollback is only a coordinated verified **pre-upgrade** database+blob
+restore; no in-place database downgrade is supported. Real-provider S3,
+fault-injection and production recovery qualification remain open.

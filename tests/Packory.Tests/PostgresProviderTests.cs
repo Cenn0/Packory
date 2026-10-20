@@ -37,7 +37,7 @@ public sealed class PostgresProviderTests
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.False(database.IsHealthy()); // Fail closed on future writer schema.
             using (var version = new NpgsqlCommand(
-                "UPDATE packory_schema_version SET version=7 WHERE slot=1", isolated))
+                "UPDATE packory_schema_version SET version=8 WHERE slot=1", isolated))
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.True(database.IsHealthy());
             using (var drop = new NpgsqlCommand("DROP TABLE feeds CASCADE", isolated))
@@ -125,6 +125,35 @@ public sealed class PostgresProviderTests
         Assert.False(db.TryDeleteDraftFeed(feedId, "integration-admin"));
         Assert.True(db.TryActivateHostedNugetFeed(feedId, "integration-admin"));
         Assert.Equal(scopedDigest, db.GetFeedNugetRevision(feedId, nuget, "1.0.0")?.Sha512);
+
+        // Shared E0 metadata contract: two distinct private Raw feeds can
+        // publish the same coordinates with separate immutable digests.
+        var firstRawFeed = "raw-alpha-" + suffix;
+        var secondRawFeed = "raw-beta-" + suffix;
+        foreach (var id in new[] { firstRawFeed, secondRawFeed })
+        {
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(id, "raw", "hosted",
+                "private", "Synthetic Raw " + id, false, created, created),
+                "integration-admin"));
+            Assert.True(db.TrySetHostedFeedEnabled(id, "raw", true, "integration-admin"));
+        }
+        var rawName = "pkg-" + suffix;
+        var rawPath = FeedAssetEntry.RawPath(rawName, "1.0.0");
+        var alphaSha = new string('a', 64);
+        var betaSha = new string('b', 64);
+        FeedAssetEntry RawEntry(string id, string digest) =>
+            new(id, "raw", rawPath, rawName, "1.0.0",
+                "application/octet-stream", digest, 42, created);
+        Assert.True(db.PublishFeedAsset(RawEntry(firstRawFeed, alphaSha), "integration-writer"));
+        Assert.True(db.PublishFeedAsset(RawEntry(secondRawFeed, betaSha), "integration-writer"));
+        Assert.False(db.PublishFeedAsset(RawEntry(firstRawFeed, betaSha), "integration-writer"));
+        Assert.Equal(alphaSha, db.GetFeedAsset(firstRawFeed, "raw", rawPath)?.Sha256);
+        Assert.Equal(betaSha, db.GetFeedAsset(secondRawFeed, "raw", rawPath)?.Sha256);
+        Assert.Equal(2, db.FeedAssets().Count(x => x.Name == rawName));
+        Assert.True(db.TrySetHostedFeedEnabled(firstRawFeed, "raw", false, "integration-admin"));
+        Assert.False(db.PublishFeedAsset(RawEntry(firstRawFeed, betaSha), "integration-writer"));
+        Assert.False(db.TryDeleteDraftFeed(firstRawFeed, "integration-admin"));
+        Assert.Null(db.PackageOrigin("raw", rawName, "1.0.0"));
 
         var npm = "pg-" + suffix;
         Assert.True(db.PutNpmVersion(npm, "1.0.0", "{\"name\":\"test\"}",

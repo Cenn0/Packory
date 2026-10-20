@@ -58,7 +58,7 @@ public static class FeedEndpoints
                 var mode = obj.GetProperty("mode").GetString();
                 var displayName = obj.GetProperty("displayName").GetString();
                 if (!FeedDefinition.ValidId(id) || id!.StartsWith("default-", StringComparison.Ordinal) ||
-                    kind is not ("nuget" or "npm" or "cargo" or "pypi" or "oci" or "skill") ||
+                    kind is not ("nuget" or "npm" or "cargo" or "pypi" or "oci" or "skill" or "raw" or "maven" or "go") ||
                     mode is not ("hosted" or "proxy") || string.IsNullOrWhiteSpace(displayName) ||
                     displayName.Length > 120 ||
                     !string.Equals(displayName, displayName.Trim(), StringComparison.Ordinal) ||
@@ -96,9 +96,12 @@ public static class FeedEndpoints
             if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
-            if (!db.TryActivateHostedNugetFeed(id, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only disabled private hosted NuGet drafts can be activated" });
-            return Results.Ok(new { id, enabled = true, kind = "nuget", mode = "hosted",
+            var feed = db.Feed(id);
+            if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
+                Visibility: "private", Enabled: false } ||
+                !db.TrySetHostedFeedEnabled(id, feed.Kind, true, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Only reviewed private NuGet/Raw hosted drafts can be activated" });
+            return Results.Ok(new { id, enabled = true, kind = feed.Kind, mode = "hosted",
                 visibility = "private" });
         }).RequireRateLimiting("publish");
 
@@ -108,8 +111,11 @@ public static class FeedEndpoints
             if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
-            if (!db.TryDeactivateHostedNugetFeed(id, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only active private hosted NuGet feeds can be disabled" });
+            var feed = db.Feed(id);
+            if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
+                Visibility: "private", Enabled: true } ||
+                !db.TrySetHostedFeedEnabled(id, feed.Kind, false, Access.Actor(ctx)))
+                return Results.Conflict(new { error = "Only active private NuGet/Raw hosted feeds can be disabled" });
             // Keep every revision, digest, journal and blob. Re-activation
             // is a separate explicit operator action; no GC is performed.
             return Results.Ok(new { id, enabled = false, retained = true });

@@ -88,6 +88,14 @@ public sealed class ArtifactIntegrityScanner(
                 valid ? MavenEndpoints.Key(maven.Path) : null,
                 valid ? maven.Sha256 : null, valid ? maven.Size : null));
         }
+        foreach (var asset in database.FeedAssets())
+        {
+            var valid = FeedAssetEntry.Valid(asset);
+            refs.Add(new Reference("feed-" + asset.Kind, asset.Name,
+                asset.Version, asset.Kind == "maven" ? asset.Path : null,
+                "hosted", valid ? FeedAssetEntry.BlobKey(asset) : null,
+                valid ? asset.Sha256 : null, valid ? asset.Size : null, asset.FeedId));
+        }
         foreach (var privateRevision in database.FeedNugetRevisions())
         {
             var valid = FeedDefinition.ValidId(privateRevision.FeedId) &&

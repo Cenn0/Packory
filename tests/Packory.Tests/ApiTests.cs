@@ -213,7 +213,7 @@ public sealed class ApiTests
     [InlineData("{invalid")]
     [InlineData("""{"id":"default-extra","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
     [InlineData("""{"id":"upper-CASE","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]
-    [InlineData("""{"id":"abc","kind":"raw","mode":"hosted","displayName":"Bad"}""")]
+    [InlineData("""{"id":"abc","kind":"invalid","mode":"hosted","displayName":"Bad"}""")]
     [InlineData("""{"id":"abc","kind":"nuget","mode":"group","displayName":"Bad"}""")]
     [InlineData("""{"id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad","enabled":true}""")]
     [InlineData("""{"id":"abc","id":"abc","kind":"nuget","mode":"hosted","displayName":"Bad"}""")]

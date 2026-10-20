@@ -485,6 +485,72 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=$feed AND kind=$kind AND path=$path
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$path", path);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadFeedAsset(reader) : null;
+    }
+
+    private static FeedAssetEntry ReadFeedAsset(SqliteDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetString(4), reader.GetString(5),
+            reader.GetString(6), reader.GetInt64(7), reader.GetString(8));
+
+    public IReadOnlyList<FeedAssetEntry> FeedAssets()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets ORDER BY feed_id,kind,path
+            """;
+        using var reader = cmd.ExecuteReader();
+        var result = new List<FeedAssetEntry>();
+        while (reader.Read()) result.Add(ReadFeedAsset(reader));
+        return result;
+    }
+
+    public bool PublishFeedAsset(FeedAssetEntry asset, string actor)
+    {
+        if (!FeedAssetEntry.Valid(asset))
+            throw new ArgumentException("Invalid private hosted asset.", nameof(asset));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO feed_assets
+                (feed_id,kind,path,name,version,media_type,sha256,size,created_at)
+            SELECT $feed,$kind,$path,$name,$version,$mime,$sha,$size,$at
+            WHERE EXISTS (SELECT 1 FROM feeds
+                WHERE id=$feed AND kind=$kind AND mode='hosted'
+                  AND visibility='private' AND enabled=1)
+            """;
+        cmd.Parameters.AddWithValue("$feed", asset.FeedId);
+        cmd.Parameters.AddWithValue("$kind", asset.Kind);
+        cmd.Parameters.AddWithValue("$path", asset.Path);
+        cmd.Parameters.AddWithValue("$name", asset.Name);
+        cmd.Parameters.AddWithValue("$version", asset.Version);
+        cmd.Parameters.AddWithValue("$mime", asset.MediaType);
+        cmd.Parameters.AddWithValue("$sha", asset.Sha256);
+        cmd.Parameters.AddWithValue("$size", asset.Size);
+        cmd.Parameters.AddWithValue("$at", asset.CreatedAt);
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "publish", "feed-" + asset.Kind,
+            asset.FeedId + "/" + asset.Name, asset.Version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public IReadOnlyList<FeedDefinition> Feeds(string? after, int limit)
     {
         using var db = Open();
@@ -557,6 +623,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
                 AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=$id)
                 AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=$id)
                 AND NOT EXISTS (SELECT 1 FROM feed_nuget_versions WHERE feed_id=$id)
+                AND NOT EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=$id)
             """;
         delete.Parameters.AddWithValue("$id", id);
         if (delete.ExecuteNonQuery() != 1) return false;
@@ -566,27 +633,28 @@ public sealed class Database(Settings settings) : IPackageDatabase
     }
 
     public bool TryActivateHostedNugetFeed(string id, string actor) =>
-        ChangeHostedNugetState(id, true, actor);
+        TrySetHostedFeedEnabled(id, "nuget", true, actor);
 
     public bool TryDeactivateHostedNugetFeed(string id, string actor) =>
-        ChangeHostedNugetState(id, false, actor);
+        TrySetHostedFeedEnabled(id, "nuget", false, actor);
 
-    private bool ChangeHostedNugetState(string id, bool enabled, string actor)
+    public bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor)
     {
-        if (!FeedDefinition.ValidId(id)) return false;
+        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw")) return false;
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = db.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
             UPDATE feeds SET enabled=$next, updated_at=$at
-            WHERE id=$id AND kind='nuget' AND mode='hosted'
+            WHERE id=$id AND kind=$kind AND mode='hosted'
               AND visibility='private' AND enabled=$previous
             """;
         cmd.Parameters.AddWithValue("$next", enabled ? 1 : 0);
         cmd.Parameters.AddWithValue("$previous", enabled ? 0 : 1);
         cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
         cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$kind", kind);
         if (cmd.ExecuteNonQuery() != 1) return false;
         InsertAudit(db, tx, enabled ? "feed-hosted-activate" : "feed-hosted-deactivate",
             "feed", id, "", actor);

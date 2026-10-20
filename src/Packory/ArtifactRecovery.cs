@@ -30,6 +30,9 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         foreach (var module in database.GoModules())
             if (!GoModuleBundle.ValidRecord(module) ||
                 !blobs.Contains(GoModuleBundle.Key(module.Name, module.Version))) missing++;
+        foreach (var asset in database.FeedAssets())
+            if (!FeedAssetEntry.Valid(asset) ||
+                !blobs.Contains(FeedAssetEntry.BlobKey(asset))) missing++;
         foreach (var revision in database.FeedNugetRevisions())
         {
             if (!FeedDefinition.ValidId(revision.FeedId) || !Names.Nuget(revision.Name) ||
@@ -52,6 +55,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
+        "feed-raw" or "feed-maven" => FeedAssetCommitted(pending),
         "go" when GoModuleBundle.ValidCoordinates(pending.Name, pending.Version) &&
             pending.Key == GoModuleBundle.Key(pending.Name, pending.Version) =>
             database.GetGoModule(pending.Name, pending.Version) is not null,
@@ -76,6 +80,21 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
                 FeedNugetEndpoints.BlobKey(feedId, name, pending.Version),
                 StringComparison.Ordinal) &&
             database.GetFeedNugetRevision(feedId, name, pending.Version) is not null;
+    }
+
+    private bool FeedAssetCommitted(PendingPublication pending)
+    {
+        var sep = pending.Name.IndexOf('|');
+        if (sep <= 0 || sep == pending.Name.Length - 1) return false;
+        var feedId = pending.Name[..sep];
+        var name = pending.Name[(sep + 1)..];
+        if (!FeedDefinition.ValidId(feedId)) return false;
+        var kind = pending.Kind == "feed-raw" ? "raw" : "maven";
+        var path = kind == "raw" ? FeedAssetEntry.RawPath(name, pending.Version) : name;
+        var asset = database.GetFeedAsset(feedId, kind, path);
+        return asset is not null && asset.Version == pending.Version &&
+            FeedAssetEntry.Valid(asset) &&
+            string.Equals(FeedAssetEntry.BlobKey(asset), pending.Key, StringComparison.Ordinal);
     }
 
     public string State(PendingPublication pending)
@@ -170,6 +189,22 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             var key = MavenEndpoints.Key(maven.Path);
             known.Add(key);
             if (!blobs.Contains(key)) missingHosted++;
+        }
+        foreach (var asset in database.FeedAssets())
+        {
+            if (!FeedAssetEntry.Valid(asset))
+            {
+                missingHosted++;
+                logger.LogError("Invalid indexed private feed asset.");
+                continue;
+            }
+            var key = FeedAssetEntry.BlobKey(asset);
+            known.Add(key);
+            if (!blobs.Contains(key))
+            {
+                missingHosted++;
+                logger.LogError("Private feed artifact missing from blob store.");
+            }
         }
         foreach (var revision in database.FeedNugetRevisions())
         {

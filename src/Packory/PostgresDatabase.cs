@@ -73,6 +73,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('raw_artifacts') IS NOT NULL
                     AND to_regclass('maven_assets') IS NOT NULL
                     AND to_regclass('go_modules') IS NOT NULL
+                    AND to_regclass('feed_assets') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -458,6 +459,60 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return versions;
     }
 
+    public FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=@feed AND kind=@kind AND path=@path
+            """, null, ("feed", feedId), ("kind", kind), ("path", path));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadFeedAsset(reader) : null;
+    }
+
+    private static FeedAssetEntry ReadFeedAsset(NpgsqlDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetString(4), reader.GetString(5),
+            reader.GetString(6), reader.GetInt64(7), reader.GetString(8));
+
+    public IReadOnlyList<FeedAssetEntry> FeedAssets()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets ORDER BY feed_id,kind,path
+            """);
+        using var reader = cmd.ExecuteReader();
+        var result = new List<FeedAssetEntry>();
+        while (reader.Read()) result.Add(ReadFeedAsset(reader));
+        return result;
+    }
+
+    public bool PublishFeedAsset(FeedAssetEntry asset, string actor)
+    {
+        if (!FeedAssetEntry.Valid(asset))
+            throw new ArgumentException("Invalid private hosted asset.", nameof(asset));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            INSERT INTO feed_assets
+                (feed_id,kind,path,name,version,media_type,sha256,size,created_at)
+            SELECT @feed,@kind,@path,@name,@version,@mime,@sha,@size,@at
+            WHERE EXISTS (SELECT 1 FROM feeds
+                WHERE id=@feed AND kind=@kind AND mode='hosted'
+                  AND visibility='private' AND enabled=1)
+            ON CONFLICT DO NOTHING
+            """, tx,
+            ("feed", asset.FeedId), ("kind", asset.Kind), ("path", asset.Path),
+            ("name", asset.Name), ("version", asset.Version), ("mime", asset.MediaType),
+            ("sha", asset.Sha256), ("size", asset.Size), ("at", asset.CreatedAt));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, "publish", "feed-" + asset.Kind,
+            asset.FeedId + "/" + asset.Name, asset.Version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public IReadOnlyList<FeedDefinition> Feeds(string? after, int limit)
     {
         using var db = Open();
@@ -522,6 +577,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                 AND NOT EXISTS (SELECT 1 FROM feed_policies WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_nuget_versions WHERE feed_id=@id)
+                AND NOT EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=@id)
             """, tx, ("id", id));
         if (delete.ExecuteNonQuery() != 1) return false;
         Audit(db, tx, "feed-draft-delete", "feed", id, "", actor);
@@ -530,22 +586,22 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
     }
 
     public bool TryActivateHostedNugetFeed(string id, string actor) =>
-        ChangeHostedNugetState(id, true, actor);
+        TrySetHostedFeedEnabled(id, "nuget", true, actor);
 
     public bool TryDeactivateHostedNugetFeed(string id, string actor) =>
-        ChangeHostedNugetState(id, false, actor);
+        TrySetHostedFeedEnabled(id, "nuget", false, actor);
 
-    private bool ChangeHostedNugetState(string id, bool enabled, string actor)
+    public bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor)
     {
-        if (!FeedDefinition.ValidId(id)) return false;
+        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw")) return false;
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = Command(db, """
             UPDATE feeds SET enabled=@next,updated_at=@at
-            WHERE id=@id AND kind='nuget' AND mode='hosted'
+            WHERE id=@id AND kind=@kind AND mode='hosted'
               AND visibility='private' AND enabled=@previous
             """, tx, ("next", enabled ? 1 : 0), ("previous", enabled ? 0 : 1),
-            ("at", DateTimeOffset.UtcNow.ToString("O")), ("id", id));
+            ("at", DateTimeOffset.UtcNow.ToString("O")), ("id", id), ("kind", kind));
         if (cmd.ExecuteNonQuery() != 1) return false;
         Audit(db, tx, enabled ? "feed-hosted-activate" : "feed-hosted-deactivate",
             "feed", id, "", actor);

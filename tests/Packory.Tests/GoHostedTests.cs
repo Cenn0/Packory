@@ -254,7 +254,7 @@ public sealed class GoHostedTests
             var cfg = new Settings { DataDirectory = root };
             var db = new Database(cfg);
             db.Initialize();
-            Assert.Equal(7, SchemaVersionGuard.Current);
+            Assert.Equal(8, SchemaVersionGuard.Current);
             var pkg = GoModuleBundle.Create(Module, "v1.2.3",
                 Encoding.UTF8.GetBytes(Mod), Zip(),
                 DateTimeOffset.Parse("2026-10-20T08:00:00Z"));

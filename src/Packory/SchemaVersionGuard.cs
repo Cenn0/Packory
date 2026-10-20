@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 7;
+    public const int Current = 8;
 
     private static int RequireKnown(object? value)
     {
@@ -27,7 +27,7 @@ public static class SchemaVersionGuard
     private const string FeedSchema = """
         CREATE TABLE IF NOT EXISTS feeds (
             id TEXT NOT NULL PRIMARY KEY,
-            kind TEXT NOT NULL CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill')),
+            kind TEXT NOT NULL CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill','raw','maven','go')),
             mode TEXT NOT NULL CHECK(mode IN ('legacy','hosted','proxy')),
             visibility TEXT NOT NULL CHECK(visibility IN ('runtime','private','public')),
             display_name TEXT NOT NULL,
@@ -120,6 +120,42 @@ public static class SchemaVersionGuard
         CREATE INDEX IF NOT EXISTS go_modules_by_name ON go_modules(name,version);
         """;
 
+    // V8: private hosted raw and future Maven/Go feed scope. Immutable
+    // references are keyed by feed+kind+canonical path, never global catalog.
+    // All native private adapters use the same durable publication journal.
+    private const string FeedAssetSchema = """
+        CREATE TABLE IF NOT EXISTS feed_assets (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            kind TEXT NOT NULL CHECK(kind IN ('raw','maven')),
+            path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+            media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size > 0), created_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,kind,path)
+        );
+        CREATE INDEX IF NOT EXISTS feed_assets_identity
+            ON feed_assets(feed_id,kind,name,version);
+        """;
+
+    // Unlike a renamed-old-table migration this preserves child foreign-key
+    // references to the feeds table name, as required by SQLite's documented
+    // generalized schema-change procedure.
+    private const string SqliteFeedKindMigration = """
+        CREATE TABLE feeds_e0_new (
+            id TEXT NOT NULL PRIMARY KEY,
+            kind TEXT NOT NULL CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill','raw','maven','go')),
+            mode TEXT NOT NULL CHECK(mode IN ('legacy','hosted','proxy')),
+            visibility TEXT NOT NULL CHECK(visibility IN ('runtime','private','public')),
+            display_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        INSERT INTO feeds_e0_new(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
+            SELECT id,kind,mode,visibility,display_name,enabled,created_at,updated_at FROM feeds;
+        DROP TABLE feeds;
+        ALTER TABLE feeds_e0_new RENAME TO feeds;
+        CREATE INDEX feeds_kind_id ON feeds(kind,id);
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -159,6 +195,20 @@ public static class SchemaVersionGuard
 
     public static void Upgrade(SqliteConnection connection)
     {
+        // The v8 CHECK expansion rebuilds the parent feeds table. SQLite
+        // requires foreign-key enforcement to be suspended BEFORE BEGIN,
+        // then verified inside the transaction before commit.
+        using var current = connection.CreateCommand();
+        current.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+        var previousVersion = RequireKnown(current.ExecuteScalar());
+        if (previousVersion == Current) return;
+        using (var disable = connection.CreateCommand())
+        {
+            disable.CommandText = "PRAGMA foreign_keys=OFF";
+            disable.ExecuteNonQuery();
+        }
+        try
+        {
         using var tx = connection.BeginTransaction();
         using var read = connection.CreateCommand();
         read.Transaction = tx;
@@ -223,6 +273,19 @@ public static class SchemaVersionGuard
             goSchema.CommandText = GoModuleSchema;
             goSchema.ExecuteNonQuery();
         }
+        if (version < 8)
+        {
+            using var migration = connection.CreateCommand();
+            migration.Transaction = tx;
+            migration.CommandText = SqliteFeedKindMigration + FeedAssetSchema;
+            migration.ExecuteNonQuery();
+            using var check = connection.CreateCommand();
+            check.Transaction = tx;
+            check.CommandText = "PRAGMA foreign_key_check";
+            using var violations = check.ExecuteReader();
+            if (violations.Read())
+                throw new InvalidOperationException("Foreign-key violation after feed migration.");
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -234,6 +297,13 @@ public static class SchemaVersionGuard
                 throw new InvalidOperationException("Packory database migration lost its version gate.");
         }
         tx.Commit();
+        }
+        finally
+        {
+            using var enable = connection.CreateCommand();
+            enable.CommandText = "PRAGMA foreign_keys=ON";
+            enable.ExecuteNonQuery();
+        }
     }
 
     public static void Verify(NpgsqlConnection connection)
@@ -312,6 +382,15 @@ public static class SchemaVersionGuard
         {
             using var goSchema = new NpgsqlCommand(GoModuleSchema, connection, tx);
             goSchema.ExecuteNonQuery();
+        }
+        if (version < 8)
+        {
+            using var schema = new NpgsqlCommand("""
+                ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_kind_check;
+                ALTER TABLE feeds ADD CONSTRAINT feeds_kind_check
+                    CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill','raw','maven','go'));
+                """ + FeedAssetSchema, connection, tx);
+            schema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
