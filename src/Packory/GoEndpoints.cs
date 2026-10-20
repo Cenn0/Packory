@@ -90,7 +90,8 @@ public static class GoEndpoints
             db.CompletePublication(key);
             ctx.Response.Headers.CacheControl = "no-store";
             return Results.Json(new { module = name, version,
-                zipSha256 = revision.ZipSha256, zipSize = revision.ZipSize,
+                zipSha256 = revision.ZipSha256, zipH1 = package.ZipH1,
+                zipSize = revision.ZipSize,
                 bundleSha256 = revision.BundleSha256,
                 proxy = cfg.Base + "/go" },
                 statusCode: StatusCodes.Status201Created);

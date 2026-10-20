@@ -129,7 +129,14 @@ public sealed class GoHostedTests
                 (await client.SendAsync(unauth)).StatusCode);
         using (var publish = Publish(Writer))
         using (var response = await client.SendAsync(publish))
+        {
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var expected = GoModuleZipInspector.Inspect(new MemoryStream(archived),
+                "example.com/hello/@v/v1.2.3.zip").ZipH1;
+            Assert.Equal(expected, body.GetProperty("zipH1").GetString());
+            Assert.StartsWith("h1:", expected, StringComparison.Ordinal);
+        }
         using (var repeat = Publish(Writer))
         using (var response = await client.SendAsync(repeat))
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

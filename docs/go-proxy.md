@@ -21,7 +21,7 @@ curl --fail-with-body --request POST \
   http://127.0.0.1:8080/api/go/modules
 ```
 
-The optional `time` field is used to generate immutable Go `.info` metadata and should reflect the release's authoritative UTC timestamp. Go version coordinates cannot be overwritten. Duplicate publishing returns HTTP 409; incomplete or invalid modules fail before any visible revision is committed. The API responds HTTP 201 with ZIP digest, size, and proxy URL on successful publication.
+The optional `time` field is used to generate immutable Go `.info` metadata and should reflect the release's authoritative UTC timestamp. Go version coordinates cannot be overwritten. Duplicate publishing returns HTTP 409; incomplete or invalid modules fail before any visible revision is committed. The API responds HTTP 201 with ZIP SHA-256, module-content `zipH1`, size, and proxy URL on successful publication. `zipH1` uses Go's canonical `h1:` content-hashing convention; it is a value computed from the uploaded module, **not** an attestation of publisher identity or a lookup against a public checksum database.
 
 Consumer configuration for a **private synthetic** module where the public Go checksum database does not have a record:
 
@@ -51,7 +51,7 @@ Go's uppercase path encoding uses `!` followed by a lowercase character. Noncano
 
 A version is stored in **one immutable object** containing `.info`, `.mod` and `.zip`, with a V7 database row and transactional catalog/audit insertion. A publication intent is persisted before its object write; only a committed database revision becomes visible. On interruption, orphan/missing-object evidence remains in recovery, and readiness is degraded for referenced missing objects. An operator must investigate unmatched intents; this is deliberately not an unsafe automatic cross-store rollback.
 
-- Publication-time SHA-256 covers the outer stored bundle, original module ZIP and `.mod`; reads verify immutable object integrity before serving. SHA-256 of ZIP **is not** Go's `h1:` canonical content hash; Packory does not implement the Go checksum database.
+- Publication-time SHA-256 covers the outer stored bundle, original module ZIP and `.mod`; reads verify immutable object integrity before serving. The importer additionally computes Go `h1:` from the **uncompressed bytes and full names of ZIP entries**, in lexicographic name order. This is independent of ZIP compression or entry order. It is returned as `zipH1` for independently verifiable client interoperability; no public checksum-database verification, signature or provenance validation is performed.
 - The existing ZIP validator enforces a strict cross-platform ASCII path subset, regular files only, matching module/version entry prefix, directory/file collision checks, optional root `go.mod` identity and bounded decompression. A ZIP containing a root `go.mod` must contain the same exact bytes as the separately published `.mod`.
 - Ceilings: **32 MiB compressed ZIP**, 64 MiB aggregate uncompressed, 16 MiB per entry, 1 MiB root `go.mod`, at most 4096 entries. These are stricter than Go's own ZIP specification, and thus reject some otherwise valid Go modules.
 - Read auth uses the existing global registry policy. Publishing requires a write/admin role, with optional `go:<prefix>*` namespace grants; feed-scoped managed tokens cannot read global Go content when authenticated reads are enforced.
@@ -60,7 +60,7 @@ A version is stored in **one immutable object** containing `.info`, `.mod` and `
 
 ## Coverage and remaining roadmap
 
-The CI smoke creates a synthetic Go module, imports it with native API calls, and runs a real `go mod download`, `go build`, `go mod verify`, `@latest`, fresh cache and process-restart check against locally served bytes. xUnit covers auth, immutable version conflicts, corruption rejection, schema, and recovery states. This proves the **exact hosted client/operation combination** that passed CI, not the full upstream Go specification.
+The CI smoke creates a synthetic Go module, imports it with native API calls, and runs a real `go mod download`, `go build`, `go mod verify`, `@latest`, fresh cache and process-restart check against locally served bytes. It compares `zipH1` against the native client's `go.sum` entry and fails on disagreement. xUnit covers auth, immutable version conflicts, corruption rejection, schema, and recovery states. This proves the **exact hosted client/operation combination** that passed CI, not the full upstream Go specification.
 
 Still open under V4 E0/E3/E11: independent multi-feed Go IAM, pseudo-versions and full Unicode archive compatibility, public HTTPS read-through with SSRF-safe origin policy, checksum-database integration, alternative OS/client qualification, provider-specific restore/failure drills and independent security qualification.
 
