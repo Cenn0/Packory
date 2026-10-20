@@ -24,6 +24,14 @@ public static class Access
         var role = (token is null ? null : CredentialRole(token, settings, context)) ??
             OidcCredentialRole(context, settings);
         if (role is null) return Results.Unauthorized();
+        // A grant scoped to one private feed or publish namespace is NOT a
+        // global registry read permission. Native private feed routes use
+        // RequireFeed instead; unscoped managed readers retain global access.
+        // Public legacy routes remain public when AnonymousRead is enabled.
+        if (!write && role is ("managed-read" or "managed-write") &&
+            context.Items[ManagedNamespaceKey] is string)
+            return Results.Json(new { error = "Scoped credentials cannot read global registries" },
+                statusCode: StatusCodes.Status403Forbidden);
         if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" or "managed-write" ||
             (!write && role is "read-token" or "oidc-read" or "managed-read"))
         {
