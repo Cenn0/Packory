@@ -14,6 +14,9 @@ cleanup() {
   status=$?
   trap - EXIT
   if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi
+  # The Go module cache is intentionally read-only by default. Restore owner
+  # permissions before deleting isolated CI fixtures, preserving test status.
+  chmod -R u+w "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
   exit "$status"
 }

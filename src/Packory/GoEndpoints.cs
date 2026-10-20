@@ -114,8 +114,14 @@ public static class GoEndpoints
                     return Results.BadRequest();
                 var versions = db.GoModuleVersions(name);
                 if (versions.Count == 0) return Results.NotFound();
-                var latest = versions.OrderBy(x => x, Comparer<string>.Create(
-                    GoModuleBundle.CompareVersions)).Last();
+                // Go prefers the highest stable release, then the highest
+                // prerelease. A later prerelease must not displace a release.
+                // See https://go.dev/ref/mod#module-proxy-protocol
+                var releases = versions.Where(v => !v.Contains('-', StringComparison.Ordinal))
+                    .ToArray();
+                var latest = (releases.Length > 0 ? releases : versions)
+                    .OrderBy(x => x, Comparer<string>.Create(
+                        GoModuleBundle.CompareVersions)).Last();
                 return await SendPart(db, blobs, ctx, name, latest, "info");
             }
 

@@ -181,7 +181,7 @@ public sealed class GoHostedTests
     {
         using var host = new Host();
         using var client = host.CreateClient();
-        foreach (var version in new[] { "v1.10.0", "v1.2.3", "v1.10.0-rc.1" })
+        foreach (var version in new[] { "v1.10.0", "v1.2.3", "v1.10.0-rc.1", "v1.11.0-rc.1" })
         {
             using var req = Publish(Admin, version: version);
             using var result = await client.SendAsync(req);
@@ -192,7 +192,7 @@ public sealed class GoHostedTests
         var payload = await latest.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         Assert.Equal("v1.10.0", payload.GetProperty("Version").GetString());
         using var versions = await Get(client, "/go/example.com/hello/@v/list", Reader);
-        Assert.Equal("v1.2.3\nv1.10.0-rc.1\nv1.10.0\n",
+        Assert.Equal("v1.2.3\nv1.10.0-rc.1\nv1.10.0\nv1.11.0-rc.1\n",
             await versions.Content.ReadAsStringAsync());
     }
 
