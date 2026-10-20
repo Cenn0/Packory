@@ -47,3 +47,26 @@ For com.example:library:1.0.0, add Packory as an explicitly configured Maven rep
 **Open:** native Maven deploy (including server-controlled mutable repository metadata lifecycle), native Gradle conformance, atomic multi-file releases, snapshot versions, private feed isolation, upstream proxy, real S3 recovery/provider tests and full client/security acceptance. Track these in [V4 roadmap](roadmap-v4.md), [issue #91](https://github.com/Cenn0/Packory/issues/91) and [release gates](release-gates.md).
 
 Official references: [Maven layout](https://maven.apache.org/repository/layout.html), [metadata](https://maven.apache.org/repositories/metadata.html), [deploy plugin](https://maven.apache.org/plugins/maven-deploy-plugin/usage.html).
+
+## V8 experimental isolated private hosted Maven sources (E0)
+
+The global `/maven/` transport above remains unchanged. Administrators
+may now activate `kind=maven` **private hosted** feed drafts. A private
+Maven source uses `/feeds/<feed-id>/maven/` and **only** exact
+`feed:<id>:read` or `feed:<id>:publish` grants; anonymous and global
+read/write credentials cannot access it. Files are immutable under
+`feeds/<id>/maven/<canonical-repository-path>` and are indexed by
+`(feed_id,kind,path)`. A POM and JAR in one feed do not appear in the
+global Maven registry or any other feed. Version metadata is derived
+only from that feed's committed assets; all digest/metadata GETs are
+validated before revealing content. Publication is still via individual
+Packory file PUTs (plus validated checksum-sidecar PUTs), not native
+Maven deploy.
+
+The CI includes two synthetic Maven feeds with identical coordinates but
+different bytes, exact credential enforcement, native Maven 3 dependency
+resolve, byte parity, checksums, negative cross-feed reads, invalid POMs,
+tampering and SQLite/PostgreSQL/provider-boundary checks. Real-world Gradle
+or Maven deploy compatibility, SNAPSHOT, Maven Central proxying, real
+storage provider recovery and broad client matrices remain separate
+release gates.

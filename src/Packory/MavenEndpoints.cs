@@ -86,7 +86,7 @@ public static class MavenEndpoints
         catch (ArgumentException) { return false; }
     }
 
-    private static bool TryMetadataCoordinates(string? path, out string groupId,
+    public static bool TryMetadataCoordinates(string? path, out string groupId,
         out string artifactId, out string? checksum)
     {
         groupId = artifactId = "";
@@ -114,7 +114,7 @@ public static class MavenEndpoints
         return MavenCoordinates.ValidGroup(groupId);
     }
 
-    private static string MetadataXml(string groupId, string artifactId,
+    public static string MetadataXml(string groupId, string artifactId,
         IReadOnlyList<string> versions)
     {
         return new XDocument(new XElement("metadata",
@@ -126,7 +126,7 @@ public static class MavenEndpoints
             ).ToString(SaveOptions.DisableFormatting);
     }
 
-    private static async Task<string> ChecksumAsync(string path, string algorithm,
+    public static async Task<string> ChecksumAsync(string path, string algorithm,
         CancellationToken ct)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,

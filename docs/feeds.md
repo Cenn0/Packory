@@ -1,6 +1,6 @@
 # Feed control plane — E0 private hosted NuGet and Raw (experimental)
 
-Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and explicitly activated, private NuGet and Raw hosted adapters. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
+Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and explicitly activated, private NuGet, Raw and Maven hosted adapters. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
 
 | ID | Kind | Mode | Wire behavior |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Packory exposes a versioned **admin-only feed inventory**, disabled drafts for a
 
 `GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `{apiVersion:"v1",items:[...],nextCursor, isolationSupported:false}`. Valid limits are 1–100; invalid cursors or IDs fail closed. `GET /api/v1/admin/feeds/{id}` returns one descriptor or 404. Admin API tokens or correctly scoped OIDC admin access are required; a read or publish credential is forbidden. Responses use `Cache-Control: no-store`.
 
-## Staged administrative drafts (only reviewed private NuGet or Raw hosted feeds can be activated)
+## Staged administrative drafts (only reviewed private NuGet, Raw or Maven hosted feeds can be activated)
 
 Admins may **prepare disabled, private** feed descriptors for review. This
 capability is a database-backed metadata staging step, **not** hosted/proxy
@@ -49,7 +49,7 @@ for an operating feed.
 
 ## Non-goals and pending MS2 gates
 
-This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet and Raw hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
+This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet, Raw and Maven hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
 
 
 ## V4 experimental private hosted NuGet feeds — first operational slice
@@ -166,6 +166,34 @@ neither reads nor publishes. Deleting a referenced disabled feed is refused.
 Recovery and integrity enumeration include the V8 ledger; the PostgreSQL/S3
 snapshot tool requires row fingerprints for `feed_assets`. CLI/API and
 SQLite/PostgreSQL coverage are **experimental**, not real S3-provider DR
-certification. This slice does not implement native Maven or Go feed routes,
+certification. This Raw slice does not implement Go feed routes,
 other private ecosystem adapters, cross-feed search, per-feed quotas,
 browser-based permissions or production-grade multiwriter semantics.
+
+## V8 isolated private Maven release repositories
+
+`kind=maven`, `mode=hosted` can be explicitly activated by an
+administrator; all proxy and SNAPSHOT behavior remains disabled. The
+private native Maven repository URL is
+`/feeds/<feed-id>/maven/`, and requires **exact** per-feed managed grants
+(`feed:<id>:read` or `feed:<id>:publish`) or signed OIDC feed claims.
+NuGet/Raw credentials for another feed, generic reader/writer credentials
+and anonymous reads do not authorize it.
+
+Canonical release POM/JAR/classifier paths, deterministic version metadata,
+`HEAD`/`GET` with checksums and idempotent hash-verified artifact checksum
+`PUT`s are handled independently of the global repository. Publishing uses
+a bounded authenticated `PUT` to the same repository path, validates POM
+identity, immutable SHA-256+size, and commits a V8 `feed_assets` reference
+with durable intents and audit evidence. Feed-specific Maven revisions are
+**absent** from global Maven metadata, search, downloads and MCP catalog.
+Two feeds can hold different immutable JAR bytes for identical GAV coordinates.
+Published revisions survive deactivation but cannot be overwritten/deleted.
+
+Real native Maven dependency resolution with per-repository Basic credentials
+is included in CI for pinned Maven + plugin versions. This is **not** the
+native `mvn deploy` publication lifecycle: mutable `maven-metadata.xml`
+`PUT`, SNAPSHOT semantics, Gradle variant behavior and atomic multi-file
+releases are not implemented. No arbitrary remote upstream exists. Real
+S3-provider restore, multi-process faults and production operations remain
+unqualified.

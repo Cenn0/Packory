@@ -97,10 +97,10 @@ public static class FeedEndpoints
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
             var feed = db.Feed(id);
-            if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
+            if (feed is not { Kind: "nuget" or "raw" or "maven" or "maven", Mode: "hosted",
                 Visibility: "private", Enabled: false } ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, true, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only reviewed private NuGet/Raw hosted drafts can be activated" });
+                return Results.Conflict(new { error = "Only reviewed private NuGet/Raw/Maven hosted drafts can be activated" });
             return Results.Ok(new { id, enabled = true, kind = feed.Kind, mode = "hosted",
                 visibility = "private" });
         }).RequireRateLimiting("publish");
@@ -115,7 +115,7 @@ public static class FeedEndpoints
             if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
                 Visibility: "private", Enabled: true } ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, false, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only active private NuGet/Raw hosted feeds can be disabled" });
+                return Results.Conflict(new { error = "Only active private NuGet/Raw/Maven hosted feeds can be disabled" });
             // Keep every revision, digest, journal and blob. Re-activation
             // is a separate explicit operator action; no GC is performed.
             return Results.Ok(new { id, enabled = false, retained = true });

@@ -488,6 +488,19 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<string> FeedAssetVersions(string feedId, string kind, string name)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT DISTINCT version FROM feed_assets
+            WHERE feed_id=@feed AND kind=@kind AND name=@name ORDER BY version
+            """, null, ("feed", feedId), ("kind", kind), ("name", name));
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
     public bool PublishFeedAsset(FeedAssetEntry asset, string actor)
     {
         if (!FeedAssetEntry.Valid(asset))
@@ -593,7 +606,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
 
     public bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor)
     {
-        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw")) return false;
+        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw" or "maven")) return false;
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = Command(db, """

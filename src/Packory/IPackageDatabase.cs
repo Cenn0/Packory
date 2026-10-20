@@ -21,6 +21,7 @@ public interface IPackageDatabase
         string sha256, long size, string actor);
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
+    IReadOnlyList<string> FeedAssetVersions(string feedId, string kind, string name);
     bool PublishFeedAsset(FeedAssetEntry asset, string actor);
     bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor);
     IReadOnlyList<FeedDefinition> Feeds(string? after, int limit);
