@@ -536,6 +536,23 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return versions;
     }
 
+    public IReadOnlyList<string> FeedGoVersions(string feedId, string module)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT version FROM feed_assets
+            WHERE feed_id=$feed AND kind='go' AND name=$module
+            ORDER BY version
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$module", module);
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
     public bool PublishFeedAsset(FeedAssetEntry asset, string actor)
     {
         if (!FeedAssetEntry.Valid(asset))
