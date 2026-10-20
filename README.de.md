@@ -54,7 +54,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Cargo & PyPI (experimentell)** | Cargo als gehostete Alternate Registry (Sparse Index und Upload), PyPI Simple API (HTML/JSON) und grundlegender Upload; keine vollständige Unterstützung |
 | **Helm 3 über OCI (experimentell)** | Native Helm-OCI-Push/Pull/Show/Template-Smoke-Tests mit festgelegter CLI-Version; kein allgemeiner Helm- oder Kubernetes-Konformitätsnachweis |
 | **Maven-Release-Dateien (experimentell)** | Globale unveränderliche Release-Dateien, POM-GAV-Prüfung, SHA-256, Versionsmetadaten und Maven-Verbrauchertest; kein Maven-Deploy, SNAPSHOT, Proxy oder separate Maven-Feeds |
-| **Go-Module (experimentelles Hosting)** | Authentifizierter Modulimport und native GOPROXY-Downloads aus unveränderlichen Versionen mit atomarer Sichtbarkeit; kein Proxy, keine privaten Go-Feeds oder vollständige Go-Konformitätsfreigabe |
+| **Go-Module (experimentelles Hosting)** | Authentifizierter Modulimport und native GOPROXY-Downloads aus unveränderlichen Versionen mit atomarer Sichtbarkeit und `h1:`-Abgleich gegen `go.sum`; kein Proxy, keine privaten Go-Feeds oder vollständige Go-Konformitätsfreigabe |
 | **Raw / Generic (experimentell)** | Binärdateien über HTTP mit SHA-256, Metadaten und Range-Downloads; globaler Namensraum, kein natives Paketmanager-Protokoll |
 | **Agent Skills** | Versionierter ZIP-Import mit Quarantäne, offline statischer SkillSpector-Prüfung, expliziter Freigabe vor REST-/MCP-Auslieferung bei aktivierter Durchsetzung sowie Widerruf/erneuter Prüfung |
 | **Statische Skill-Qualität** | Deterministische Dokumentationsbefunde, Verbesserungsvorschläge und Prüfungsabdeckung für veröffentlichte unveränderliche Skills über MCP, REST und Dashboard; getrennt von Sicherheits- und Verhaltenstests |
@@ -64,7 +64,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Zugriff** | Statische Read-/Write-/Admin-Tokens sowie optionale OIDC-JWT-Prüfung mit expliziten `packory.read`-, `packory.write`- und `packory.admin`-Scopes; noch kein Browser-SSO/BFF |
 | **Speicher** | SQLite und Dateisystem standardmäßig; optional PostgreSQL-Metadaten und S3-kompatible Blobs für neue Einzelinstanz-Installationen |
 
-**Go (V4 E3, experimentelles Hosting):** Authentifizierter Import für Go-Module und native GOPROXY-Leseendpunkte für `.info`, `.mod` und `.zip` mit unveränderlicher Veröffentlichung. Nicht implementiert sind Upstream-Spiegelung, eine Prüfsummendatenbank, private Go-Feeds und umfassende Clientkonformität. Siehe [Go-Dokumentation](docs/go-proxy.md) und [Checkpoint vom 20. Oktober](docs/roadmap-status-2026-10-20.md).
+**Go (V4 E3, experimentelles Hosting):** Authentifizierter Import für Go-Module und native GOPROXY-Leseendpunkte für `.info`, `.mod` und `.zip` mit unveränderlicher Veröffentlichung. Der berechnete kanonische `h1:`-Hash wird im nativen Go-Clienttest mit `go.sum` abgeglichen; dies ist **keine unabhängige Prüfsummendatenbank-Verifikation**. Upstream-Spiegelung, private Go-Feeds und umfassende Clientkonformität fehlen weiterhin. Siehe [Go-Dokumentation](docs/go-proxy.md) und [Checkpoint vom 20. Oktober](docs/roadmap-status-2026-10-20.md).
 
 ### Packory als Paketquelle nutzen
 
