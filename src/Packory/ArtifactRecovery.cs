@@ -55,7 +55,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
-        "feed-raw" or "feed-maven" => FeedAssetCommitted(pending),
+        "feed-raw" or "feed-maven" or "feed-go" => FeedAssetCommitted(pending),
         "go" when GoModuleBundle.ValidCoordinates(pending.Name, pending.Version) &&
             pending.Key == GoModuleBundle.Key(pending.Name, pending.Version) =>
             database.GetGoModule(pending.Name, pending.Version) is not null,
