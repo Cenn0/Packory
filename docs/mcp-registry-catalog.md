@@ -1,6 +1,6 @@
 # MCP Registry metadata and discovery
 
-Packory stores and discovers a **version-pinned, remote-only manifest profile** of the official MCP Registry `server.json` format. The three v0.1 read routes, Packory management API, MCP tools and dashboard share the same immutable reviewed catalog. The [MCP delivery roadmap](mcp-roadmap.md) tracks broader manifests, publisher verification, synchronization and an optional isolated gateway.
+Packory stores and discovers a **version-pinned, conservatively validated inert manifest profile** of the official MCP Registry `server.json` format. It admits reviewed remote and/or package distributions and does not install, connect to, resolve variables in or execute any of them. The three v0.1 read routes, Packory management API, MCP tools and dashboard share the same immutable reviewed catalog. The [MCP delivery roadmap](mcp-roadmap.md) tracks broader manifests, publisher verification, synchronization and an optional isolated gateway.
 
 ## State and trust model
 
@@ -9,7 +9,9 @@ Packory stores and discovers a **version-pinned, remote-only manifest profile** 
 3. Read-only REST and MCP discovery expose **PUBLISHED** records only; revocation hides records immediately for later reads. Reusing the same name/version or re-publishing a revoked version is prohibited.
 4. The server never contacts, runs, installs or proxies external MCP servers or forwards any token. Registry metadata is always labeled **publisherVerified: false** and **safeToConnect: false**. An operator's approval is not ownership verification.
 
-**Manifest profile:** pinned 2025-12-11 `server.schema.json`, canonical MCP name, strict semantic version (including the prohibition on leading zeroes in numeric prerelease identifiers), title of at most 100 characters, bounded description, optional GitHub repository and one to four HTTPS Streamable HTTP remotes. The profile rejects unknown properties, duplicate JSON keys, URL templates, inline request headers, package launch commands, local/IP URLs, credentials in URLs and URL query strings. Admission of this profile does not establish full official schema conformance. Previously stored bytes remain immutable; records that fail the current profile are excluded from discovery.
+**Manifest profile:** pinned 2025-12-11 `server.schema.json`, Packory's canonical lowercase MCP name and exact SemVer, title and description limits. Packory now accepts one to sixteen HTTPS remote descriptors (Streamable HTTP or SSE), one to sixteen inert package descriptors (including stdio or HTTPS transport), **or both**. It validates declared transport variables, bounded header/environment and argument metadata, package checksum syntax (MCPB requires `fileSha256`), icons, HTTPS website and repository metadata, safe repository subfolders and namespaced `_meta` objects. Only explicit documented fields are admitted. Metadata is retained as the original UTF-8 JSON and digest, never converted into executable startup arguments or resolved credentials.
+
+**Deliberate restrictions:** malformed/duplicate/unknown fields, unsafe URL origins, raw IPs, non-HTTPS URLs, hardcoded credential queries, static sensitive header/environment values, ambiguous templates, non-exact package versions and nested/oversized input are rejected. URL-template variables must be declared; query values, when present, must be variable references. Namespaced extensions are bounded and may not contain obviously sensitive key names. That structural check cannot guarantee submitted strings contain no secrets. Registry review is still manual. **This is a Packory-admitted subset**, not complete validation against every official JSON Schema possibility, publisher authentication, package signature verification or permission to connect. Previously stored bytes remain immutable; records failing the current profile are excluded from discovery.
 
 ## Example input
 
@@ -31,6 +33,27 @@ The following public dummy metadata is inert. Do not treat it as a genuine verif
   ]
 }
 ~~~
+
+Package-only metadata is also accepted without `remotes`; it is **not** a runnable client installation configuration. For example:
+
+~~~json
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "org.example/package-only",
+  "description": "Synthetic package distribution metadata",
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@example/inert-package",
+      "version": "1.0.0",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
+~~~
+
+A server may declare `remotes` using `streamable-http` or `sse`, with explicit `variables` and bounded `headers`. Sensitive headers must refer to declared secret variables instead of literal credentials. Package `environmentVariables`, `packageArguments` and `runtimeArguments` are stored as **untrusted descriptive strings only**; Packory does not spawn these commands. Packages can use `stdio` or an HTTPS transport. Icons and vendor extension data are never fetched or rendered as active markup by this service.
 
 Submit it as an administrator, using a runtime token that is never committed or logged:
 
@@ -88,17 +111,17 @@ Ordinary REST discovery follows `PACKORY_ANONYMOUS_READ`; when anonymous reads a
 
 ## Web dashboard
 
-The main Packory dashboard provides name/title search and **Load more** with opaque cursor continuation. Version and remote endpoint are displayed as inert text. Token changes clear prior catalog data and discard delayed responses from the previous credentials. The in-memory API token is used only for Packory requests. Staging, publishing and revocation remain administrator-only REST operations; a browser session/CSRF contract is a separate roadmap task. Publisher verification stays explicitly false.
+The main Packory dashboard provides name/title search and **Load more** with opaque cursor continuation. Version and remote endpoint, where present, are displayed as inert text. Package-only summaries intentionally have a null remote type and URL. Token changes clear prior catalog data and discard delayed responses from the previous credentials. The in-memory API token is used only for Packory requests. Staging, publishing and revocation remain administrator-only REST operations; a browser session/CSRF contract is a separate roadmap task. Publisher verification stays explicitly false.
 
 ## Operational limitations
 
-- No automatic ownership/domain proof, signature verification, upstream registry import, remote runtime authentication, tool permission mediation or third-party scanning. The receiving MCP client must separately verify endpoints and apply SSRF and injection controls. A DNS hostname that passes import checks can later resolve to a private address.
+- No automatic ownership/domain proof, signature verification, upstream registry import, remote runtime authentication, package execution, icon fetching, tool permission mediation or third-party scanning. The receiving MCP client must separately verify endpoints and apply SSRF and injection controls. A DNS hostname that passes import checks can later resolve to a private address.
 - Persistence uses existing SQLite or PostgreSQL. Writer startup initializes the additive table; read-only instances require the corresponding shared-primary migration.
 - The /mcp endpoint has an in-process shared fixed-window budget of 300 requests per minute with no queue. This is not a distributed rate limiter or a measured capacity target.
 - New discovery consumers use keyset cursors. Legacy explicit-offset consumers can still observe shifted rows when publication state changes.
-- Official publishing/authentication, full manifest support, ownership proof, signatures, imports and deleted-record synchronization remain separate [MCP-R2–R6](mcp-roadmap.md) tasks. The v0.1 read routes do not imply full Registry conformance.
+- Official publishing/authentication, full official JSON Schema conformance, ownership proof, signatures, imports and deleted-record synchronization remain separate [MCP-R2–R6](mcp-roadmap.md) tasks. The v0.1 read routes do not imply full Registry conformance.
 - Keep production credentials, email addresses, private hostnames, internal test results and personal data out of the public repository.
 
 ## Verification
 
-`McpRegistryTests` covers the three read routes, exact/latest versions, envelopes, scope-bound cursors, literal filters, immutable decisions, revocation, corrupt storage and native C# MCP discovery. `McpRegistryPostgresProviderTests` runs the same ordering/lifecycle cases against an actual PostgreSQL database when `PACKORY_TEST_POSTGRES` is configured. SQLite remains covered in the ordinary suite. The dashboard browser script uses synthetic API responses and verifies pagination and credential changes independently of backend tests.
+`McpRegistryManifestShapeTests` covers accepted remote/package manifests, safe template declarations, alternate transports, icons, repository and extension metadata, original bytes/digests, package-only SQLite publication/revocation, and rejected secret-bearing or ambiguous shapes. `McpRegistryTests` covers the three read routes, exact/latest versions, envelopes, scope-bound cursors, literal filters, immutable decisions, revocation, corrupt storage and native C# MCP discovery. `McpRegistryPostgresProviderTests` runs the same ordering/lifecycle cases against an actual PostgreSQL database when `PACKORY_TEST_POSTGRES` is configured. SQLite remains covered in the ordinary suite. The dashboard browser script uses synthetic API responses and verifies pagination and credential changes independently of backend tests.

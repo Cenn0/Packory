@@ -22,6 +22,7 @@ Registry approval is a local distribution decision. It does not prove publisher 
 | MCP-P1 | Native-client compatibility checks for MCP protocol revisions 2025-06-18, 2025-11-25 and 2026-07-28; current discovery/caching metadata and advertised capabilities | `McpProtocolTests`, existing `ApiTests` and `McpOAuthMetadataTests` |
 | MCP-P2 | Opaque keyset pagination for Skills and directory children; strict invalid-parameter errors; canonical escaped URIs and exact-byte binary resources | `McpProtocolTests`; directory cursors bind the immutable archive digest |
 | MCP-P3 | Complete traversal of the global artifact catalog and exact package versions beyond the former 100-row ceiling, including Maven and Raw; approval predicate applied before LIMIT | `McpArtifactCatalogTests`, SQLite and actual PostgreSQL test profiles |
+| MCP-R2a | The admitted inert manifest profile now stores remote, package and mixed distributions, SSE/Streamable HTTP/stdio transport descriptors, bounded declared variables, icons, repository metadata and namespaced extensions with fail-closed negative checks; nothing is executed | `McpRegistryManifestShapeTests`, exact-byte SQLite persist/revoke, existing REST/MCP discovery and provider suites |
 | MCP-R1 | All three v0.1 Registry read routes for the supported remote manifest profile; exact/latest versions, bounded keyset pages, correct JSON envelopes and explicit unsupported-filter errors | `McpRegistryTests`, `McpRegistryPostgresProviderTests`, native C# MCP discovery |
 | MCP-Q1 | `assess_skill_quality`, read-only REST and dashboard: deterministic findings, suggestions, file/manifest/archive digests, coverage and incomplete-result semantics | `SkillQualityAssessmentTests`; same report through native MCP and HTTP |
 | MCP-U1 | Dashboard pagination and quality inspection; stale responses from previous credentials or revoked Skills are discarded | `scripts/test-mcp-dashboard.cjs` (five browser scenarios with synthetic API responses), plus dashboard contract checks |
@@ -36,7 +37,7 @@ The browser job pins Node 22 and Playwright 1.62.1, serves the actual dashboard 
 
 | ID | Work to finish | Completion criteria and dependencies |
 | --- | --- | --- |
-| MCP-R2 | Complete inert `server.json` model for package distributions, transport variants, variables, icons, repository metadata and forward-compatible optional fields | Pin official schema; positive/negative fixtures for every admitted shape; retain original bytes and unknown-field policy; discovery never installs, connects or interpolates credentials |
+| MCP-R2b | Qualify the complete official `server.json` compatibility surface beyond Packory's R2a admitted subset | Pin and execute independent official JSON Schema conformance fixtures, reconcile intentionally excluded shapes and non-SemVer version constraints, publish a versioned support matrix; no client may install/connect/interpolate from the Registry |
 | MCP-R3 | Publisher/namespace ownership model and verification | Separate claimed identity, verified identity and operator approval; implement selected official proof mechanisms with challenge expiry, replay protection, namespace takeover/revocation tests and audit; do not infer ownership from a URL or package name |
 | MCP-R4 | Signature and provenance verification | Bind proof to exact artifact digest, revision and issuer; explicit supported algorithm/key/trust-root policy, rotation/revocation/expiry and malformed proof tests; distinguish unsigned, invalid and verified |
 | MCP-R5 | Read-only upstream Registry synchronization | Allowlisted source, bounded pages, persistent checkpoints, idempotence, retries/backoff, differential updates and deleted/revoked records; no import is automatically trusted; fault/restart and SSRF/redirect tests |
@@ -78,7 +79,7 @@ Q4 requires the separate execution boundary and threat model; it is not satisfie
 
 Reuse MS1/MS4/MS6 and E11 for migrations, selected-provider recovery, TLS/OIDC, sanitized telemetry, capacity limits, dependency/license/SBOM and signed release artifacts. Keep library/SDK version upgrades independent and run the MCP acceptance matrix on every upgrade. Do not equate an official SDK dependency with endorsement of Packory by that SDK's maintainers.
 
-Recommended next implementation order: **R2/R3/R6 → R4/R5; Q2/Q3 → Q4/Q5 → Q6/Q7; P4 in parallel; P5 after feed isolation; G1–G5 after the separate runtime prerequisites**. Each delivery should include working end-to-end behavior, negative tests, documentation and a CI-verified commit.
+Recommended next implementation order: **R2b/R3/R6 → R4/R5; Q2/Q3 → Q4/Q5 → Q6/Q7; P4 in parallel; P5 after feed isolation; G1–G5 after the separate runtime prerequisites**. R2a addresses the conservative inert model but does not close R2b's broader official compatibility obligation. Each delivery should include working end-to-end behavior, negative tests, documentation and a CI-verified commit.
 
 ## Primary specifications
 

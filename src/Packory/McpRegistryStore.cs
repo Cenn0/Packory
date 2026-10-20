@@ -70,7 +70,7 @@ public sealed record McpRegistryManifest(
             throw new InvalidDataException("Unsupported manifest property.");
     }
 
-    private static bool SafeRemote(string url)
+    internal static bool SafeRemote(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) ||
@@ -105,7 +105,7 @@ public sealed record McpRegistryManifest(
             var root = document.RootElement;
             UniqueProperties(root);
             Only(root, "$schema", "name", "version", "title", "description",
-                "remotes", "repository");
+                "remotes", "packages", "repository", "websiteUrl", "icons", "_meta");
             if (ReadString(root, "$schema", 160) != Schema)
                 throw new InvalidDataException("Unsupported server.json schema.");
             var name = ReadString(root, "name", 180);
@@ -115,37 +115,8 @@ public sealed record McpRegistryManifest(
             var description = ReadString(root, "description", 100);
             var title = root.TryGetProperty("title", out _) ?
                 ReadString(root, "title", 100) : name;
-            if (!root.TryGetProperty("remotes", out var remotes) ||
-                remotes.ValueKind != JsonValueKind.Array ||
-                remotes.GetArrayLength() is < 1 or > 4)
-                throw new InvalidDataException("Only bounded remote-only manifests are supported.");
-            string? first = null;
-            foreach (var remote in remotes.EnumerateArray())
-            {
-                Only(remote, "type", "url");
-                if (ReadString(remote, "type", 32) != "streamable-http")
-                    throw new InvalidDataException("Only Streamable HTTP remotes are supported.");
-                var url = ReadString(remote, "url", 512);
-                if (!SafeRemote(url))
-                    throw new InvalidDataException("Unsafe remote endpoint.");
-                first ??= url;
-            }
-            if (root.TryGetProperty("repository", out var repo))
-            {
-                Only(repo, "source", "url");
-                if (ReadString(repo, "source", 32) != "github")
-                    throw new InvalidDataException("Unsupported repository source.");
-                var repoUrl = ReadString(repo, "url", 512);
-                if (!Uri.TryCreate(repoUrl, UriKind.Absolute, out var repository) ||
-                    repository.Scheme != "https" ||
-                    !string.Equals(repository.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
-                    !string.IsNullOrEmpty(repository.Query) ||
-                    !string.IsNullOrEmpty(repository.Fragment) ||
-                    !string.IsNullOrEmpty(repository.UserInfo) ||
-                    repository.AbsolutePath.Trim('/').Split('/').Length != 2)
-                    throw new InvalidDataException("Invalid repository reference.");
-            }
-            return new McpRegistryManifest(name, version, title, description, first!,
+            var firstRemote = McpRegistryManifestShapes.Validate(root);
+            return new McpRegistryManifest(name, version, title, description, firstRemote,
                 json, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         }
         catch (Exception e) when (e is JsonException or DecoderFallbackException)
@@ -159,13 +130,22 @@ public sealed record McpRegistryEntry(
     string Name, string Version, string Title, string Description, string RemoteUrl,
     string Json, string Sha256, string State, string UpdatedAt)
 {
-    public object Summary => new
+    public object Summary
     {
-        name = Name, version = Version, title = Title, description = Description,
-        remoteType = "streamable-http", remoteUrl = RemoteUrl,
-        sha256 = Sha256, reviewState = State, publisherVerified = false,
-        safeToConnect = false
-    };
+        get
+        {
+            using var doc = JsonDocument.Parse(Json);
+            var remoteType = RemoteUrl.Length == 0 ? null :
+                doc.RootElement.GetProperty("remotes")[0].GetProperty("type").GetString();
+            return new
+            {
+                name = Name, version = Version, title = Title, description = Description,
+                remoteType, remoteUrl = RemoteUrl.Length == 0 ? null : RemoteUrl,
+                sha256 = Sha256, reviewState = State, publisherVerified = false,
+                safeToConnect = false
+            };
+        }
+    }
 
     public object Detail
     {
