@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 BASE="http://127.0.0.1:18093"
+TLSBASE="https://127.0.0.1:18094"
+TLSPID=""
 ADMIN="$(openssl rand -hex 32)"
 MODULE="example.com/e0-private"
 VERSION="v1.2.3"
@@ -12,6 +14,7 @@ PID=""
 cleanup() {
   code=$?
   trap - EXIT
+  if [ -n "$TLSPID" ]; then kill "$TLSPID" 2>/dev/null || true; wait "$TLSPID" 2>/dev/null || true; fi
   if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi
   chmod -R u+w "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
@@ -50,6 +53,64 @@ for n in $(seq 1 90); do
   sleep 0.2
 done
 test "$ready" = true || { echo "Go feed server failed readiness" >&2; exit 1; }
+# Go only transmits GOAUTH/.netrc credentials to an HTTPS proxy. Build an
+# ephemeral loopback certificate with a validated IP SAN.
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+  -keyout "$WORK/localhost.key" -out "$WORK/localhost.pem" \
+  -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" \
+  >"$WORK/certificate.log" 2>&1
+cat >"$WORK/tls-proxy.py" <<'PY'
+import http.client
+import http.server
+import ssl
+import sys
+
+certificate, key = sys.argv[1], sys.argv[2]
+
+class Forward(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+    def do_GET(self):
+        try:
+            upstream = http.client.HTTPConnection("127.0.0.1", 18093, timeout=30)
+            headers = {k: v for k, v in self.headers.items()
+                       if k.lower() not in ("host", "connection", "transfer-encoding")}
+            upstream.request("GET", self.path, headers=headers)
+            response = upstream.getresponse()
+            body = response.read()
+            self.send_response(response.status)
+            for name, value in response.getheaders():
+                if name.lower() not in ("connection", "transfer-encoding",
+                                        "content-length", "server", "date"):
+                    self.send_header(name, value)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            upstream.close()
+        except Exception:
+            self.send_error(502)
+    def log_message(self, fmt, *args):
+        pass
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 18094), Forward)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
+context.load_cert_chain(certificate, key)
+server.socket = context.wrap_socket(server.socket, server_side=True)
+server.serve_forever()
+PY
+python3 "$WORK/tls-proxy.py" "$WORK/localhost.pem" "$WORK/localhost.key" \
+  >"$WORK/tls-proxy.log" 2>&1 &
+TLSPID="$!"
+tls_ready=false
+for n in $(seq 1 75); do
+  if curl -fsS --cacert "$WORK/localhost.pem" "$TLSBASE/health/ready" >/dev/null 2>&1; then
+    tls_ready=true
+    break
+  fi
+  if ! kill -0 "$TLSPID" 2>/dev/null; then break; fi
+  sleep 0.2
+done
+test "$tls_ready" = true || { echo "Private Go TLS fixture failed readiness" >&2; exit 1; }
 admin_post() {
   curl --fail-with-body -sS -H "Authorization: Bearer $ADMIN" \
     -H "Content-Type: application/json" --data-binary "$2" "$BASE$1"
@@ -123,11 +184,15 @@ for feed in go-alpha go-beta; do
   chmod 600 "$WORK/$feed/home/.netrc"
   (
     cd "$WORK/$feed/consumer"
-    HOME="$WORK/$feed/home" GOPROXY="$BASE/feeds/$feed/go" \
+    HOME="$WORK/$feed/home" NETRC="$WORK/$feed/home/.netrc" \
+      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc \
+      GOPROXY="$TLSBASE/feeds/$feed/go" \
       GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
       GOMODCACHE="$WORK/$feed/modcache" GOTOOLCHAIN=local \
       go mod download "$MODULE@$VERSION" >"$WORK/$feed-download.log" 2>&1
-    HOME="$WORK/$feed/home" GOPROXY="$BASE/feeds/$feed/go" \
+    HOME="$WORK/$feed/home" NETRC="$WORK/$feed/home/.netrc" \
+      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc \
+      GOPROXY="$TLSBASE/feeds/$feed/go" \
       GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
       GOMODCACHE="$WORK/$feed/modcache" GOTOOLCHAIN=local \
       go build -o "$WORK/$feed-client" ./... >"$WORK/$feed-build.log" 2>&1
