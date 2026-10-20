@@ -204,9 +204,13 @@ public sealed class ScopedGlobalRegistryReadTests
         var scoped = AddToken(db, "read", "feed:alpha-feed:read", '3');
         Assert.Equal(HttpStatusCode.OK,
             await Status(client, HttpMethod.Get, "/nuget/v3/index.json", scoped));
-        // Private feeds still do NOT honor the anonymous legacy read setting.
-        Assert.Equal(HttpStatusCode.Forbidden,
+        // A matching grant does not activate a feed. Disabled/nonexistent
+        // private feeds return 404, and anonymous clients are challenged.
+        Assert.Equal(HttpStatusCode.NotFound,
             await Status(client, HttpMethod.Get,
                 "/feeds/alpha-feed/nuget/v3/index.json", scoped));
+        using var noCredential = await client.GetAsync(
+            "/feeds/alpha-feed/nuget/v3/index.json");
+        Assert.Equal(HttpStatusCode.Unauthorized, noCredential.StatusCode);
     }
 }
