@@ -1,6 +1,6 @@
 # CI supply-chain posture and SHA-pinned actions
 
-As of **2026-10-17**, all first-party GitHub Actions in the seven public Packory workflows are pinned to exact upstream commit SHAs. The SHA/tag associations were verified against GitHub's official `actions/*` release tags:
+As of **2026-10-17**, all first-party GitHub Actions in the public Packory workflows at this checkpoint are pinned to exact upstream commit SHAs. The SHA/tag associations were verified against GitHub's official `actions/*` release tags:
 
 | Upstream action | Release | Exact tag commit |
 | --- | --- | --- |

@@ -9,14 +9,14 @@
 | E1 Raw/Generic and Helm OCI | [#90](https://github.com/Cenn0/Packory/pull/90) | Hosted immutable Raw bytes and pinned native Helm OCI smoke | Feed isolation, more clients, real-provider restoration |
 | E2 Maven parser | [#92](https://github.com/Cenn0/Packory/pull/92) | Release-coordinate safety groundwork | Native publishing |
 | E2 Maven files | [#93](https://github.com/Cenn0/Packory/pull/93) | Global immutable hosted release assets, V6 metadata/recovery, SHA-256 and native Maven consumer with transitive dependency | Maven deploy, SNAPSHOT, private feeds, remote proxy, Gradle and provider conformance |
-| E3 Go coordinates | [#94](https://github.com/Cenn0/Packory/pull/94) | Canonical paths, escaped wire names and bounded version parser with negative xUnit coverage | No HTTP GOPROXY route, stored modules or native Go client support |
+| E3 Go parser groundwork (historical) | [#94](https://github.com/Cenn0/Packory/pull/94) | Canonical paths, escaped wire names and bounded version parser with negative xUnit coverage | This row records the earlier parser stage; hosted delivery followed in [#97](https://github.com/Cenn0/Packory/pull/97), with `h1:` parity in [#102](https://github.com/Cenn0/Packory/pull/102) |
 | CI resilience | [#95](https://github.com/Cenn0/Packory/pull/95) | Bounded retry for recognizable transient Maven Central bootstrap errors | No claim of eliminating all external-service flakiness |
 
 ## E3 ZIP archive-inspection continuation
 
-This change introduces a **bounded offline ZIP preflight plus synthetic tests**. It checks ZIP module/version prefix, duplicate and case-fold collisions for its ASCII-only subset, traversal, symlinks, resource limits and root go.mod module identity. It computes SHA-256 of ZIP bytes; this is **not** Go's h1: checksum or a checksum database verification.
+At the earlier **PR #94 stage**, this change introduced a **bounded offline ZIP preflight plus synthetic tests**. It checks ZIP module/version prefix, duplicate and case-fold collisions for its ASCII-only subset, traversal, symlinks, resource limits and root go.mod module identity. It initially computed only the compressed ZIP SHA-256. Follow-on [PR #102](https://github.com/Cenn0/Packory/pull/102) computes Go `h1:` locally; neither feature checks a public checksum database.
 
-It does not register endpoints, alter database schema, introduce public network fetches, promise durable publishing or certify native Go clients. See [Go groundwork](go-proxy.md) for deliberate constraints. Test results count as evidence **only if checks succeed on the exact changed commit**.
+**Historical scope of #94:** that parser-only commit did not register endpoints, alter database schema or provide durable publishing/native clients. Those hosted capabilities were later implemented in #97. See [Go hosted registry](go-proxy.md) for current constraints. Test results count as evidence **only if checks succeed on the exact changed commit**.
 
 ## MS5 / E10 MCP functional continuation
 
@@ -52,6 +52,6 @@ The configured full-suite run also exposed a pre-existing PostgreSQL feed-list e
 **Public source privacy:** no personal identities, private email addresses, secrets, internal URLs, private projects or production logs in code, docs, PRs or CI artifacts; test fixtures use example domains and noreply Git identities.
 
 
-## Additional V4 E3 hosted delivery — PR #97
+## Additional V4 E3 hosted delivery — merged PRs #97 and #102
 
-The new hosted Go adapter uses an authenticated multipart importer, immutable version triplets, V7 SQLite/PostgreSQL metadata and journal recovery, plus standard hosted GOPROXY reads (list, info, mod, zip, latest). A real native Go CLI smoke is required before a client support claim. There is no public mirror, per-feed Go isolation, comprehensive Go ZIP compatibility or production recommendation. See [Go hosted](go-proxy.md) and [PR #97](https://github.com/Cenn0/Packory/pull/97).
+The new hosted Go adapter uses an authenticated multipart importer, immutable version triplets, V7 SQLite/PostgreSQL metadata and journal recovery, plus standard hosted GOPROXY reads (list, info, mod, zip, latest). Native Go CLI download/build/verify, fresh-cache and restart smoke passed in CI on the merged implementation; PR #102 also checks the computed `h1:` against the Go client's own `go.sum`. There is no public mirror, per-feed Go isolation, comprehensive Go ZIP compatibility or production recommendation. See [Go hosted](go-proxy.md), [PR #97](https://github.com/Cenn0/Packory/pull/97) and [PR #102](https://github.com/Cenn0/Packory/pull/102), verified at main commit `780494d0e6b03adc41f1b4b6d82ffe74f2ceb18c`.

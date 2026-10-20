@@ -53,7 +53,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **OCI (experimental)** | Hosted Distribution v2 endpoints for SHA-256 blobs, chunk uploads, manifests, tags and referrers; incomplete client/auth support |
 | **Cargo & PyPI (experimental)** | Hosted Cargo alternate registry (sparse index, binary publish), PyPI Simple API (HTML/JSON) and basic distribution upload; not full ecosystem support |
 | **Maven (experimental)** | Immutable hosted release files, POM identity checks, SHA-256, Maven-consumable URLs; no native deploy, SNAPSHOT, proxy or isolated Maven feeds |
-| **Go modules (hosted experimental)** | Authenticated multipart import and native GOPROXY reads for immutable module versions; bounded Go CLI smoke; no mirror, per-feed isolation or full protocol qualification |
+| **Go modules (hosted experimental)** | Authenticated multipart import and native GOPROXY reads for immutable module versions; Go `h1:` hash verified against native `go.sum`; no mirror, per-feed isolation or full protocol qualification |
 | **Raw / Generic (experimental)** | Immutable binary upload/download with SHA-256 metadata, authentication, ranged downloads; global namespace only, **no native package protocol** |
 | **Agent Skills** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download under the enforcing policy; revocation and rescan |
 | **Static Skill quality** | Deterministic documentation findings, improvement suggestions and coverage for immutable published Skills through MCP, REST and dashboard; separate from safety and behavior checks |
@@ -63,7 +63,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
 | **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
 
-**Go modules (experimental hosted profile):** Packory provides authenticated module import and native GOPROXY hosted download endpoints for immutable `.info`, `.mod` and `.zip` revisions. This profile does not include an upstream mirror, checksum-database service, private Go feeds or general protocol certification. See [Go hosted registry](docs/go-proxy.md) and the [20 October checkpoint](docs/roadmap-status-2026-10-20.md).
+**Go modules (experimental hosted profile):** Packory provides authenticated module import and native GOPROXY hosted download endpoints for immutable `.info`, `.mod` and `.zip` revisions. Its hosted importer computes Go's canonical `h1:` content hash and the native Go smoke verifies it against `go.sum`; this is **not** independent checksum-database verification. No upstream mirror, private Go feeds or general protocol certification is provided. See [Go hosted registry](docs/go-proxy.md) and the [20 October checkpoint](docs/roadmap-status-2026-10-20.md).
 
 ### Use Packory as a registry
 
