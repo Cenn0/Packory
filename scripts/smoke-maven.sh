@@ -33,12 +33,32 @@ mvn -version | sed -n '1p'
 # The plugin itself is downloaded from the normal public Maven distribution origin.
 mkdir -p "$WORK/m2"
 echo "Maven native smoke: priming pinned dependency consumer"
-mvn -B -q -Dmaven.repo.local="$WORK/m2" \
-  org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help >"$WORK/maven-prime.log" 2>&1 || {
-    echo "Maven plugin priming failed" >&2
+# Maven Central may reset a short-lived transfer. Retry ONLY recognizable
+# upstream transport faults, never plugin/build/validation failures.
+primed=false
+for attempt in 1 2 3; do
+  if mvn -B -q --no-transfer-progress -Dmaven.repo.local="$WORK/m2" \
+    org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help \
+    >"$WORK/maven-prime.log" 2>&1; then
+    primed=true
+    break
+  fi
+  if ! grep -Eiq 'Connection reset|Read timed out|Connection timed out|Temporary failure|Network is unreachable|502 Bad Gateway|503 Service Unavailable' \
+    "$WORK/maven-prime.log"; then
+    echo "Maven plugin priming failed with a non-network error; no retry" >&2
     grep -Ei 'error|fail|exception' "$WORK/maven-prime.log" | tail -n 12 >&2 || true
     exit 1
-  }
+  fi
+  if test "$attempt" -lt 3; then
+    echo "Maven Central transient transfer failure; retry attempt $((attempt + 1))/3" >&2
+    sleep "$attempt"
+  fi
+done
+if [ "$primed" != true ]; then
+  echo "Maven Central unavailable after bounded plugin bootstrap retries" >&2
+  grep -Ei 'error|fail|exception' "$WORK/maven-prime.log" | tail -n 12 >&2 || true
+  exit 1
+fi
 echo "Maven native smoke: plugin available"
 
 mkdir -p "$WORK/payload"
