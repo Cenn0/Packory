@@ -460,7 +460,10 @@ public sealed class PackoryMcpOptionsConfigurator(
                     // A full DB batch or an early stop due to output capacity
                     // may have more records. Consumers can safely request a
                     // final empty page; a cursor never grants authorization.
-                    mayHaveMore = array.Count == 25 || candidates.Count == batchLimit;
+                    mayHaveMore = array.Count == 25
+                        ? security.ReadablePage(nextName, nextVersion, 1,
+                            settings.SkillSecurityEnforced).Count > 0
+                        : candidates.Count == batchLimit;
                     if (!mayHaveMore) break;
                 }
                 var response = new JsonObject

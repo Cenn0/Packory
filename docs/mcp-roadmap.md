@@ -45,7 +45,7 @@ The browser job pins Node 22 and Playwright 1.62.1, serves the actual dashboard 
 | MCP-P4 | Broader independent client conformance | Pin another official SDK and client revisions; validate discovery, all tool/resource/prompt schemas, version errors, pagination, OAuth metadata and cancellation over real HTTP; publish concrete client/operation results |
 | MCP-P5 | Per-feed MCP authorization and native installation guidance | Depends on MS2/E0 feed identity and scope model; list only readable feeds/revisions, authorize exact asset references and return adapter-correct install instructions; two same-name private feeds and revoked/OIDC/managed token tests |
 | MCP-P6 | Optional protocol feature decisions | For subscriptions, task/progress extensions, completions, sampling or elicitation, record a concrete Packory use case first; only advertise capabilities with implemented handlers and native positive/negative tests. No capability is enabled merely to increase a feature count |
-| MCP-P7 | Bound Skill-list database work and measure read capacity | Replace the existing all-Skills inventory plus per-revision approval lookups with provider-side keyset/release predicates; preserve paging under revocation and malformed resources, add a large-catalog work-bound test and measure approved-content hashing costs. Current Skills pages bound response size, not the full database work |
+| MCP-P7 | Bound Skill-list database work and measure read capacity | Provider-side approval-first SQLite/PostgreSQL keyset pages, paginated list tool, bounded Skills Extension candidate scans and revocation tests are implemented (PR #100); **remaining:** independent capacity measurements on representative storage, large malformed-archive stress and approved-content hashing cost characterization before declaring the performance gate complete |
 
 R5 depends on R2/R3/R6 identity and lifecycle contracts. P5 must not reinterpret a namespace-limited publishing token as a global catalog read token. The current global MCP endpoint rejects scoped managed tokens and excludes private feed records.
 
@@ -79,7 +79,7 @@ Q4 requires the separate execution boundary and threat model; it is not satisfie
 
 Reuse MS1/MS4/MS6 and E11 for migrations, selected-provider recovery, TLS/OIDC, sanitized telemetry, capacity limits, dependency/license/SBOM and signed release artifacts. Keep library/SDK version upgrades independent and run the MCP acceptance matrix on every upgrade. Do not equate an official SDK dependency with endorsement of Packory by that SDK's maintainers.
 
-Recommended next implementation order: **R2b/R3/R6 → R4/R5; Q2/Q3 → Q4/Q5 → Q6/Q7; P4 in parallel; P5 after feed isolation; G1–G5 after the separate runtime prerequisites**. R2a addresses the conservative inert model but does not close R2b's broader official compatibility obligation. Each delivery should include working end-to-end behavior, negative tests, documentation and a CI-verified commit.
+Recommended next implementation order: **R2b/R3/R6 → R4/R5; Q2/Q3 → Q4/Q5 → Q6/Q7; P4 in parallel; P5 after feed isolation; G1–G5 after the separate runtime prerequisites**. R2a addresses the conservative inert model but does not close R2b's broader official compatibility obligation. P7 has a bounded-query implementation but requires load evidence before its capacity gate closes. Each delivery should include working end-to-end behavior, negative tests, documentation and a CI-verified commit.
 
 ## Primary specifications
 
