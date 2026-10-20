@@ -245,7 +245,7 @@ public sealed class FeedGoTests
         Assert.Equal(HttpStatusCode.Forbidden,
             await Status(client, HttpMethod.Get, root + ".zip", Reader));
         var ledger = Assert.Single(host.Services.GetRequiredService<IPackageDatabase>()
-            .FeedAssets().Where(x => x.Kind == "go"));
+            .FeedAssets(), x => x.Kind == "go");
         await File.WriteAllTextAsync(Path.Combine(host.Root, "blobs",
             FeedAssetEntry.BlobKey(ledger).Replace('/', Path.DirectorySeparatorChar)),
             "corrupted bundle");
