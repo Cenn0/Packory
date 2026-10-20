@@ -146,7 +146,7 @@ public sealed class SchemaVersionTests
             using var check = db.Open();
             using var read = check.CreateCommand();
             read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(7, Convert.ToInt32(read.ExecuteScalar()));
+            Assert.Equal(8, Convert.ToInt32(read.ExecuteScalar()));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
