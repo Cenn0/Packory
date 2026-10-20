@@ -505,6 +505,7 @@ FeedEndpoints.Map(app);
 FeedNugetEndpoints.Map(app);
 FeedRawEndpoints.Map(app);
 FeedMavenEndpoints.Map(app);
+FeedGoEndpoints.Map(app);
 RawEndpoints.Map(app);
 MavenEndpoints.Map(app);
 GoEndpoints.Map(app);
