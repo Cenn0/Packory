@@ -1,0 +1,34 @@
+name: MCP TypeScript SDK interoperability
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mcp-client:
+    name: Official TS SDK v2.3.1 HTTP conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Restore and build Packory
+        run: |
+          dotnet restore Packory.slnx
+          dotnet build Packory.slnx -c Release --no-restore -warnaserror
+      - name: Validate test scripts
+        run: |
+          bash -n scripts/smoke-mcp-typescript.sh
+          node --check scripts/smoke-mcp-typescript-client.mjs
+      - name: Exercise independent HTTP client
+        run: bash scripts/smoke-mcp-typescript.sh
