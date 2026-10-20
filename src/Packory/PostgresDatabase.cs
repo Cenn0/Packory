@@ -488,6 +488,20 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<string> FeedMavenVersions(string feedId, string groupId, string artifactId)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT DISTINCT version FROM feed_assets
+            WHERE feed_id=@feed AND kind='maven' AND name=@name
+            ORDER BY version
+            """, null, ("feed", feedId), ("name", groupId + ":" + artifactId));
+        using var reader = cmd.ExecuteReader();
+        var versions = new List<string>();
+        while (reader.Read()) versions.Add(reader.GetString(0));
+        return versions;
+    }
+
     public bool PublishFeedAsset(FeedAssetEntry asset, string actor)
     {
         if (!FeedAssetEntry.Valid(asset))
