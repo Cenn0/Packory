@@ -103,6 +103,18 @@ A feed-specific managed token cannot publish into the old global
 parser rejects feed grants. Runtime token revocation is immediate on
 subsequent requests. This is feed-level—not per-package—authorization.
 
+**Global read boundary:** when `PACKORY_ANONYMOUS_READ=false`, managed tokens
+with any feed grant or package publish-namespace grant receive **403** on
+legacy/global NuGet, npm, Cargo, PyPI, OCI, Raw, Maven and Go read APIs,
+as well as the global catalog. Such grants authorize their exact private
+feed or publication namespace, **not** global discovery. Unscoped managed
+readers and static readers retain access. When anonymous legacy reads are
+explicitly enabled, those public URLs remain public regardless of a supplied
+token; private feed URLs continue to enforce exact grants and never honor
+anonymous reads. This is a fail-closed interim measure: it does **not**
+implement package-level private reads for the global registries or add
+private feeds for other protocols.
+
 ### Isolation, data safety and limits
 
 Two feeds may each host `same.package@1.0.0` with different bytes and
