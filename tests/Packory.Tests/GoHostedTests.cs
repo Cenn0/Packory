@@ -134,7 +134,9 @@ public sealed class GoHostedTests
         using (var response = await client.SendAsync(repeat))
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        using (var missing = await Get(client, path + "v9.9.9.zip", Reader))
+        using (var invalidMajor = await Get(client, path + "v9.9.9.zip", Reader))
+            Assert.Equal(HttpStatusCode.BadRequest, invalidMajor.StatusCode);
+        using (var missing = await Get(client, path + "v1.9.9.zip", Reader))
             Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
         using (var noAuth = await Get(client, path + "v1.2.3.zip", null))
             Assert.Equal(HttpStatusCode.Unauthorized, noAuth.StatusCode);
