@@ -607,7 +607,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
 
     public bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor)
     {
-        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw")) return false;
+        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw" or "maven")) return false;
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = Command(db, """
