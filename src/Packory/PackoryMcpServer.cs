@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using YamlDotNet.RepresentationModel;
@@ -20,29 +21,54 @@ public static class PackoryMcpCatalog
 {
     public sealed record SkillFile(string Path, byte[] Bytes);
     public sealed record SkillSnapshot(string Name, string Version, JsonObject Frontmatter,
-        IReadOnlyList<SkillFile> Files, IReadOnlyList<string> Directories);
-
-    public static IReadOnlyList<SkillEntry> Approved(IPackageDatabase db, SkillSecurityStore security,
-        Settings settings) =>
-        db.Skills().Where(x => !settings.SkillSecurityEnforced ||
-                security.IsApproved(x.Name, x.Version)).ToArray();
+        IReadOnlyList<SkillFile> Files, IReadOnlyList<string> Directories)
+    {
+        public string ArchiveSha256 { get; init; } = "";
+    }
 
     public static string UriFor(string version, string name, string path = "SKILL.md") =>
-        $"skill://packory/{version}/{name}/{path}";
+        $"skill://packory/{version}/{name}/" +
+        string.Join("/", path.Split('/').Select(Uri.EscapeDataString));
 
     public static bool TryParseUri(string? uri, out string version, out string name)
     {
-        version = name = "";
-        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) ||
-            parsed.Scheme != "skill" || parsed.Host != "packory" ||
-            !string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment))
+        if (!TryParseResourceUri(uri, out version, out name, out var path) || path != "SKILL.md")
+        {
+            version = name = "";
             return false;
-        var segments = parsed.AbsolutePath.Trim('/').Split('/');
-        if (segments.Length != 3 || segments[2] != "SKILL.md" ||
-            !Names.Version(segments[0]) || !Names.Skill(segments[1]))
+        }
+        return true;
+    }
+
+    // Parse the original spelling before System.Uri can normalize dot segments.
+    // Decode each segment once: an encoded separator cannot create a new level.
+    public static bool TryParseResourceUri(string? uri, out string version, out string name,
+        out string path)
+    {
+        version = name = path = "";
+        const string origin = "skill://packory/";
+        if (uri is null || uri.Length > 8192 ||
+            !uri.StartsWith(origin, StringComparison.Ordinal) || uri.EndsWith('/') ||
+            uri.Contains('?') || uri.Contains('#') || uri.Contains('\\') ||
+            uri.Any(char.IsControl)) return false;
+        var raw = uri[origin.Length..].Split('/');
+        if (raw.Length is < 2 or > 258 || !Names.Version(raw[0]) || !Names.Skill(raw[1]))
             return false;
-        version = segments[0];
-        name = segments[1];
+        var parts = new List<string>();
+        foreach (var segment in raw.Skip(2))
+        {
+            var decoded = Uri.UnescapeDataString(segment);
+            if (decoded.Length == 0 || decoded is "." or ".." ||
+                decoded.Any(char.IsControl) || decoded.Contains('/') || decoded.Contains('\\') ||
+                decoded.Contains(':') || !string.Equals(Uri.EscapeDataString(decoded), segment,
+                    StringComparison.OrdinalIgnoreCase)) return false;
+            parts.Add(decoded);
+        }
+        var relative = string.Join("/", parts);
+        if (relative.Length > 512) return false;
+        version = raw[0];
+        name = raw[1];
+        path = relative;
         return true;
     }
 
@@ -113,12 +139,15 @@ public static class PackoryMcpCatalog
             if (files.Any(f => directories.Contains(f.Path))) return null;
             var manifest = files.SingleOrDefault(f => f.Path == "SKILL.md");
             if (manifest is null) return null;
-            var frontmatter = ReadFrontmatter(Encoding.UTF8.GetString(manifest.Bytes));
+            var frontmatter = ReadFrontmatter(new UTF8Encoding(false, true).GetString(manifest.Bytes));
             if (frontmatter["name"]?.GetValue<string>() != name ||
                 frontmatter["description"]?.GetValue<string>() is not { Length: > 0 })
                 return null;
             return new SkillSnapshot(name, version, frontmatter, files,
-                directories.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+                directories.OrderBy(x => x, StringComparer.Ordinal).ToArray())
+            {
+                ArchiveSha256 = Convert.ToHexStringLower(SHA256.HashData(publishedBytes))
+            };
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or FormatException
             or ArgumentException or InvalidOperationException or YamlDotNet.Core.YamlException)
@@ -139,12 +168,14 @@ public static class PackoryMcpCatalog
         yaml.Load(new StringReader(normalized[4..end]));
         if (yaml.Documents.Count != 1 || yaml.Documents[0].RootNode is not YamlMappingNode mapping)
             throw new InvalidDataException("Invalid YAML mapping.");
-        return (JsonObject)ToNode(mapping, 0);
+        var remainingNodes = 4096;
+        return (JsonObject)ToNode(mapping, 0, ref remainingNodes)!;
     }
 
-    private static JsonNode ToNode(YamlNode node, int depth)
+    private static JsonNode? ToNode(YamlNode node, int depth, ref int remainingNodes)
     {
-        if (depth > 12) throw new InvalidDataException("Deep frontmatter is unsupported.");
+        if (depth > 12 || --remainingNodes < 0)
+            throw new InvalidDataException("Frontmatter exceeds structural limits.");
         if (node is YamlMappingNode map)
         {
             if (map.Children.Count > 100) throw new InvalidDataException("Oversized frontmatter.");
@@ -154,7 +185,7 @@ public static class PackoryMcpCatalog
                 if (key is not YamlScalarNode scalar || scalar.Value is not { } text ||
                     text.Length > 128 || obj.ContainsKey(text))
                     throw new InvalidDataException("Invalid or duplicate YAML key.");
-                obj[text] = ToNode(value, depth + 1);
+                obj[text] = ToNode(value, depth + 1, ref remainingNodes);
             }
             return obj;
         }
@@ -162,25 +193,100 @@ public static class PackoryMcpCatalog
         {
             if (seq.Children.Count > 100) throw new InvalidDataException("Oversized list.");
             var arr = new JsonArray();
-            foreach (var child in seq.Children) arr.Add(ToNode(child, depth + 1));
+            foreach (var child in seq.Children) arr.Add(ToNode(child, depth + 1, ref remainingNodes));
             return arr;
         }
         if (node is YamlScalarNode s)
         {
             if (s.Value?.Length > 65536) throw new InvalidDataException("Oversized scalar.");
             var value = s.Value ?? "";
+            var tag = s.Tag.ToString();
+            if (tag is "tag:yaml.org,2002:str" or "!") return JsonValue.Create(value);
+            var isNull = value is "" or "~" or "null" or "Null" or "NULL";
+            var isBoolean = value is "true" or "True" or "TRUE" or "false" or "False" or "FALSE";
+            // Explicit tags constrain the value's type. An invalid !!int must
+            // never fall through to bool/null/string inference, for example.
+            if (tag == "tag:yaml.org,2002:null")
+            {
+                if (!isNull) throw new InvalidDataException("Invalid YAML null scalar.");
+                return null;
+            }
+            if (tag == "tag:yaml.org,2002:bool")
+            {
+                if (!isBoolean) throw new InvalidDataException("Invalid YAML boolean scalar.");
+                return JsonValue.Create(value[0] is 't' or 'T');
+            }
+            if (tag is "tag:yaml.org,2002:int" or "tag:yaml.org,2002:float")
+            {
+                var integerOnly = tag == "tag:yaml.org,2002:int";
+                var numeric = NormalizeYamlNumber(value, integerOnly, allowBasedInteger: integerOnly);
+                if (numeric is null) throw new InvalidDataException("Invalid JSON-compatible YAML numeric scalar.");
+                return JsonNode.Parse(numeric);
+            }
             if (s.Style == YamlDotNet.Core.ScalarStyle.Plain)
             {
-                if (value == "true") return JsonValue.Create(true)!;
-                if (value == "false") return JsonValue.Create(false)!;
-                if (value is "null" or "~") return JsonValue.Create("")!;
-                if (long.TryParse(value, System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture, out var number))
-                    return JsonValue.Create(number)!;
+                if (isNull) return null;
+                if (isBoolean) return JsonValue.Create(value[0] is 't' or 'T');
+                if (NormalizeYamlNumber(value, false) is { } numeric) return JsonNode.Parse(numeric);
             }
             return JsonValue.Create(value)!;
         }
         throw new InvalidDataException("Unsupported YAML alias/tag.");
+    }
+
+    // Convert finite YAML Core numeric spellings to exact JSON lexemes. Never
+    // round through decimal/double: +1e-100 and .000...001 must retain their value.
+    private static string? NormalizeYamlNumber(string value, bool integerOnly, bool allowBasedInteger = true)
+    {
+        if (value.Length == 0) return null;
+        if (value.StartsWith("0x", StringComparison.Ordinal) || value.StartsWith("0o", StringComparison.Ordinal))
+        {
+            if (!allowBasedInteger) return null;
+            var bits = value[1] == 'x' ? 4 : 3;
+            if (value.Length == 2) return null;
+            // Pack the digits in linear time, including integers outside Int64.
+            var bytes = new byte[((value.Length - 2) * bits + 7) / 8];
+            var bit = 0;
+            for (var i = value.Length - 1; i >= 2; i--, bit += bits)
+            {
+                var c = value[i];
+                var digit = c is >= '0' and <= '9' ? c - '0' :
+                    c is >= 'a' and <= 'f' ? c - 'a' + 10 :
+                    c is >= 'A' and <= 'F' ? c - 'A' + 10 : -1;
+                if (digit < 0 || digit >= (1 << bits)) return null;
+                bytes[bit / 8] |= (byte)(digit << (bit % 8));
+                if (bit % 8 + bits > 8) bytes[bit / 8 + 1] |= (byte)(digit >> (8 - bit % 8));
+            }
+            return new System.Numerics.BigInteger(bytes, isUnsigned: true).ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+        var index = value[0] is '+' or '-' ? 1 : 0;
+        var integerStart = index;
+        while (index < value.Length && char.IsAsciiDigit(value[index])) index++;
+        var integerEnd = index;
+        var fractionStart = -1;
+        if (!integerOnly && index < value.Length && value[index] == '.')
+        {
+            fractionStart = ++index;
+            while (index < value.Length && char.IsAsciiDigit(value[index])) index++;
+        }
+        var fractionEnd = index;
+        if (integerStart == integerEnd && (fractionStart < 0 || fractionStart == fractionEnd)) return null;
+        var exponentStart = index;
+        if (!integerOnly && index < value.Length && value[index] is 'e' or 'E')
+        {
+            index++;
+            if (index < value.Length && value[index] is '+' or '-') index++;
+            var exponentDigits = index;
+            while (index < value.Length && char.IsAsciiDigit(value[index])) index++;
+            if (exponentDigits == index) return null;
+        }
+        if (index != value.Length) return null;
+        while (integerStart < integerEnd && value[integerStart] == '0') integerStart++;
+        var integer = integerStart == integerEnd ? "0" : value[integerStart..integerEnd];
+        var fraction = fractionStart < 0 ? "" : "." +
+            (fractionStart == fractionEnd ? "0" : value[fractionStart..fractionEnd]);
+        return (value[0] == '-' ? "-" : "") + integer + fraction + value[exponentStart..];
     }
 
     public static JsonObject? Entry(string name, string version, IPackageDatabase db,
@@ -212,42 +318,11 @@ public static class PackoryMcpCatalog
     /// path separators, traversal, URI suffixes and nonexistent directories.
     /// </summary>
     public static JsonObject? ReadDirectory(string? uri, IPackageDatabase db,
-        BlobStore blobs, SkillSecurityStore security, Settings settings)
+        BlobStore blobs, SkillSecurityStore security, Settings settings, string? cursor = null)
     {
-        const string origin = "skill://packory/";
-        if (uri is null || uri.Length > 2048 ||
-            !uri.StartsWith(origin, StringComparison.Ordinal) ||
-            uri.EndsWith("/", StringComparison.Ordinal) ||
-            uri.Contains('?') || uri.Contains('#') || uri.Contains('\\') ||
-            uri.Any(char.IsControl))
+        if (!TryParseResourceUri(uri, out var version, out var name, out var directory))
             return null;
-
-        // Split BEFORE percent-unescaping: %2f and %5c must not create
-        // synthetic directory levels, and encoded dot-segments must be denied.
-        var raw = uri[origin.Length..].Split('/');
-        if (raw.Length < 2 || raw.Length > 256 ||
-            !Names.Version(raw[0]) || !Names.Skill(raw[1]))
-            return null;
-        var decoded = new List<string>();
-        foreach (var item in raw.Skip(2))
-        {
-            var part = Uri.UnescapeDataString(item);
-            if (string.IsNullOrEmpty(part) || part is "." or ".." ||
-                part.Any(char.IsControl) || part.Contains('/') ||
-                part.Contains('\\') || part.Contains(':') ||
-                part.Contains('?') || part.Contains('#'))
-                return null;
-            // URI encoding may be used for spaces/unicode in archive names,
-            // but only canonical escaped path segments may contain '%'.
-            if (item.Contains('%') &&
-                !string.Equals(Uri.EscapeDataString(part), item,
-                    StringComparison.OrdinalIgnoreCase))
-                return null;
-            decoded.Add(part);
-        }
-        var directory = string.Join("/", decoded);
-        if (directory.Length > 512) return null;
-        var snapshot = Get(raw[1], raw[0], db, blobs, security, settings);
+        var snapshot = Get(name, version, db, blobs, security, settings);
         if (snapshot is null ||
             (directory.Length > 0 && !snapshot.Directories.Contains(directory,
                 StringComparer.Ordinal))) return null;
@@ -271,10 +346,16 @@ public static class PackoryMcpCatalog
             }
         }
         var resources = new JsonArray();
-        var baseUri = origin + raw[0] + "/" + raw[1] +
-            (directory.Length == 0 ? "" : "/" + string.Join("/",
-                decoded.Select(Uri.EscapeDataString)));
-        foreach (var (child, isDirectory) in children)
+        var baseUri = directory.Length == 0 ? $"skill://packory/{version}/{name}" :
+            UriFor(version, name, directory);
+        var cursorScope = "directory:" + Convert.ToHexStringLower(SHA256.HashData(
+            Encoding.UTF8.GetBytes(baseUri + "\n" + snapshot.ArchiveSha256)));
+        var after = McpSkillCursor.Decode(cursor, cursorScope);
+        if (after is { } marker && (marker.Second != "" || !children.ContainsKey(marker.First)))
+            throw McpSkillCursor.Invalid();
+        var page = children.Where(x => after is null ||
+            StringComparer.Ordinal.Compare(x.Key, after.Value.First) > 0).Take(101).ToArray();
+        foreach (var (child, isDirectory) in page.Take(100))
         {
             var mime = isDirectory ? "inode/directory" :
                 child.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? "text/markdown" :
@@ -288,13 +369,16 @@ public static class PackoryMcpCatalog
                 ["mimeType"] = mime
             });
         }
-        return new JsonObject
+        var response = new JsonObject
         {
             ["resultType"] = "complete",
             ["resources"] = resources,
             ["cacheScope"] = "private",
             ["ttlMs"] = 0
         };
+        if (page.Length > 100)
+            response["nextCursor"] = McpSkillCursor.Encode(cursorScope, page[99].Key);
+        return response;
     }
 
 }
@@ -314,24 +398,73 @@ public sealed class PackoryMcpOptionsConfigurator(
         // A JsonElement is a supported DOM value and produces the exact advertised extension shape.
         options.Capabilities.Extensions["io.modelcontextprotocol/skills"] =
             JsonSerializer.SerializeToElement(new Dictionary<string, bool> { ["directoryRead"] = true });
+        options.Filters.Request.ReadResourceFilters.Add(next => (request, ct) =>
+        {
+            var uri = request.Params?.Uri;
+            if (uri is null || !uri.StartsWith("skill:", StringComparison.OrdinalIgnoreCase))
+                return next(request, ct);
+            ct.ThrowIfCancellationRequested();
+            if (!PackoryMcpCatalog.TryParseResourceUri(uri, out var version, out var name, out var path) ||
+                path.Length == 0)
+                throw new McpProtocolException("Invalid skill resource URI.", McpErrorCode.InvalidParams);
+            // Use the raw, canonical URI to bind the file. URI-template decoding
+            // must not normalize away traversal or decode percent escapes twice.
+            return ValueTask.FromResult(new ReadResourceResult
+            {
+                Contents = [PackoryMcpResources.SkillFile(version, name, path,
+                    db, blobs, security, settings)],
+                CacheScope = CacheScope.Private,
+                TimeToLive = TimeSpan.Zero
+            });
+        });
         options.RequestHandlers ??= new List<McpServerRequestHandler>();
         options.RequestHandlers.Add(new McpServerRequestHandler
         {
             Method = "skills/list",
             Handler = (request, ct) =>
             {
-                var cursor = request.Params?["cursor"]?.GetValue<string>();
-                var start = 0;
-                if (cursor is not null && (!int.TryParse(cursor, out start) || start < 0))
-                    throw new ArgumentException("Invalid skills cursor.");
-                var ordered = PackoryMcpCatalog.Approved(db, security, settings)
-                    .OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.Version, StringComparer.Ordinal).ToArray();
+                var cursor = McpSkillCursor.Parameter(request.Params, "cursor", maximum: 512);
+                var after = McpSkillCursor.Decode(cursor, "skills");
+                if (after is { } marker && (!Names.Skill(marker.First) || !Names.Version(marker.Second)))
+                    throw McpSkillCursor.Invalid();
                 var array = new JsonArray();
-                foreach (var skill in ordered.Skip(start).Take(25))
+                // Bound the DB work and content verification per request. Invalid,
+                // missing or revoked archives still advance the opaque keyset.
+                const int MaxExamined = 200;
+                var examined = 0;
+                var nextName = after?.First;
+                var nextVersion = after?.Second;
+                var mayHaveMore = false;
+                while (array.Count < 25 && examined < MaxExamined)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var entry = PackoryMcpCatalog.Entry(skill.Name, skill.Version, db, blobs, security, settings);
-                    if (entry is not null) array.Add(entry);
+                    var batchLimit = Math.Min(26, MaxExamined - examined);
+                    var candidates = security.ReadablePage(nextName, nextVersion, batchLimit,
+                        settings.SkillSecurityEnforced);
+                    if (candidates.Count == 0)
+                    {
+                        mayHaveMore = false;
+                        break;
+                    }
+                    foreach (var skill in candidates)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        nextName = skill.Name;
+                        nextVersion = skill.Version;
+                        examined++;
+                        var entry = PackoryMcpCatalog.Entry(skill.Name, skill.Version,
+                            db, blobs, security, settings);
+                        if (entry is not null) array.Add(entry);
+                        if (array.Count == 25) break;
+                    }
+                    // A full DB batch or an early stop due to output capacity
+                    // may have more records. Consumers can safely request a
+                    // final empty page; a cursor never grants authorization.
+                    mayHaveMore = array.Count == 25
+                        ? security.ReadablePage(nextName, nextVersion, 1,
+                            settings.SkillSecurityEnforced).Count > 0
+                        : candidates.Count == batchLimit;
+                    if (!mayHaveMore) break;
                 }
                 var response = new JsonObject
                 {
@@ -340,7 +473,8 @@ public sealed class PackoryMcpOptionsConfigurator(
                     ["cacheScope"] = "private",
                     ["ttlMs"] = 0
                 };
-                if (start + 25 < ordered.Length) response["nextCursor"] = (start + 25).ToString();
+                if (mayHaveMore && nextName is not null && nextVersion is not null)
+                    response["nextCursor"] = McpSkillCursor.Encode("skills", nextName, nextVersion);
                 return ValueTask.FromResult<JsonNode?>(response);
             }
         });
@@ -349,11 +483,12 @@ public sealed class PackoryMcpOptionsConfigurator(
             Method = "skills/get",
             Handler = (request, ct) =>
             {
-                var uri = request.Params?["uri"]?.GetValue<string>();
+                ct.ThrowIfCancellationRequested();
+                var uri = McpSkillCursor.Parameter(request.Params, "uri", required: true);
                 if (!PackoryMcpCatalog.TryParseUri(uri, out var version, out var name))
-                    throw new ArgumentException("Unknown skill URI.");
+                    throw new McpProtocolException("Unknown skill URI.", McpErrorCode.InvalidParams);
                 var entry = PackoryMcpCatalog.Entry(name, version, db, blobs, security, settings)
-                    ?? throw new ArgumentException("Unknown or unpublished skill.");
+                    ?? throw new McpProtocolException("Unknown or unpublished skill.", McpErrorCode.InvalidParams);
                 return ValueTask.FromResult<JsonNode?>(new JsonObject
                 {
                     ["resultType"] = "complete",
@@ -371,10 +506,11 @@ public sealed class PackoryMcpOptionsConfigurator(
                 ct.ThrowIfCancellationRequested();
                 // The method applies to real directories only. A revoked
                 // Skill or file URI must never yield listing metadata.
-                var uri = request.Params?["uri"]?.GetValue<string>();
+                var uri = McpSkillCursor.Parameter(request.Params, "uri", required: true);
+                var cursor = McpSkillCursor.Parameter(request.Params, "cursor");
                 var directory = PackoryMcpCatalog.ReadDirectory(
-                    uri, db, blobs, security, settings)
-                    ?? throw new ArgumentException("Unknown or unavailable skill directory.");
+                    uri, db, blobs, security, settings, cursor)
+                    ?? throw new McpProtocolException("Unknown or unavailable skill directory.", McpErrorCode.InvalidParams);
                 return ValueTask.FromResult<JsonNode?>(directory);
             }
         });
@@ -386,20 +522,32 @@ public sealed class PackoryMcpOptionsConfigurator(
 public sealed class PackoryMcpTools
 {
     [McpServerTool(Name = "search_artifacts", ReadOnly = true)]
-    [Description("Search Packory's locally indexed NuGet, npm, Cargo, PyPI, OCI and approved Skill revisions. No remote fetch or execution.")]
-    public static object SearchArtifacts(string query, IPackageDatabase db,
-        SkillSecurityStore security, Settings settings, int limit = 30)
-    {
-        var items = db.Search(query, null, Math.Clamp(limit, 1, 100))
-            .Where(x => x.Kind != "skill" || !settings.SkillSecurityEnforced ||
-                        security.IsApproved(x.Name, x.Version)).ToArray();
-        return new { items };
-    }
+    [Description("Search locally indexed artifacts across the implemented ecosystems, including Maven, Raw and approved Skills. Optional kind filter and opaque nextCursor pagination; no remote fetch. Global catalog only; private feed entries are not included.")]
+    public static McpArtifactCatalog.SearchPage SearchArtifacts(string query, Settings settings,
+        int limit = 30, string? kind = null, string? cursor = null) =>
+        McpArtifactCatalog.Search(settings, query, kind, limit, cursor);
 
     [McpServerTool(Name = "list_approved_skills", ReadOnly = true)]
-    [Description("Discover versioned, security-approved agent Skills available to read.")]
-    public static object ListApprovedSkills(IPackageDatabase db, SkillSecurityStore security, Settings settings) =>
-        new { items = PackoryMcpCatalog.Approved(db, security, settings) };
+    [Description("Discover versioned, approved agent Skills from a bounded database-side keyset page. Follow nextCursor to continue. No archive execution.")]
+    public static object ListApprovedSkills(SkillSecurityStore security, Settings settings,
+        int limit = 50, string? cursor = null)
+    {
+        if (limit is < 1 or > 99) throw McpSkillCursor.Invalid();
+        var marker = McpSkillCursor.Decode(cursor, "approved-skill-tool");
+        if (marker is { } selected &&
+            (!Names.Skill(selected.First) || !Names.Version(selected.Second)))
+            throw McpSkillCursor.Invalid();
+        var rows = security.ReadablePage(marker?.First, marker?.Second,
+            limit + 1, settings.SkillSecurityEnforced);
+        return new
+        {
+            items = rows.Take(limit).ToArray(),
+            nextCursor = rows.Count > limit
+                ? McpSkillCursor.Encode("approved-skill-tool",
+                    rows[limit - 1].Name, rows[limit - 1].Version)
+                : null
+        };
+    }
 
     [McpServerTool(Name = "verify_skill_integrity", ReadOnly = true)]
     [Description("Verify that a published, reviewed Skill ZIP still matches its immutable approved SHA-256. Does not execute or certify Skill instructions.")]
@@ -429,8 +577,7 @@ public sealed class PackoryMcpTools
         SkillSecurityStore security, Settings settings)
     {
         if (!Names.Skill(name) || !Names.Version(version)) return new { error = "Invalid skill identity" } as object;
-        var skill = PackoryMcpCatalog.Approved(db, security, settings)
-            .FirstOrDefault(x => x.Name == name && x.Version == version);
+        var skill = security.Readable(name, version, settings.SkillSecurityEnforced);
         if (skill is null) return new { error = "Skill is not available" };
         return new { skill.Name, skill.Version, skill.Description, manifestUri =
             PackoryMcpCatalog.UriFor(version, name), sha256 = security.Get(name, version)?.Sha256,
@@ -438,17 +585,10 @@ public sealed class PackoryMcpTools
     }
 
     [McpServerTool(Name = "artifact_versions", ReadOnly = true)]
-    [Description("List known versions of a named registry package, with skill versions filtered by security approval.")]
-    public static object ArtifactVersions(string kind, string name, IPackageDatabase db,
-        SkillSecurityStore security, Settings settings)
-    {
-        if (kind is not ("nuget" or "npm" or "cargo" or "pypi" or "oci" or "skill") ||
-            name.Length > 214) return new { error = "Invalid identity" } as object;
-        var versions = db.Versions(kind, name)
-            .Where(v => kind != "skill" || !settings.SkillSecurityEnforced || security.IsApproved(name, v))
-            .ToArray();
-        return new { kind, name, versions };
-    }
+    [Description("List global catalog versions of an exact native package identity (Maven: groupId:artifactId), including approved Skills. Results use lexical version order, not newest-release semantics. Follow nextCursor until absent.")]
+    public static McpArtifactCatalog.VersionPage ArtifactVersions(string kind, string name,
+        Settings settings, int limit = 100, string? cursor = null) =>
+        McpArtifactCatalog.Versions(settings, kind, name, limit, cursor);
 }
 
 [McpServerResourceType]
@@ -460,35 +600,50 @@ public sealed class PackoryMcpResources
     public static ResourceContents SkillFile(string version, string name, string path,
         IPackageDatabase db, BlobStore blobs, SkillSecurityStore security, Settings settings)
     {
-        if (path.Length > 512 || path.Contains('\\') || path.StartsWith('/') ||
+        if (path.Length > 512 || path.Contains('\\') || path.Contains(':') ||
+            path.Any(char.IsControl) || path.StartsWith('/') ||
             path.Split('/').Any(x => x is "." or ".." or "") ||
             !Names.Skill(name) || !Names.Version(version))
-            throw new ArgumentException("Invalid skill resource.");
+            throw new McpProtocolException("Invalid skill resource.", McpErrorCode.InvalidParams);
         var snapshot = PackoryMcpCatalog.Get(name, version, db, blobs, security, settings)
-            ?? throw new ArgumentException("Unknown or unpublished skill.");
+            ?? throw new McpProtocolException("Unknown or unpublished skill.", McpErrorCode.InvalidParams);
         var content = snapshot.Files.SingleOrDefault(x => x.Path == path)
-            ?? throw new ArgumentException("Unknown skill file.");
+            ?? throw new McpProtocolException("Unknown skill file.", McpErrorCode.InvalidParams);
         var uri = PackoryMcpCatalog.UriFor(version, name, path);
         if (path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
-            return new TextResourceContents
+        {
+            try
             {
-                Uri = uri,
-                MimeType = path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-                    ? "text/markdown" : "text/plain",
-                Text = new UTF8Encoding(false, true).GetString(content.Bytes)
-            };
+                return new TextResourceContents
+                {
+                    Uri = uri,
+                    MimeType = path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                        ? "text/markdown" : path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                            ? "application/json" : "text/plain",
+                    Text = new UTF8Encoding(false, true).GetString(content.Bytes)
+                };
+            }
+            catch (DecoderFallbackException)
+            {
+                // A filename suffix is not an encoding guarantee. Binary output
+                // preserves the exact bytes covered by the manifest digest.
+            }
+        }
         return BlobResourceContents.FromBytes(content.Bytes, uri, "application/octet-stream");
     }
 
     [McpServerResource(UriTemplate = "packory://catalog/info", Name = "Packory Catalog", MimeType = "application/json")]
-    [Description("Provides current registry supported ecosystem names, without secrets.")]
+    [Description("Provides implemented registry ecosystem names and scoped capability limits, without secrets or private-feed metadata.")]
     public static string CatalogInfo() =>
         JsonSerializer.Serialize(new { name = "Packory",
-            ecosystems = new[] { "nuget", "npm", "cargo", "pypi", "oci", "skill" },
-            mode = "read-only MCP registry gateway; skill approval enforced server-side" });
+            ecosystems = RegistryCapabilities.All.Select(x => x.Ecosystem).ToArray(),
+            protocols = RegistryCapabilities.All,
+            mode = "read-only Packory catalog; no remote MCP gateway",
+            catalogScope = "global hosted/cached metadata; private feeds excluded",
+            ordering = "lexical kind/name/version; current visibility rechecked per page" });
 }
 
 [McpServerPromptType]

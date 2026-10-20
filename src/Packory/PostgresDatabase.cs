@@ -468,6 +468,8 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             """;
         using var cmd = Command(db, sql, null, ("after", (object?)after ?? DBNull.Value),
             ("limit", Math.Clamp(limit, 1, 101)));
+        // DBNull has no inferable CLR type for the first-page IS NULL predicate.
+        cmd.Parameters["after"].NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text;
         var feeds = new List<FeedDefinition>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())

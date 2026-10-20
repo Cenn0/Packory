@@ -179,15 +179,36 @@ public sealed class SchemaVersionTests
     {
         var connectionString = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(connectionString)) return;
-        var database = new PostgresDatabase(new Settings { MetadataProvider = "postgresql",
-            PostgresConnectionString = connectionString });
-        database.Initialize();
-        using var connection = new NpgsqlConnection(connectionString);
-        connection.Open();
-        SchemaVersionGuard.Verify(connection);
-        Assert.Equal(6, database.Feeds(null, 20).Count);
-        Assert.Equal("oci", database.Feed("default-oci")?.Kind);
-        using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", connection);
-        Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
+        // Baseline counts must not include hosted feeds from other provider tests.
+        var schema = "packory_schema_" + Guid.NewGuid().ToString("N");
+        using var administrator = new NpgsqlConnection(connectionString);
+        administrator.Open();
+        using (var create = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            create.ExecuteNonQuery();
+        try
+        {
+            var isolated = new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema };
+            var database = new PostgresDatabase(new Settings { MetadataProvider = "postgresql",
+                PostgresConnectionString = isolated.ConnectionString });
+            database.Initialize();
+            using var connection = new NpgsqlConnection(isolated.ConnectionString);
+            connection.Open();
+            SchemaVersionGuard.Verify(connection);
+            var feeds = database.Feeds(null, 20);
+            Assert.Equal(6, feeds.Count);
+            var firstPage = database.Feeds(null, 2);
+            Assert.Equal(feeds.Take(2).Select(x => x.Id), firstPage.Select(x => x.Id));
+            var remaining = database.Feeds(firstPage[^1].Id, 20);
+            Assert.Equal(feeds.Skip(2).Select(x => x.Id), remaining.Select(x => x.Id));
+            Assert.Empty(database.Feeds(feeds[^1].Id, 20));
+            Assert.Equal("oci", database.Feed("default-oci")?.Kind);
+            using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", connection);
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
+        }
+        finally
+        {
+            using var drop = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator);
+            drop.ExecuteNonQuery();
+        }
     }
 }

@@ -1,12 +1,18 @@
-# Experimental Packory MCP and SkillSpector integration
+# Packory MCP and SkillSpector integration
 
-**Status:** experimental integration. Build and tests are tracked by PR/commit in GitHub Actions. Production readiness and full interoperability are not implied by green CI.
+**Implementation checkpoint: 20 October 2026.** Packory provides authenticated MCP artifact discovery, approved Skill distribution, reviewed Registry metadata and static Skill quality assessment. The supported protocol revisions and validation boundaries are documented below; broader client conformance and the remaining Registry/assessment work are tracked in the [MCP delivery roadmap](mcp-roadmap.md).
 
 ## Architecture
 
 Packory remains a single-writer ASP.NET Core / .NET 10 modular monolith.
 
-The new MCP Streamable HTTP endpoint at /mcp uses the official MCP C# SDK and provides read-only tools (search_artifacts, artifact_versions, list_approved_skills, skill_metadata), resources (skill files and catalog information), prompts (review_skill, discover_packages), and MCP Skills Extension methods (skills/list, skills/get). The Skills extension advertises `directoryRead=true` and implements `resources/directory/read` for the approved ZIP's root and nested directories, including explicitly empty directories. Listings contain direct child names, URIs and MIME types (`inode/directory` for subdirectories), with `cacheScope=private` and `ttlMs=0` so revocation is not masked by advertised freshness. Skill files are served as resources with SHA-256 digests, bounded file counts and content sizes. The URI format is skill://packory/VERSION/NAME/SKILL.md.
+The Streamable HTTP endpoint at `/mcp` uses the official MCP C# SDK. It provides read-only artifact/Skill discovery, integrity and quality tools, reviewed MCP Registry discovery, resources, the `review_skill` and `discover_packages` prompts, and MCP Skills Extension `skills/list` / `skills/get`. The extension advertises `directoryRead=true` and implements `resources/directory/read` for approved ZIP roots and nested directories, including explicitly empty directories. Listings contain direct child names, canonical escaped URIs and MIME types (`inode/directory` for subdirectories), with `cacheScope=private` and `ttlMs=0`.
+
+`skills/list` uses opaque keyset pages of 25 Skills. Directory pages return at most 100 children and bind their cursors to the exact archive digest and directory URI. Repeat the same filters/resource and pass `nextCursor`; unknown or mismatched cursors return MCP `InvalidParams` (`-32602`). Resource paths use individually escaped segments in `skill://packory/VERSION/NAME/PATH`. Traversal, encoded separators and noncanonical spellings are rejected before URI normalization. Valid UTF-8 resource text and binary resource data preserve the original bytes; invalid UTF-8 is delivered as binary even when its filename has a text extension.
+
+`search_artifacts(query, limit=30, kind?, cursor?)` and `artifact_versions(kind, name, limit=100, cursor?)` provide keyset traversal beyond the former 100-row ceiling. They share the implemented ecosystem catalog, including global Maven and Raw. Skill approval is filtered in the database before the page limit. Private-feed rows remain excluded. Artifact versions use ordinal lexical order; the MCP tool does not reinterpret ecosystem-specific version semantics or select a universal latest version.
+
+`assess_skill_quality(name, version)` returns the same deterministic profile as the read-only REST endpoint and dashboard. It reports findings, suggestions, exact digests, independent dimensions and explicit coverage; it never changes approval or runs submitted content. See [Skill quality](skill-quality.md). Optional signed external validation exports retain their separate configured verifier and permission checks.
 
 This is a distribution server, not a remote tool-execution gateway. It does not launch untrusted Skill scripts or remote MCP servers. Mutations are intentionally excluded from the MCP attack surface.
 
@@ -40,7 +46,7 @@ The optional default Compose stack builds the Packory API plus a pinned SkillSpe
 
 The MCP endpoint requires an authenticated bearer token even when anonymous REST reads are enabled. Only same-origin browser requests are accepted. For external use, deploy behind properly configured HTTPS with host validation and DNS-rebinding protections, and grant least-privilege read tokens to MCP clients.
 
-Imported skills return 202 QUEUED. Review the scanner report before approving; only APPROVED revisions become discoverable. Blocking or failed results do not become automatically available. The MCP endpoint supports the modern 2026-07-28 protocol and older initialize-era clients through hybrid session handling in the official SDK.
+Imported skills return 202 QUEUED. Review the scanner report before approving; only APPROVED revisions become discoverable. Blocking or failed results do not become automatically available. Native official C# SDK tests exercise protocol revisions **2025-06-18**, **2025-11-25** and **2026-07-28**, including initialize-era hybrid sessions and current stateless discovery. This matrix records those tested client/protocol combinations; another SDK and broader client qualification remain MCP-P4.
 
 ## Upgrade: explicitly backfill previously published Skills
 
@@ -59,16 +65,18 @@ Backfill is idempotent for previously queued revisions and does not rewrite the 
 
 - Existing published Skills remain unavailable under default enforcement until explicitly scanned and approved. Administrators can enqueue legacy revisions using the documented backfill API below; unscannable/missing revisions remain unavailable and need operator investigation.
 - A worker crash, missing output volume or a scan contract change can leave a revision blocked. This is preferable to accidental publication but needs operational recovery/runbooks and retry limits.
-- No full PostgreSQL/S3 restore certification, multi-writer guarantees, BFF-based administration, live MCP compatibility matrix, signed scanner image, locked transitive Python dependency tree or complete license/SBOM review yet.
+- No full PostgreSQL/S3 restore certification, multi-writer guarantees, BFF-based administration, broad independent MCP client matrix, signed scanner image, locked transitive Python dependency tree or complete license/SBOM review yet.
 - NVIDIA SkillSpector source is pinned to v2.13.0 / Git commit 091a509b3d6ba8ff5be528966e1f43c2e68cf214, but its transitive dependencies must be verified against the project's preferred permissive-license policy. Its static-only offline mode uses fallback vulnerability data rather than live OSV requests.
 - Scanning is not a security certification. Encrypted payloads, novel prompt injections, non-English attacks and runtime-only behavior may be missed.
 - This is a public repository. Never commit personal emails, private credentials, operational logs with secrets or real internal addresses.
 
-## Evidence to collect before release
+## Reproducible verification and remaining coverage
 
 Run dotnet restore Packory.slnx; dotnet build Packory.slnx -c Release --no-restore -warnaserror; dotnet test Packory.slnx -c Release --no-build; node --check src/Packory/wwwroot/app.js; python3 -m py_compile workers/skillspector/worker.py; docker compose config; docker compose build.
 
-Add real sidecar smoke tests, synthetic malicious Skills, interrupted jobs, stale artifacts, backfill/upgrade, auth bypass checks and protocol interoperability against old and current MCP clients. Do not mark tests green without executing them. Update support claims only after the tests are available and pass.
+The ordinary .NET suite covers native HTTP MCP clients, current metadata, capability discovery, pagination, approval/revocation, byte tampering, canonical URIs, strict errors and static quality assessment. PostgreSQL CI executes `McpRegistryPostgresProviderTests` and `McpArtifactCatalogTests` with an actual provider; those provider-specific facts explicitly skip without a configured database. Dashboard browser regressions use synthetic API responses to test the actual JS/CSS and do not replace the backend or scanner tests.
+
+The pinned scanner Compose smoke, provider recovery and independent client/behavioral coverage remain separate evidence. Only record a test as passed after executing it for the relevant source revision and environment.
 
 References: NVIDIA SkillSpector https://github.com/NVIDIA/SkillSpector ; MCP C# SDK https://github.com/modelcontextprotocol/csharp-sdk ; MCP Skills Extension https://skills.extensions.modelcontextprotocol.io/specification/stable/skills ; Packory skill security roadmap skill-security-roadmap.md .
 
@@ -86,6 +94,9 @@ No raw scanner findings, unapproved ZIPs or executable actions are returned.
 
 **Limits:** each read verifies a bounded object and incurs hashing and
 in-memory materialization; performance and multi-node caching are not certified.
+`skills/list` bounds the returned page but currently loads the full Skill inventory
+and checks approval per revision. Provider-side work bounds are tracked as MCP-P7;
+the global artifact catalog already applies its page and approval predicates in SQL.
 The returned `safeToExecute=false` is deliberate: a human approval and
 matching digest authenticate the reviewed bytes, not their runtime behavior.
 MCP hosts must still compare resource digests to the Skills Extension manifest
@@ -115,7 +126,8 @@ For a security-approved Skill whose manifest URI is
 `resources/directory/read` for `skill://packory/1.0.0/example`
 or an existing directory such as `.../references`. Only immediate
 children are listed. Exact approved ZIP bytes are reverified before
-any directory response. File URIs, traversal and nonexistent directories
+any directory response. Continue pages with `nextCursor`; cursors from another
+directory or archive revision are rejected. File URIs, traversal and nonexistent directories
 fail closed. The capability is optional in the Skills Extension; this
 implementation is covered by synthetic .NET tests and a real scanner
 Compose/MCP smoke but is **not** general production protocol certification.

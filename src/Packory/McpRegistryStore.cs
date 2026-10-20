@@ -29,7 +29,10 @@ public sealed record McpRegistryManifest(
     public static bool ValidName(string? name) =>
         name is { Length: >= 5 and <= 180 } && NamePattern.IsMatch(name);
     public static bool ValidVersion(string? version) =>
-        version is { Length: >= 5 and <= 128 } && VersionPattern.IsMatch(version);
+        version is { Length: >= 5 and <= 128 } && VersionPattern.IsMatch(version) &&
+        !version.Split('+')[0].Split('-', 2).Skip(1)
+            .SelectMany(x => x.Split('.')).Any(x =>
+                x.Length > 1 && x[0] == '0' && x.All(char.IsAsciiDigit));
 
     private static void UniqueProperties(JsonElement element, int depth = 0)
     {
@@ -67,7 +70,7 @@ public sealed record McpRegistryManifest(
             throw new InvalidDataException("Unsupported manifest property.");
     }
 
-    private static bool SafeRemote(string url)
+    internal static bool SafeRemote(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) ||
@@ -102,7 +105,7 @@ public sealed record McpRegistryManifest(
             var root = document.RootElement;
             UniqueProperties(root);
             Only(root, "$schema", "name", "version", "title", "description",
-                "remotes", "repository");
+                "remotes", "packages", "repository", "websiteUrl", "icons", "_meta");
             if (ReadString(root, "$schema", 160) != Schema)
                 throw new InvalidDataException("Unsupported server.json schema.");
             var name = ReadString(root, "name", 180);
@@ -111,38 +114,9 @@ public sealed record McpRegistryManifest(
                 throw new InvalidDataException("Invalid MCP name or version.");
             var description = ReadString(root, "description", 100);
             var title = root.TryGetProperty("title", out _) ?
-                ReadString(root, "title", 120) : name;
-            if (!root.TryGetProperty("remotes", out var remotes) ||
-                remotes.ValueKind != JsonValueKind.Array ||
-                remotes.GetArrayLength() is < 1 or > 4)
-                throw new InvalidDataException("Only bounded remote-only manifests are supported.");
-            string? first = null;
-            foreach (var remote in remotes.EnumerateArray())
-            {
-                Only(remote, "type", "url");
-                if (ReadString(remote, "type", 32) != "streamable-http")
-                    throw new InvalidDataException("Only Streamable HTTP remotes are supported.");
-                var url = ReadString(remote, "url", 512);
-                if (!SafeRemote(url))
-                    throw new InvalidDataException("Unsafe remote endpoint.");
-                first ??= url;
-            }
-            if (root.TryGetProperty("repository", out var repo))
-            {
-                Only(repo, "source", "url");
-                if (ReadString(repo, "source", 32) != "github")
-                    throw new InvalidDataException("Unsupported repository source.");
-                var repoUrl = ReadString(repo, "url", 512);
-                if (!Uri.TryCreate(repoUrl, UriKind.Absolute, out var repository) ||
-                    repository.Scheme != "https" ||
-                    !string.Equals(repository.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
-                    !string.IsNullOrEmpty(repository.Query) ||
-                    !string.IsNullOrEmpty(repository.Fragment) ||
-                    !string.IsNullOrEmpty(repository.UserInfo) ||
-                    repository.AbsolutePath.Trim('/').Split('/').Length != 2)
-                    throw new InvalidDataException("Invalid repository reference.");
-            }
-            return new McpRegistryManifest(name, version, title, description, first!,
+                ReadString(root, "title", 100) : name;
+            var firstRemote = McpRegistryManifestShapes.Validate(root);
+            return new McpRegistryManifest(name, version, title, description, firstRemote,
                 json, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         }
         catch (Exception e) when (e is JsonException or DecoderFallbackException)
@@ -156,13 +130,22 @@ public sealed record McpRegistryEntry(
     string Name, string Version, string Title, string Description, string RemoteUrl,
     string Json, string Sha256, string State, string UpdatedAt)
 {
-    public object Summary => new
+    public object Summary
     {
-        name = Name, version = Version, title = Title, description = Description,
-        remoteType = "streamable-http", remoteUrl = RemoteUrl,
-        sha256 = Sha256, reviewState = State, publisherVerified = false,
-        safeToConnect = false
-    };
+        get
+        {
+            using var doc = JsonDocument.Parse(Json);
+            var remoteType = RemoteUrl.Length == 0 ? null :
+                doc.RootElement.GetProperty("remotes")[0].GetProperty("type").GetString();
+            return new
+            {
+                name = Name, version = Version, title = Title, description = Description,
+                remoteType, remoteUrl = RemoteUrl.Length == 0 ? null : RemoteUrl,
+                sha256 = Sha256, reviewState = State, publisherVerified = false,
+                safeToConnect = false
+            };
+        }
+    }
 
     public object Detail
     {
@@ -185,6 +168,8 @@ public sealed record McpRegistryEntry(
 /// </summary>
 public sealed class McpRegistryStore(Settings settings)
 {
+    private string OrdinalCollation => settings.MetadataProvider == "postgresql" ? "\"C\"" : "BINARY";
+
     private DbConnection Open()
     {
         DbConnection db = settings.MetadataProvider == "postgresql"
@@ -362,5 +347,141 @@ public sealed class McpRegistryStore(Settings settings)
             if (entry is not null) results.Add(entry);
         }
         return results;
+    }
+
+    /// <summary>
+    /// Keyset paging rechecks the current publication state on each request.
+    /// Concurrent revocations cannot shift later rows as they can with offsets.
+    /// Pages are live views, not a historical snapshot or synchronization feed.
+    /// </summary>
+    public McpRegistryPage ListPublishedPage(string? search = null,
+        int limit = McpRegistryDiscovery.DefaultPageSize, string? cursor = null,
+        string? name = null, string? version = null,
+        bool searchTitles = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!McpRegistryDiscovery.ValidSearch(search) ||
+            limit is < 1 or > McpRegistryDiscovery.MaximumPageSize ||
+            (name is not null && !McpRegistryManifest.ValidName(name)) ||
+            (version is not null && version != "latest" && !McpRegistryManifest.ValidVersion(version)))
+            throw new ArgumentException("Invalid MCP registry query.");
+        var mode = name is not null ? "versions" : version == "latest" ? "latest" : "servers";
+        var scope = McpRegistryCursor.ScopeFor(mode + (searchTitles ? "-summary" : ""), name, search, version);
+        var after = McpRegistryCursor.Parse(cursor, scope);
+        if (after is not null && name is not null && after.Name != name)
+            throw new ArgumentException("Invalid MCP registry cursor name.");
+        cancellationToken.ThrowIfCancellationRequested();
+        if (mode == "latest")
+            return ListLatestPage(search, limit, after, scope, cancellationToken);
+        var collation = OrdinalCollation;
+        var position = mode == "versions"
+            ? $"(updated_at < @at OR (updated_at = @at AND version COLLATE {collation} < @afterVersion))"
+            : $"(name COLLATE {collation},version COLLATE {collation}) > (@afterName,@afterVersion)";
+        var order = mode == "versions" ? $"updated_at DESC,version COLLATE {collation} DESC"
+            : $"name COLLATE {collation},version COLLATE {collation}";
+        using var db = Open();
+        using var cmd = Sql(db, $"""
+            SELECT name,version,title,description,remote_url,document_json,sha256,state,updated_at
+            FROM mcp_registry_manifests
+            WHERE state='PUBLISHED'
+                AND (@search='' OR LOWER(name) LIKE @pattern ESCAPE '\'
+                    OR (@titles=1 AND LOWER(title) LIKE @pattern ESCAPE '\'))
+                AND (@name='' OR name=@name) AND (@version='' OR version=@version)
+                AND (@hasCursor=0 OR {position})
+            ORDER BY {order} LIMIT @limit
+            """,
+            ("search", search?.ToLowerInvariant() ?? ""), ("pattern", SearchPattern(search)),
+            ("titles", searchTitles ? 1 : 0),
+            ("name", name ?? ""), ("version", version ?? ""), ("hasCursor", after is null ? 0 : 1),
+            ("afterName", after?.Name ?? ""), ("afterVersion", after?.Version ?? ""),
+            ("at", after?.PublishedAt ?? ""), ("limit", limit + 1));
+        using var cancel = cancellationToken.Register(cmd.Cancel);
+        using var reader = cmd.ExecuteReader();
+        var results = new List<McpRegistryEntry>(limit + 1);
+        var scanned = 0;
+        McpRegistryEntry? last = null;
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            scanned++;
+            // Keep only a position if an otherwise-published document is
+            // corrupt. It must not truncate discovery of healthy later rows.
+            last = new McpRegistryEntry(reader.GetString(0), reader.GetString(1), "", "", "",
+                "", "", "PUBLISHED", reader.GetString(8));
+            var entry = Read(reader);
+            if (entry is not null) results.Add(entry);
+        }
+        string? next = null;
+        if (results.Count > limit)
+        {
+            next = McpRegistryCursor.Create(scope, results[limit - 1]);
+            results.RemoveAt(limit);
+        }
+        else if (scanned > limit && last is not null)
+            next = McpRegistryCursor.Create(scope, last);
+        return new McpRegistryPage(results, next);
+    }
+
+    private static string SearchPattern(string? search) => "%" + (search ?? "")
+        .ToLowerInvariant().Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_") + "%";
+
+    private McpRegistryPage ListLatestPage(string? search, int limit,
+        McpRegistryCursor? after, string scope, CancellationToken cancellationToken)
+    {
+        // Page names in SQL rather than truncating the complete version list
+        // first. A server with many versions cannot starve later names.
+        var names = new List<string>(limit + 1);
+        using (var db = Open())
+        using (var cmd = Sql(db, $"""
+            SELECT DISTINCT name COLLATE {OrdinalCollation} AS name
+            FROM mcp_registry_manifests
+            WHERE state='PUBLISHED' AND name COLLATE {OrdinalCollation} > @after
+                AND (@search='' OR LOWER(name) LIKE @pattern ESCAPE '\')
+            ORDER BY name LIMIT @limit
+            """, ("after", after?.Name ?? ""), ("search", search?.ToLowerInvariant() ?? ""),
+            ("pattern", SearchPattern(search)), ("limit", limit + 1)))
+        using (var cancel = cancellationToken.Register(cmd.Cancel))
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                names.Add(reader.GetString(0));
+            }
+        var results = new List<McpRegistryEntry>(limit);
+        foreach (var serverName in names.Take(limit))
+        {
+            var latest = FindLatest(serverName, cancellationToken);
+            if (latest is not null) results.Add(latest);
+        }
+        var next = names.Count > limit ? McpRegistryCursor.Create(scope,
+            new McpRegistryEntry(names[limit - 1], "0.0.0", "", "", "", "", "", "PUBLISHED",
+                DateTimeOffset.MinValue.ToString("O"))) : null;
+        return new McpRegistryPage(results, next);
+    }
+
+    public McpRegistryEntry? FindLatest(string name, CancellationToken cancellationToken = default)
+    {
+        if (!McpRegistryManifest.ValidName(name)) return null;
+        cancellationToken.ThrowIfCancellationRequested();
+        // Stream version identifiers only, with constant memory. Never sort a
+        // truncated page or use lexicographic ordering for semantic versions.
+        string? latest = null;
+        using (var db = Open())
+        using (var cmd = Sql(db, """
+            SELECT version FROM mcp_registry_manifests
+            WHERE state='PUBLISHED' AND name=@name
+            """, ("name", name)))
+        using (var cancel = cancellationToken.Register(cmd.Cancel))
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var candidate = reader.GetString(0);
+                if (McpRegistryManifest.ValidVersion(candidate) && (latest is null ||
+                    McpRegistryDiscovery.CompareVersions(candidate, latest) > 0)) latest = candidate;
+            }
+        // Recheck digest and current state after selection; never return a
+        // corrupted or newly-revoked version as an apparently healthy latest.
+        return latest is null ? null : Find(name, latest);
     }
 }

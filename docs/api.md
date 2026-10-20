@@ -87,7 +87,7 @@ Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Networ
 
 `GET /api/skills` returns `{ "items": [...] }`. `POST /api/skills` accepts multipart fields `version` and `file` (ZIP). `GET /api/skills/{name}/{version}` returns metadata. Download the immutable ZIP from `/download`, or retrieve just the `SKILL.md` content from `/skill.md`.
 
-Skills follow the [Agent Skills specification](https://agentskills.io/specification) conceptually, but this experimental only parses simple inline `name`/`description` frontmatter. Do not assume complete conformance or trust executable content in arbitrary ZIP files.
+Skill imports validate required `name`/`description` metadata and bounded ZIP contents. MCP returns JSON-compatible YAML frontmatter and exact-byte resources. These implemented checks do not establish complete [Agent Skills specification](https://agentskills.io/specification) conformance or runtime correctness; the [static quality profile](skill-quality.md) describes the additional documentation checks.
 
 ## HTTP error codes
 
@@ -154,8 +154,34 @@ credentials and tokens for other feeds do not grant private feed access.
 See [feed operations](feeds.md) for precise limitations.
 
 
-## MCP Registry metadata (experimental)
+## MCP
+
+The MCP Registry accepts a bounded, inert `server.json` descriptor with remote and/or package distributions; package descriptors never trigger installation, execution, interpolation or outbound requests. See [Registry profile and rejected shapes](mcp-registry-catalog.md). Full official schema conformance, publisher verification and signatures remain separate roadmap tasks.
+ artifact and Skill discovery
+
+The authenticated Streamable HTTP endpoint is `/mcp`. It requires an explicit global Bearer read credential even when REST reads are anonymous. Managed credentials restricted to a feed or publishing namespace receive 403. Native C# SDK tests cover MCP revisions 2025-06-18, 2025-11-25 and 2026-07-28.
+
+| Method/tool | Paging and identity |
+| --- | --- |
+| `search_artifacts(query, limit=30, kind?, cursor?)` | Global hosted/cached artifacts, including Maven and Raw; `items` and `nextCursor`; limit 1–100 |
+| `artifact_versions(kind, name, limit=100, cursor?)` | Exact native name (Maven uses `groupId:artifactId`); lexical version order and `nextCursor`; limit 1–100 |
+| `skills/list` | Approved Skill discovery; opaque pages of at most 25 entries |
+| `skills/get` | Exact approved manifest, file digests and canonical resource URIs |
+| `resources/directory/read` | Direct children of one approved directory; at most 100 entries, archive/directory-bound `nextCursor` |
+| `resources/read` | Exact approved file bytes, text or binary as appropriate |
+
+Continue each page with the returned cursor and the original query/kind/name/directory. Cursors grant no permissions and are not historical snapshots. Invalid or mismatched parameters return MCP `InvalidParams` (`-32602`). Skill eligibility is applied before artifact page limits and rechecked for content delivery; private-feed records are excluded from global discovery. See [MCP integration](mcp-security-integration.md) for URI, digest, caching and OAuth metadata behavior.
+
+## Read-only Skill quality
+
+`GET /api/v1/skills/{name}/{version}/quality` and MCP `assess_skill_quality(name, version)` return the same deterministic `packory.skill-quality/1` report for the exact published bytes. Reports include archive/manifest SHA-256, coverage, independent dimensions, findings and concrete suggestions. `completed` means the defined checks ran and may include `issues_found`; incomplete coverage stays explicit. No approval, execution or aggregate safety score is implied.
+
+REST follows explicit anonymous-read configuration and otherwise requires global read access. Authentication runs before a separate 60-request/minute per-role in-process limiter. Responses are `no-store`; unavailable, revoked or tampered revisions return REST 404 and MCP `status: unavailable`. The UI action is **Assess quality**. See [Skill quality](skill-quality.md) for resource bounds and exclusions.
+
+## MCP Registry metadata
 
 Packory provides a versioned, **remote-only** MCP server.json catalog separate from its own Streamable HTTP MCP service. For operator staging and digest-bound approval/revocation, use `POST /api/v1/admin/mcp/servers/stage` (raw 16 KiB server.json) and `POST /api/v1/admin/mcp/servers/decide` (name, version, sha256, action and reason). Both require an administrator; publish/revoke decisions are immutable-key and auditable.
 
-Read-only `GET /api/v1/mcp/servers?q=...&limit=25&offset=0`, `GET /api/v1/mcp/server?name=...&version=...`, and `/mcp` tools `search_mcp_servers` / `get_mcp_server` expose **only approved-for-discovery records**. Responses explicitly set `publisherVerified=false` and `safeToConnect=false`; Packory never connects to remote MCP servers or executes their tools. These paths are **not** the official MCP Registry `/v0.1` API. Complete supported fields, threat model, examples and restrictions are described in [MCP registry catalog](mcp-registry-catalog.md).
+The supported Registry v0.1 read contract provides `GET /v0.1/servers`, `GET /v0.1/servers/{serverName}/versions` and `GET /v0.1/servers/{serverName}/versions/{version}` (exact or `latest`). Lists use official `servers`/`metadata` envelopes and opaque `nextCursor`; per-entry Packory review information lives in `_meta["io.github.cenn0.packory/registry"]`. Search is literal and name-only, limits are 1–100/default 30. Encode a complete server name as one path segment. Unsupported synchronization/deleted-record filters are explicitly rejected.
+
+Packory `GET /api/v1/mcp/servers?q=...&limit=25&cursor=...` adds name/title search for the dashboard; explicit offsets remain for legacy clients. `GET /api/v1/mcp/server?name=...&version=...` returns an exact descriptor. MCP tools `search_mcp_servers(query, limit=20, cursor?, version?)` and `get_mcp_server(name, version)` share the published catalog. Every route exposes only approved-for-discovery records; publisher ownership and connection safety remain unverified. Complete supported fields, lifecycle, envelope/digest semantics and remaining Registry work are in [MCP registry catalog](mcp-registry-catalog.md).

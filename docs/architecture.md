@@ -31,6 +31,9 @@ Modules:
 - `NuGetEndpoints` + `NugetRegistration`: service index, package index, registration metadata, content, SHA512, search and package push; mirrors the upstream registration JSON and rewrites download/registration paths.
 - `NpmEndpoints`: packuments, dist-tag/version merging for hosted package versions, tarball cache/validation and publish payloads.
 - `SkillEndpoints`: archive validation, manifest metadata, versioned downloads. No archive extraction/execution on disk.
+- `PackoryMcpServer` and `McpArtifactCatalog`: official SDK Streamable HTTP adapter, shared global artifact capabilities and keyset catalog queries. Skill snapshots bind approved ZIP bytes, canonical resource paths and file digests; private-feed rows are excluded from global discovery.
+- `McpRegistryStore` / `McpRegistryEndpoints`: immutable operator-reviewed remote descriptors, v0.1 read envelopes and Packory management routes. Descriptors are inert; registry reads cannot contact their endpoints or forward credentials.
+- `SkillQualityAssessment`: deterministic read-only documentation checks over the same verified Skill snapshot, exposed through REST, MCP and the dashboard. Security approval, integrity, static quality and external verifier attestations retain distinct meanings.
 - `IPackageDatabase` implemented by SQLite `Database` and `PostgresDatabase`: shared catalog, registry-specific metadata, OCI references and hosted-publish audit; each provider has its own transactional boundary.
 - `BlobStore` (filesystem) and `S3BlobStore` (optional): immutable objects and size-bounded writes. S3 uses conditional writes and local materialization; this is **not** cross-store ACID.
 - `ArtifactLocks`: bounded striped per-artifact coordination for uploads and cache cold misses, **single-process only**.
@@ -52,7 +55,9 @@ Modules:
 
 SQLite remains the default **single-instance** profile; PostgreSQL metadata and S3 object storage are optional and tested separately. Neither profile guarantees multi-node publishing. Database transactions and object-store writes are **not** a shared distributed ACID transaction. On unexpected termination, an artifact may exist without a catalog entry. Before traffic starts, recovery moves unindexed local immutable files to `data/recovery/orphaned/` and logs the count without deleting them. PostgreSQL/S3 publication journals and opt-in reviewed remote quarantine provide a separate recovery path; they do not constitute a real-provider restore guarantee. Missing hosted blobs degrade `/health/ready` (HTTP 503). This is recovery of **visibility**, not a cross-store ACID transaction or automated restoration of missing bytes. Consistent metadata-database snapshots plus artifact-store backups are required for restoration. Avoid concurrent replicas on the same directory; WAL is not multi-host coordination.
 
-`origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions and skills enter immediately after successful upload. Search is not federated across remote registries in MVP.
+`origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions enter after successful upload. Skills are staged and become discoverable only when the active release policy allows them; MCP artifact pagination applies that approval predicate before the database page limit. Search is not federated across remote registries.
+
+MCP Registry publisher verification, source synchronization and durable multi-profile assessments are separate domain additions. A future functional evaluator or MCP gateway requires an isolated execution service with its own credentials, authorization, network/resource limits and lifecycle. Neither belongs inside the registry's request process. See the [MCP delivery roadmap](mcp-roadmap.md) for dependencies and concrete acceptance criteria.
 
 ## Constraints and next decisions
 

@@ -33,5 +33,7 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
-      - name: Run PostgreSQL persistence tests
-        run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --filter FullyQualifiedName~PostgresProviderTests
+      # PostgreSQL-specific facts also live in schema and MCP catalog classes.
+      # A class-name filter must not silently omit those provider regressions.
+      - name: Run the full suite with PostgreSQL provider checks enabled
+        run: dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --logger 'console;verbosity=normal'
