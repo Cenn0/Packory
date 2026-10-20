@@ -434,7 +434,7 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     {
         var feedId = feedGrant.Split(':')[1];
         if (db.Feed(feedId) is not
-            { Kind: "nuget" or "raw" or "maven", Mode: "hosted", Visibility: "private", Enabled: true })
+            { Kind: "nuget" or "raw" or "maven" or "go", Mode: "hosted", Visibility: "private", Enabled: true })
             return Results.BadRequest(new { error = "Feed grants require an active private hosted feed" });
     }
     var id = Guid.NewGuid().ToString("N");
