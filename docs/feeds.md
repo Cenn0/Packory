@@ -245,8 +245,15 @@ Offline recovery and integrity scans enumerate the same ledger.
 Read-only GOPROXY supports `@v/list`, `@latest`, versioned
 `.info`, `.mod` and `.zip`. The native client harness checks
 two private feeds storing different bytes under identical coordinates,
-with separate credentials and module caches. It disables external Go
-checksum-database resolution only for this isolated, synthetic fixture;
+with separate credentials and module caches over an ephemeral HTTPS proxy.
+The official Go command sends GOAUTH/.netrc credentials **only via HTTPS**;
+plaintext HTTP private Go clients must not be advertised as supported.
+A `.netrc` entry is scoped to a hostname, not a URL path: multiple
+independently scoped feeds on the same host require separate client
+credential contexts, dedicated hosts, or a reviewed path-scoped
+`GOAUTH` helper on supported Go versions (Go 1.24+). Never embed
+long-lived tokens in `GOPROXY` URLs, shell history or CI logs.
+The isolated synthetic test disables the external Go checksum database;
 **public checksum trust is not implemented**.
 
 No public read-through mirror, automatic checksum database trust,
