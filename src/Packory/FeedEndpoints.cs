@@ -97,7 +97,7 @@ public static class FeedEndpoints
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
             var feed = db.Feed(id);
-            if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
+            if (feed is not { Kind: "nuget" or "raw" or "maven", Mode: "hosted",
                 Visibility: "private", Enabled: false } ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, true, Access.Actor(ctx)))
                 return Results.Conflict(new { error = "Only reviewed private NuGet/Raw hosted drafts can be activated" });
@@ -112,7 +112,7 @@ public static class FeedEndpoints
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
             var feed = db.Feed(id);
-            if (feed is not { Kind: "nuget" or "raw", Mode: "hosted",
+            if (feed is not { Kind: "nuget" or "raw" or "maven", Mode: "hosted",
                 Visibility: "private", Enabled: true } ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, false, Access.Actor(ctx)))
                 return Results.Conflict(new { error = "Only active private NuGet/Raw hosted feeds can be disabled" });
