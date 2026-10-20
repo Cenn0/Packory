@@ -301,6 +301,72 @@ public sealed class SchemaVersionTests
     }
 
     [Fact]
+    public void PostgresV8ToV9KeepsFeedRowsAndWidensTheGoConstraint()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var schema = "packory_feed_v9_" + Guid.NewGuid().ToString("N");
+        using var admin = new NpgsqlConnection(connectionString);
+        admin.Open();
+        using (var create = new NpgsqlCommand("CREATE SCHEMA " + schema, admin))
+            create.ExecuteNonQuery();
+        try
+        {
+            var isolated = new NpgsqlConnectionStringBuilder(connectionString)
+            {
+                SearchPath = schema
+            };
+            var db = new PostgresDatabase(new Settings
+            {
+                MetadataProvider = "postgresql",
+                PostgresConnectionString = isolated.ConnectionString
+            });
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v9-raw", "raw",
+                "hosted", "private", "Synthetic raw", false, at, at), "fixture"));
+            Assert.True(db.TrySetHostedFeedEnabled("v9-raw", "raw", true, "fixture"));
+            var asset = new FeedAssetEntry("v9-raw", "raw", "same.name/1.0.0",
+                "same.name", "1.0.0", "application/octet-stream",
+                new string('a', 64), 12, at);
+            Assert.True(db.PublishFeedAsset(asset, "fixture"));
+            using (var connection = new NpgsqlConnection(isolated.ConnectionString))
+            {
+                connection.Open();
+                using var downgrade = new NpgsqlCommand("""
+                    ALTER TABLE feed_assets DROP CONSTRAINT feed_assets_kind_check;
+                    ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_kind_check
+                        CHECK(kind IN ('raw','maven'));
+                    UPDATE packory_schema_version SET version=8 WHERE slot=1;
+                    """, connection);
+                downgrade.ExecuteNonQuery();
+            }
+            db.Initialize();
+            Assert.Equal(asset, db.GetFeedAsset("v9-raw", "raw", asset.Path));
+            using var check = new NpgsqlConnection(isolated.ConnectionString);
+            check.Open();
+            using var cmd = new NpgsqlCommand(
+                "SELECT version FROM packory_schema_version WHERE slot=1", check);
+            Assert.Equal(9, Convert.ToInt32(cmd.ExecuteScalar()));
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v9-go", "go",
+                "hosted", "private", "Synthetic Go", false, at, at), "fixture"));
+            Assert.True(db.TrySetHostedFeedEnabled("v9-go", "go", true, "fixture"));
+            var goAsset = new FeedAssetEntry("v9-go", "go",
+                "example.com/hello/@v/v1.2.3.zip", "example.com/hello",
+                "v1.2.3", "application/vnd.packory.go-module-bundle+zip",
+                new string('b', 64), 128, at);
+            Assert.True(db.PublishFeedAsset(goAsset, "fixture"));
+            Assert.Equal(goAsset, db.GetFeedAsset("v9-go", "go", goAsset.Path));
+        }
+        finally
+        {
+            using var cleanup = new NpgsqlCommand(
+                "DROP SCHEMA " + schema + " CASCADE", admin);
+            cleanup.ExecuteNonQuery();
+        }
+    }
+
+    [Fact]
     public void SqliteRejectsFutureVersionWithoutOverwritingMarker()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-schema-" + Guid.NewGuid().ToString("N"));
