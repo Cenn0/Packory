@@ -19,6 +19,10 @@ public interface IPackageDatabase
     IReadOnlyList<RawArtifactEntry> RawArtifacts();
     bool PublishRaw(string name, string version, string mediaType,
         string sha256, long size, string actor);
+    FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
+    IReadOnlyList<FeedAssetEntry> FeedAssets();
+    bool PublishFeedAsset(FeedAssetEntry asset, string actor);
+    bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor);
     IReadOnlyList<FeedDefinition> Feeds(string? after, int limit);
     FeedDefinition? Feed(string id);
     bool TryCreateDraftFeed(FeedDefinition feed, string actor);
