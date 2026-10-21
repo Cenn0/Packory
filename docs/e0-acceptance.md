@@ -1,10 +1,13 @@
 # E0 acceptance — private hosted package foundation
 
-**Checkpoint: 21 October 2026. Status: implemented; final candidate acceptance
-pending.** The eight hosted package adapters and their regression/native
-harnesses are present. Versioned local native results are recorded below.
-The complete current-head CI, PostgreSQL/S3, fault, migration and restore gates
-must finish before this checkpoint is marked accepted.
+**Checkpoint: 21 October 2026. Status: E0 hosted package foundation accepted.** The eight hosted package adapters and their regression/native
+harnesses are present. All eight local native profiles, the selected
+PostgreSQL/S3 native parity profiles and private offline restore have passed.
+The final local Release build has zero warnings/errors; the complete .NET
+suite passed **591 tests**, and the Python suite passed **74 tests**, both with
+actual configured PostgreSQL/S3 services and zero failures or skips.
+Versioned results and their boundaries are recorded below. All eight GitHub
+workflows and twelve jobs passed on the implementation commit recorded here.
 
 ## Acceptance source and scope
 
@@ -20,7 +23,8 @@ transport is HTTP; it is not a package-manager implementation. The hosted
 origin policy is explicit: private requests may use only their own feed's
 committed objects. They never fall back to global coordinates, another feed
 or any upstream. Native client fixtures also use only the intended feed and
-separate empty caches.
+isolated caches without prepopulated fixture packages. Maven bootstraps its
+public build plugin separately before resolving private fixtures.
 
 Legacy global package roots and keys are retained. The specific compatibility
 boundary is OCI: `/v2/feeds/{id}/{repository}/` reserves the legacy repository
@@ -31,30 +35,34 @@ feeds. See [feed lifecycle and protocol contracts](feeds.md).
 
 | Criterion | Required observable behavior | Code and tests |
 | --- | --- | --- |
-| E0-1 Control plane | Eight hosted kinds can be explicitly activated; proxy/Skill drafts remain disabled; lifecycle actions require admin, audit transitions and retain referenced bytes on deactivation | [FeedDefinition](../src/Packory/FeedDefinition.cs), [FeedEndpoints](../src/Packory/FeedEndpoints.cs), [ApiTests](../tests/Packory.Tests/ApiTests.cs), [FeedRawTests](../tests/Packory.Tests/FeedRawTests.cs) |
+| E0-1 Control plane | Eight hosted kinds can be explicitly activated; proxy/Skill drafts remain disabled; lifecycle actions require admin and audit transitions; deactivation retains bytes and identity, and only never-activated, fully unreferenced drafts can be deleted | [FeedDefinition](../src/Packory/FeedDefinition.cs), [FeedEndpoints](../src/Packory/FeedEndpoints.cs), [ApiTests](../tests/Packory.Tests/ApiTests.cs), [FeedRawTests](../tests/Packory.Tests/FeedRawTests.cs) |
 | E0-2 Exact authorization | Anonymous/invalid credentials fail 401; valid foreign or insufficient feed grants fail 403; authorized missing/deactivated content fails 404; reads and writes use the same exact feed boundary, including metadata and sessions | [Access](../src/Packory/Access.cs), adapter test files below, native negative scenarios; global catalog/MCP scope-denial tests in `ApiTests` |
 | E0-3 Independent native identity | Two feeds serve different bytes under the same native coordinate without cache contamination, lookup collision or global catalog exposure | Every adapter's two-feed test and native harness below; [FeedAssetEntry](../src/Packory/FeedAssetEntry.cs) |
 | E0-4 Immutable visibility and integrity | Native identity, declared digests, sizes and archive safety are checked; conflicts cannot replace bytes; missing/tampered committed content fails closed | [FeedPackageStore](../src/Packory/FeedPackageStore.cs), [FeedGoBundle](../src/Packory/FeedGoBundle.cs), adapter validation/tamper/concurrency tests; OCI tags are mutable references to immutable digests |
-| E0-5 Origin policy | Private metadata, files and manifests never consult global/upstream data; generated URLs use the configured origin; clients have no test fallback source | Adapter tests for absent private/global collisions, fixed-origin metadata and foreign dependency references; isolated configs in each smoke |
+| E0-5 Origin policy | Private metadata, files and manifests never consult global/upstream data; generated URLs use the configured origin; direct external dependency references and alternate OCI descriptor URLs are rejected; client fixtures have no fallback source | Adapter tests for absent private/global collisions, fixed-origin metadata and foreign dependency references; isolated configs in each smoke, including Maven's exact-feed mirror |
 | E0-6 Interrupted publication and recovery | Faults before/after object and metadata boundaries retain evidence; no guessed serving row is invented; pending/missing objects remain distinguishable; restart preserves committed private identities | [FeedProviderRecoveryTests](../tests/Packory.Tests/FeedProviderRecoveryTests.cs), [ArtifactRecovery](../src/Packory/ArtifactRecovery.cs), OCI session/restart tests and native restart scenarios |
-| E0-7 Migration and restore | V10 preserves prior private rows/keys and foreign keys; failed migrations retain the prior marker; snapshots include private assets/OCI tags and isolated restore checks metadata and bytes | [SchemaVersionTests](../tests/Packory.Tests/SchemaVersionTests.cs), [SchemaVersionGuard](../src/Packory/SchemaVersionGuard.cs), [snapshot tool](../scripts/pg_s3_snapshot.py), [offline backup tests](../tests/test_offline_backup.py), [PG/S3 restore tests](../tests/test_pg_s3_restore_e2e.py) |
+| E0-7 Migration and restore | V10 preserves prior private rows/keys and foreign keys; failed migrations retain the prior marker; snapshots include private assets/OCI tags and isolated restore checks metadata and bytes | [SchemaVersionTests](../tests/Packory.Tests/SchemaVersionTests.cs), [SchemaVersionGuard](../src/Packory/SchemaVersionGuard.cs), [all-kind private restore smoke](../scripts/smoke-feed-recovery.py), [snapshot tool](../scripts/pg_s3_snapshot.py), [offline backup tests](../tests/test_offline_backup.py), [PG/S3 restore tests](../tests/test_pg_s3_restore_e2e.py) |
 | E0-8 Provider and reproducibility | SQLite/filesystem and explicitly configured PostgreSQL/S3-emulator tests execute on the current candidate; native versions and operation results are recorded; required CI passes on the reviewed head | [CI](../.github/workflows/ci.yml), [PostgreSQL workflow](../.github/workflows/postgres.yml), [S3 workflow](../.github/workflows/s3.yml), commands and gates below |
 
-Implemented tests are evidence of the intended contract. Their presence is not
-itself a passing result: the current candidate gates below remain pending.
-Provider-specific tests that skip because a service variable is absent do not
-satisfy E0-8.
+The result sections distinguish executed local checks from the separately
+recorded published-commit CI evidence. Test presence alone is not a passing result, and
+provider-specific tests that skip because a service variable is absent do not
+satisfy E0-8. A feed ID that has ever been activated remains reserved, including
+after deactivation, so an old managed-token or external OIDC grant cannot
+attach to a newly created feed identity. Historical deleted IDs are also
+blocked when an activation audit, exact managed grant or pending publication
+still references them.
 
 ## Adapter files, native operations and limits
 
 | Adapter | Implementation and regression tests | Native harness | Deliberate profile boundary |
 | --- | --- | --- | --- |
-| NuGet | [FeedNugetEndpoints](../src/Packory/FeedNugetEndpoints.cs), private cases in [ApiTests](../tests/Packory.Tests/ApiTests.cs) | [smoke-feed-nuget.sh](../scripts/smoke-feed-nuget.sh): pack/push, source-cleared restore/build in two feeds | Private flat-container/push, without registration/search/symbols |
+| NuGet | [FeedNugetEndpoints](../src/Packory/FeedNugetEndpoints.cs), private cases in [ApiTests](../tests/Packory.Tests/ApiTests.cs) | [smoke-feed-nuget.sh](../scripts/smoke-feed-nuget.sh): pack/push, source-cleared restore in two feeds and native 401/403/404 with fresh caches | Private flat-container/push, without registration/search/symbols |
 | npm | [FeedNpmEndpoints](../src/Packory/FeedNpmEndpoints.cs), [FeedNpmTests](../tests/Packory.Tests/FeedNpmTests.cs) | [smoke-feed-npm.sh](../scripts/smoke-feed-npm.sh): publish, transitive install, restart and fresh-cache ci | Tags are supplied during publish; no separate mutable tag API, unpublish, login or provenance attachment |
 | Cargo | [FeedCargoEndpoints](../src/Packory/FeedCargoEndpoints.cs), [FeedCargoTests](../tests/Packory.Tests/FeedCargoTests.cs) | [smoke-feed-ecosystems.sh](../scripts/smoke-feed-ecosystems.sh): native publish, sparse registry download and run before/after restart | No private yank/unyank or crates.io proxy; foreign dependency registries rejected |
 | PyPI | [FeedPyPiEndpoints](../src/Packory/FeedPyPiEndpoints.cs), [FeedPyPiTests](../tests/Packory.Tests/FeedPyPiTests.cs) | [smoke-feed-ecosystems.sh](../scripts/smoke-feed-ecosystems.sh): Twine upload and transitive pip wheel install before/after restart | Bounded canonical PEP 440 without epochs/aliases; no direct-reference dependency/extra-index fallback, metadata sidecars or source-build qualification |
-| OCI | [FeedOciEndpoints](../src/Packory/FeedOciEndpoints.cs), [FeedOciTests](../tests/Packory.Tests/FeedOciTests.cs) | [smoke-feed-oci.sh](../scripts/smoke-feed-oci.sh): pinned Helm push/pull/template and exact bytes after restart | `/v2/feeds/{id}/`; SHA-256 immutable digests and mutable tags; no private Docker/ORAS evidence, Bearer issuer, blob/manifest deletion or multi-node handoff |
-| Maven | [FeedMavenEndpoints](../src/Packory/FeedMavenEndpoints.cs), [FeedMavenTests](../tests/Packory.Tests/FeedMavenTests.cs) | [smoke-feed-maven.sh](../scripts/smoke-feed-maven.sh): independent Maven 3 dependency resolution | Immutable release files/checksum acknowledgements; no native deploy, mutable metadata PUT, SNAPSHOT or full Gradle variants |
+| OCI | [FeedOciEndpoints](../src/Packory/FeedOciEndpoints.cs), [FeedOciTests](../tests/Packory.Tests/FeedOciTests.cs) | [smoke-feed-oci.sh](../scripts/smoke-feed-oci.sh): pinned Helm push/pull/template and exact bytes after restart | `/v2/feeds/{id}/`; SHA-256 immutable digests and mutable tags; alternate descriptor URLs rejected and inline data bound to digest/size; no private Docker/ORAS evidence, Bearer issuer, blob/manifest deletion or multi-node handoff |
+| Maven | [FeedMavenEndpoints](../src/Packory/FeedMavenEndpoints.cs), [FeedMavenTests](../tests/Packory.Tests/FeedMavenTests.cs) | [smoke-feed-maven.sh](../scripts/smoke-feed-maven.sh): independent Maven 3 resolution through exact-feed mirrors, separate credentials and native 401/403/404 | Immutable release files/checksum acknowledgements; no native deploy, mutable metadata PUT, SNAPSHOT or full Gradle variants |
 | Go | [FeedGoEndpoints](../src/Packory/FeedGoEndpoints.cs), [FeedGoTests](../tests/Packory.Tests/FeedGoTests.cs) | [smoke-feed-go.sh](../scripts/smoke-feed-go.sh): native download/build over verified loopback TLS, separate caches and native HTTP failures | Hosted triplet import; no public sumdb trust, mirror or universal archive compatibility |
 | Raw | [FeedRawEndpoints](../src/Packory/FeedRawEndpoints.cs), [FeedRawTests](../tests/Packory.Tests/FeedRawTests.cs) | [smoke-feed-raw.sh](../scripts/smoke-feed-raw.sh): real HTTP upload/read with independent bytes and credentials | Generic HTTP bytes, metadata and ranges; no invented package-manager protocol |
 
@@ -79,29 +87,34 @@ The offline snapshot inventory includes private ledgers and OCI tag pointers.
 
 The first table records **21 October 2026** runs on Linux x86-64 with
 SQLite/filesystem and .NET SDK **10.0.402**. A separately executed
-PostgreSQL/S3-emulator parity run follows. The complete final candidate gates
-remain pending. Exact observed versions are recorded rather than inferred
+PostgreSQL/S3-emulator parity run follows. Published-commit CI evidence
+is recorded separately below. Exact observed versions are recorded rather than inferred
 from an unpinned runner image.
 
 | Client | Observed version | Passed local private-feed scenario |
 | --- | --- | --- |
+| NuGet through .NET SDK | **10.0.402** | Native pack/push and source-cleared restore from two feeds with different package bytes; separate package/HTTP/plugin caches; native missing-credential 401, foreign-token 403, missing-feed and deactivated-feed 404; the other feed remains readable |
 | npm / Node.js | npm **11.9.0**, Node.js **24.19.0** | Two scoped packages with a transitive dependency in each feed; same names/versions with different exports; native publish/install; immutable republish rejection; fresh-cache ci after process restart; native 401/403/deactivated 404; lockfile URLs confined to the correct feed |
 | Go | **1.24.13**, official archive SHA-256 checked | Same module/version yields different binaries from two feeds; independent module/build caches; native 401, foreign-token 403, missing module/version/feed 404 and deactivated 404; HTTPS netrc authority includes the test port |
 | Cargo / rustc | **1.99.1 / 1.99.1** | Native publish and run from both feeds, independent Cargo homes/target directories, fresh-cache restart read and native credential/deactivation negatives |
 | Python / pip / Twine | **3.12 / 26.2.1 / 6.2.0** | Two-feed Twine upload and pip transitive pure-Python wheel installation; sole index, no-cache clients, restart and native credential/deactivation negatives |
 | Helm | **3.22.0**, official archive SHA-256 checked | Same chart name/version with different bytes in two feeds; push/pull/template, exact archive comparison after process restart and credential/deactivation negatives |
+| Maven / Java | **3.9.11 / OpenJDK 17.0.20**, official Maven archive SHA-512 checked | Same release coordinate resolves to different bytes from two feeds; `mirrorOf=*` points only to the intended feed; public plugin bootstrap occurs beforehand; fresh fixture repositories and separate credentials prove native 401/403, missing-version 404 and deactivated-feed 404 |
+| curl / Raw HTTP | **8.5.0** | Two feeds with identical coordinates and different exact bytes; immutable duplicate conflict; credential 401/403, legacy-route non-leak, HEAD and deactivated-feed 404 while the other feed remains readable |
 
 The pinned Helm script verifies its downloaded archive checksum. Go 1.24.13
-was also verified against the official archive checksum for this local run;
-the Go script uses the installed `go` command, so a CI run must record its
-actual version. Cargo and npm likewise use installed clients. The observations
+and Maven 3.9.11 were also verified against their official archive checksums
+for these local runs. Their scripts use the installed commands, so a CI run
+must record its actual versions. Cargo and npm likewise use installed clients. The observations
 above do not endorse untested versions or imply a maintained multi-version
 matrix. Private Docker/ORAS and native PyPI source-build scenarios have no
 result in this table.
 
-NuGet, Maven and Raw have existing native harnesses; their rerun on the complete
-current candidate belongs to the pending gate below. Earlier green merged
-workflows are not substituted for that rerun.
+Maven translates HTTP 404 into an artifact-not-found diagnostic; its harness
+checks that native failure and independently confirms the corresponding HTTP
+status. NuGet checks its service-index failure and reported status. Both
+harnesses isolate each negative scenario's caches and credentials. The final
+GitHub workflow reruns every native harness on the published commit.
 
 ### Recorded local PostgreSQL/S3 native parity
 
@@ -121,8 +134,58 @@ aliases and no unfinished publication intents.
 
 These runs include each script's process restart, fresh client caches and
 authorization/deactivation negatives. They establish provider parity for
-those native profiles, with an S3 emulator. They do not replace the separate
-fault-injection, migration/restore or real-S3-provider gates.
+those native profiles, with an S3 emulator. Fault-injection and migration/
+restore have separate tests; real S3-provider qualification remains separate.
+
+### Recorded local recovery and complete suites
+
+[smoke-feed-recovery.py](../scripts/smoke-feed-recovery.py) passed for **16
+private feeds across all eight kinds**, including a rerun against the final
+Release build. It publishes different bytes at the same coordinate in two
+feeds per protocol, stops the server, creates an offline backup, restores into
+an isolated directory and starts the restored server. Exact artifact bytes,
+feed grants and OCI tag references survive the restore. Missing credentials
+and foreign-feed grants still fail. Corrupt snapshot object bytes are rejected
+before a restore target is created. This verifies the stored artifacts over
+HTTP; each protocol's native CLI interoperability is established by its
+separate harness above.
+
+The final Release build completed with **zero warnings and zero errors**.
+The full .NET suite passed **591 tests, zero failed and zero skipped**, with
+actual PostgreSQL 16 and Moto services enabled. This includes the final
+feed-ID lifecycle and OCI descriptor-origin regressions, provider fault
+recovery and schema preservation/rollback cases.
+
+The complete local Python suite passed **74 tests, with zero failures and
+zero skips**, using the same actual local services for its configured
+provider cases. This includes **37 snapshot checks** for inventory, integrity,
+private feed references, S3 versions and coordinated restore. These results
+cover the exercised local service profiles; they do not establish real S3
+vendor compatibility or measured recovery objectives.
+
+## Published implementation CI evidence
+
+[PR #110](https://github.com/Cenn0/Packory/pull/110) was verified at implementation
+commit [b1c3326b8d04aaaa34df99528a152d8d286823de](https://github.com/Cenn0/Packory/commit/b1c3326b8d04aaaa34df99528a152d8d286823de).
+All **eight workflows and twelve jobs passed** on that exact source. The
+documentation update recording this checkpoint must also pass the required
+branch checks before merge; the PR retains those later runs.
+
+| Workflow | Passing implementation run |
+| --- | --- |
+| CI: Release build, protocol tests, all private native clients, recovery, privacy, dashboard and container | [39600846330](https://github.com/Cenn0/Packory/actions/runs/39600846330) |
+| PostgreSQL backend: complete suite with provider checks enabled | [39600846270](https://github.com/Cenn0/Packory/actions/runs/39600846270) |
+| S3 object storage: PostgreSQL/Moto snapshots, recovery, corruption and native private parity | [39600846500](https://github.com/Cenn0/Packory/actions/runs/39600846500) |
+| Native ecosystem compatibility matrix: existing Cargo/pip profiles on Python 3.12 and 3.13 | [39600846340](https://github.com/Cenn0/Packory/actions/runs/39600846340) |
+| Keycloak OIDC end-to-end | [39600846460](https://github.com/Cenn0/Packory/actions/runs/39600846460) |
+| MCP TypeScript SDK interoperability | [39600846323](https://github.com/Cenn0/Packory/actions/runs/39600846323) |
+| SkillSpector pinned worker smoke | [39600846341](https://github.com/Cenn0/Packory/actions/runs/39600846341) |
+| Public documentation | [39600846449](https://github.com/Cenn0/Packory/actions/runs/39600846449) |
+
+The main CI run includes every private native harness, the all-kind offline
+restore, actual OCI SIGKILL/TCP recovery and existing Helm/Docker regression
+checks. The provider run uses Moto; this evidence does not establish external
+S3-provider certification or private Docker/ORAS interoperability.
 
 ## Reproduce the checks
 
@@ -147,6 +210,7 @@ bash scripts/smoke-feed-oci.sh
 bash scripts/smoke-feed-maven.sh
 bash scripts/smoke-feed-go.sh
 bash scripts/smoke-feed-raw.sh
+python3 scripts/smoke-feed-recovery.py
 ```
 
 PostgreSQL facts require `PACKORY_TEST_POSTGRES`. Combined S3 facts also require
@@ -180,22 +244,29 @@ workflow:
 python3 -m unittest discover -s tests -p test_offline_backup.py -v
 python3 -m unittest discover -s tests -p test_pg_s3_snapshot.py -v
 python3 -m unittest discover -s tests -p test_pg_s3_snapshot_safety.py -v
+python3 -m unittest discover -s tests -p test_pg_s3_snapshot_feeds.py -v
 python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
 python3 -m unittest discover -s tests -p test_pg_s3_restore_e2e.py -v
 ```
 
-## Pending candidate gates
+To run the full Python suite with the same configured disposable services:
 
-- [ ] Full Release build with warnings as errors and complete test suite after all E0 changes.
-- [ ] All eight private adapter harnesses on the same candidate, including existing NuGet/Maven/Raw flows and native failure checks.
-- [ ] Actual PostgreSQL tests, including V9→V10 preservation/rollback constraints and private feed recovery.
-- [ ] PostgreSQL + S3 emulator cold reads, remote corruption checks, intent recovery and restored feed/tag references.
-- [ ] Interruption/restart/missing-object tests and offline snapshot/isolated restore tests pass without treating skipped provider facts as evidence.
-- [ ] Documentation, public-data/privacy checks and all required PR checks pass on the exact reviewed head.
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
 
-When a gate completes, record the immutable commit/run and the actual
-client/provider outcome here or in the release evidence artifact. A successful
-local native run closes only its corresponding scenario.
+## Completed acceptance checks
+
+- [x] Final Release build with warnings as errors: zero warnings/errors; complete .NET suite: 591 passed, zero failed or skipped, with actual PostgreSQL/S3 fault, migration and recovery cases enabled.
+- [x] All eight local private adapter profiles, including native NuGet/Maven credential and missing/deactivated-content failures.
+- [x] Native npm/Cargo/PyPI/Helm parity on PostgreSQL 16 and Moto, including restart, cold client caches, exact remote bytes/ledger and no global package aliases or unfinished intents.
+- [x] Offline backup and isolated process restore for 16 private feeds across all eight kinds against the final Release build, with exact bytes, grants, OCI tags and corrupt-snapshot rejection.
+- [x] Complete Python suite with actual configured PostgreSQL/Moto services: 74 passed, zero failed or skipped, including 37 snapshot checks.
+- [x] All eight PR workflows and twelve jobs, including documentation/public-data checks and every native harness, passed on the exact published implementation commit in the CI evidence section.
+
+The immutable implementation commit and recorded run links identify this
+acceptance checkpoint. Subsequent changes must pass their own required checks;
+these results qualify only the documented hosted profiles.
 
 ## Separate milestones that remain open
 

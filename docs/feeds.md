@@ -1,8 +1,9 @@
 # Private hosted feeds — E0 package foundation
 
 **Implemented:** independently routed private hosted NuGet, npm, Cargo, PyPI,
-OCI, Maven, Go and Raw feeds. **Current acceptance:** pending the complete
-candidate CI and provider/recovery gates in [E0 acceptance](e0-acceptance.md).
+OCI, Maven, Go and Raw feeds. **Current acceptance:** local native, provider,
+fault/restore and complete test suites have passed; the published-commit
+GitHub gate remains open in [E0 acceptance](e0-acceptance.md).
 The protocol profiles below describe available operations and their limits.
 Proxy feeds and private Skills remain disabled drafts; group routing and
 feed-aware MCP discovery are separate work.
@@ -55,7 +56,10 @@ IDs cannot begin with `default-`. Kinds are `nuget`, `npm`, `cargo`, `pypi`,
 `hosted` and `proxy`; `group` is not an accepted draft mode.
 The server assigns `visibility: private` and `enabled: false`; callers cannot
 supply these fields or an upstream URL. Success returns 201 with
-`operational: false`, and duplicate IDs return 409.
+`operational: false`, and duplicate or historically reserved IDs return 409.
+Creation also rejects a previously deleted ID if an activation audit, exact
+managed read/publish grant or pending feed publication still references it.
+An unreferenced, never-activated draft ID may be reused after deletion.
 
 A draft alone has no serving capability or granted access. For one of the
 eight implemented hosted package kinds, an administrator may call

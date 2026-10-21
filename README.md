@@ -21,7 +21,7 @@ Packory combines native package-registry endpoints, an indexed artifact catalog 
 
 > **Status: active development with documented functional profiles.** Registry adapters and optional backends have bounded test coverage; full protocol interoperability, migration recovery and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries. See the [support matrix](docs/support-matrix.md) for each implemented and tested scope.
 
-**E0 private hosted feeds are implemented for NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw.** Each active feed has its own native routes, exact read/publish grants and immutable artifact identity; private requests never fall back to global packages or upstreams. Acceptance for the current change is still pending the complete CI and provider/recovery gates recorded in [E0 acceptance](docs/e0-acceptance.md). Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
+**E0 private hosted feeds are implemented for NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw.** Each active feed has its own native routes, exact read/publish grants and immutable artifact identity; private requests never fall back to global packages or upstreams. All eight local native profiles, selected PostgreSQL/Moto native parity, private offline restore and the complete local test suites have passed. All eight GitHub workflows passed on the implementation commit; the complete acceptance record is in [E0 acceptance](docs/e0-acceptance.md). Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
 
 ## Quick start
 
@@ -141,7 +141,7 @@ bash scripts/smoke-ecosystems.sh
 
 [CI](.github/workflows/ci.yml) runs builds, deterministic integration tests and a [native-client hosted smoke test](scripts/smoke-hosted.sh): a real `dotnet nuget push` followed by an isolated `dotnet restore/build`, plus a scoped `npm publish` followed by `npm install` and fresh-cache `npm ci`. Test credentials are generated temporarily and never committed. CI also exercises native Cargo publish/consume, a pip installation with a hosted transitive dependency, and one Docker OCI push/pull scenario using a local scratch image. A [separate live mirror workflow](.github/workflows/smoke-live.yml) checks upstream registry behavior; passing one native hosted scenario does not imply comprehensive protocol support.
 
-The private-feed harness adds two feeds containing different bytes under identical coordinates, exact credential denials, empty client caches and restart checks where specified. [E0 acceptance](docs/e0-acceptance.md) maps every adapter to its tests and commands, distinguishes local results from pending CI/provider runs, and lists the exact client versions observed.
+The private-feed harness adds two feeds containing different bytes under identical coordinates, exact credential denials, isolated client caches and restart checks where specified. [E0 acceptance](docs/e0-acceptance.md) maps every adapter to its tests and commands, records local native/provider/restore results separately from final CI acceptance, and lists the exact client versions observed.
 
 ## Documentation and contributions
 

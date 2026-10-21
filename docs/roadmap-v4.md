@@ -1,6 +1,6 @@
 # Packory Roadmap V4 — Native package ecosystem expansion
 
-**Planning baseline:** 19 October 2026; **implementation checkpoint updated:** 21 October 2026. **Status:** E0 hosted implementation present, candidate acceptance pending; other milestones retain the states below. This plan is not a claim that all package ecosystems or V3 milestones are complete.
+**Planning baseline:** 19 October 2026; **implementation checkpoint updated:** 21 October 2026. **Status:** E0 hosted package foundation completed and accepted; other milestones retain the states below. This plan is not a claim that all package ecosystems or V3 milestones are complete.
 **Depends on:** [V3 delivery roadmap](roadmap.md), [release gates](release-gates.md), [support matrix](support-matrix.md), real-provider restore qualification and secure feed authorization.
 
 ## Outcome and non-negotiable rules
@@ -20,7 +20,7 @@ Packory should distribute packages through existing native package managers. A R
 
 | ID | Priority | Scope | Acceptance for the milestone | State at this plan |
 | --- | --- | --- | --- | --- |
-| E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Implemented hosted foundation; acceptance pending:** private NuGet/npm/Cargo/PyPI/OCI/Maven/Go/Raw routes, exact grants, typed native identities, schema V10 and immutable storage. Local versioned native checks pass; full candidate CI/provider/fault/restore gates are tracked in [E0 acceptance](e0-acceptance.md). Proxy/group and private Skills/MCP remain separate milestones |
+| E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Complete and accepted for hosted packages:** private NuGet/npm/Cargo/PyPI/OCI/Maven/Go/Raw routes, exact grants, typed native identities, schema V10 and immutable storage. All eight local native profiles, selected PostgreSQL/Moto native parity, all-kind private restore and complete local suites pass; all eight published-commit workflows and twelve jobs pass, with immutable evidence in [E0 acceptance](e0-acceptance.md). Proxy/group and private Skills/MCP remain separate milestones |
 | E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90 merged**, experimental; no production/provider qualification |
 | E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90 merged**, pinned CLI smoke passed; no universal Helm/Kubernetes conformance |
 | E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** parser #92 and global immutable hosted release transport + V6 metadata/recovery + Maven native consume #93 merged; bounded Maven Central CI retry #95 merged; bounded verified checksum PUTs for already committed immutable release artifacts added. E0 adds private hosted release feeds. Native deploy (including mutable metadata PUT), Gradle conformance, SNAPSHOT, atomic multi-file release and proxy remain open |
@@ -90,7 +90,7 @@ For each adapter, collect versioned evidence for:
 - Follow-up E3 ZIP preflight: conservative offline archive validation only, no persistence or wire behavior; see [Go design](go-proxy.md) and the [current checkpoint](roadmap-status-2026-10-20.md).
 - E10/MS5 MCP continuation: paginated global discovery including Maven/Raw, three v0.1 Registry read routes, strict native MCP/Skills Extension behavior and static Skill quality with dashboard integration. See [delivered functions and open acceptance](mcp-roadmap.md); neither E10 nor MS5 is complete.
 
-**Current continuation:** the hosted Go endpoint, immutable triplet and private feed authorization are implemented. The E0 candidate extends hosted isolation to all eight delivered package kinds and must pass the evidence gates below. E11 real-provider and disaster-recovery qualification remains separate.
+**Current continuation:** the hosted Go endpoint, immutable triplet and private feed authorization are implemented. E0 completes hosted isolation for all eight delivered package kinds with the passing acceptance evidence below. E11 real-provider and disaster-recovery qualification remains separate.
 
 ## Previous checkpoint: PR #90
 
@@ -103,6 +103,8 @@ Maven, Go and Raw hosted feeds**. Each adapter uses an explicitly activated
 private feed, exact read/publish grants, native coordinate validation and
 feed-qualified immutable identity. Every read, metadata response and upload
 session stays within its authorized feed; there is no global/upstream fallback.
+Once activated, a feed ID remains reserved after deactivation; only
+never-activated and completely unreferenced drafts can be deleted.
 Legacy routes remain available except that OCI repository prefix `feeds/` is
 reserved for `/v2/feeds/{id}/{repository}/` private routing.
 
@@ -113,16 +115,23 @@ immutable bundle; Go commits its immutable triplet. OCI digest bytes remain
 immutable while tags may move between verified manifests. Recovery and
 snapshot tooling enumerate these same identities.
 
-**Acceptance is pending for the complete candidate.** Local Linux,
-SQLite/filesystem native tests have passed with npm 11.9.0, Go 1.24.13,
-Cargo/rustc 1.99.1, Python 3.12/pip 26.2.1/Twine 6.2.0 and pinned Helm 3.22.0.
+**Published-commit GitHub acceptance passed: eight workflows, twelve jobs.** Local Linux,
+SQLite/filesystem native tests have passed with .NET SDK 10.0.402, npm 11.9.0,
+Go 1.24.13, Cargo/rustc 1.99.1, Python 3.12/pip 26.2.1/Twine 6.2.0,
+pinned Helm 3.22.0, Maven 3.9.11/OpenJDK 17.0.20 and curl 8.5.0.
 Those runs do not qualify other clients, providers or native operations.
 The same npm/Cargo/PyPI/Helm native profiles also passed against actual
 PostgreSQL 16 and Moto S3, with independent remote-byte/ledger verification.
-That emulator parity result leaves fault/restore and real-provider gates separate.
+The local offline restore smoke passed against the final Release build for
+16 private feeds across all eight kinds, preserving exact bytes, grants and
+OCI tags while rejecting corrupt snapshot content. The final Release build
+has zero warnings/errors; all 591 .NET and 74 Python tests passed without
+failures or skips, with PostgreSQL/Moto services configured. The Python total
+includes 37 snapshot checks. Every native harness also passed on the published implementation commit;
+real-provider qualification is a separate later gate.
 [E0 acceptance](e0-acceptance.md) maps the original E0 row to concrete
 cross-feed, authorization, integrity, restart/fault, migration and restore
-criteria, test files, commands and remaining CI gates.
+criteria, test files, commands and immutable CI run links.
 
 This bounded hosted foundation does not complete MS2 or the wider project.
 Proxy/group feed semantics, per-feed quotas/retention, full declarative

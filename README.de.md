@@ -21,7 +21,7 @@ Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatal
 
 > **Status: aktive Entwicklung mit dokumentiertem Funktionsumfang.** Die Adapter und optionalen Speicher-Backends sind nur begrenzt getestet; vollständige Protokollkompatibilität, Recovery nach Migrationen und Mehrinstanzgarantien sind nicht nachgewiesen. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries. Die [Support-Matrix](docs/support-matrix.md) nennt den jeweils implementierten und getesteten Umfang.
 
-**Private Hosted-Feeds nach E0 sind für NuGet, npm, Cargo, PyPI, OCI, Maven, Go und Raw implementiert.** Jeder aktive Feed besitzt eigene native Routen, exakte Lese-/Publikationsrechte und unveränderliche Artefaktidentitäten. Private Anfragen greifen niemals auf globale Pakete oder Upstreams zurück. Die Abnahme der aktuellen Änderung wartet noch auf die vollständigen CI- und Provider-/Recovery-Prüfungen in [E0-Abnahme](docs/e0-acceptance.md). Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche bleiben eigene Aufgaben.
+**Private Hosted-Feeds nach E0 sind für NuGet, npm, Cargo, PyPI, OCI, Maven, Go und Raw implementiert.** Jeder aktive Feed besitzt eigene native Routen, exakte Lese-/Publikationsrechte und unveränderliche Artefaktidentitäten. Private Anfragen greifen niemals auf globale Pakete oder Upstreams zurück. Alle acht lokalen nativen Profile, ausgewählte native PostgreSQL-/Moto-Profile, die private Offline-Wiederherstellung und die vollständigen lokalen Tests sind erfolgreich geprüft. Alle acht GitHub-Workflows sind auf dem Implementierungscommit erfolgreich; die vollständigen Nachweise stehen in [E0-Abnahme](docs/e0-acceptance.md). Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche bleiben eigene Aufgaben.
 
 ## Schnellstart
 
@@ -142,7 +142,7 @@ bash scripts/smoke-ecosystems.sh
 
 Die [CI](.github/workflows/ci.yml) führt Build-, Integrations- und [echte CLI-Veröffentlichungstests](scripts/smoke-hosted.sh) aus: `dotnet nuget push` mit anschließendem isoliertem `dotnet restore/build` sowie `npm publish` für ein Scoped Package mit anschließendem `npm install` und `npm ci` in einem frischen Cache. Zugangsdaten entstehen nur temporär im Test. Die CI testet zusätzlich Cargo Publish/Consumption, einen echten pip-Installationslauf mit gehosteter transitiver Abhängigkeit und einen Docker-OCI-Push/Pull-Test mit lokal erstelltem Scratch-Image. Ein [separater Live-Smoke-Workflow](.github/workflows/smoke-live.yml) prüft öffentliche Upstream-Registries. Ein bestandener CLI-Test bedeutet noch keine vollständige Protokollkompatibilität.
 
-Die privaten Feed-Tests ergänzen zwei Feeds mit gleichen Koordinaten und verschiedenen Bytes, exakte Berechtigungsfehler, leere Clientcaches und die jeweils dokumentierten Neustartprüfungen. [E0-Abnahme](docs/e0-acceptance.md) ordnet jedem Adapter Tests und Befehle zu, trennt lokale Ergebnisse von offenen CI-/Provider-Läufen und nennt die tatsächlich verwendeten Clientversionen.
+Die privaten Feed-Tests ergänzen zwei Feeds mit gleichen Koordinaten und verschiedenen Bytes, exakte Berechtigungsfehler, isolierte Clientcaches und die jeweils dokumentierten Neustartprüfungen. [E0-Abnahme](docs/e0-acceptance.md) ordnet jedem Adapter Tests und Befehle zu, dokumentiert lokale native, Provider- und Wiederherstellungsergebnisse getrennt von der abschließenden CI-Abnahme und nennt die tatsächlich verwendeten Clientversionen.
 
 ## Dokumentation und Mitwirkung
 

@@ -1,6 +1,6 @@
 # Packory runtime architecture
 
-Status: **modular monolith with eight private hosted package adapters; optional PostgreSQL, S3 and OIDC** · 21 October 2026. E0 implementation is present; final candidate acceptance remains tracked in [E0 acceptance](e0-acceptance.md).
+Status: **modular monolith with eight private hosted package adapters; optional PostgreSQL, S3 and OIDC** · 21 October 2026. The E0 hosted package foundation is accepted; its exact implementation and CI evidence are recorded in [E0 acceptance](e0-acceptance.md).
 
 ## Decision
 
@@ -30,7 +30,7 @@ Modules:
 
 - `NuGetEndpoints` + `NugetRegistration`: service index, package index, registration metadata, content, SHA512, search and package push; mirrors the upstream registration JSON and rewrites download/registration paths.
 - `NpmEndpoints`: packuments, dist-tag/version merging for hosted package versions, tarball cache/validation and publish payloads.
-- `FeedEndpoints` / `FeedDefinition`: administrator-only inventory and disabled draft lifecycle; explicit activation for the eight implemented private hosted package kinds. Previously activated IDs remain reserved, including empty deactivated feeds, so old managed/OIDC grants cannot attach to a new identity. Legacy descriptors do not grant access, and proxy/Skill drafts stay disabled.
+- `FeedEndpoints` / `FeedDefinition`: administrator-only inventory and disabled draft lifecycle; explicit activation for the eight implemented private hosted package kinds. Previously activated IDs remain reserved, including empty deactivated feeds, so old managed/OIDC grants cannot attach to a new identity. Creation also checks historical activation, managed-grant and publication-intent references when a feed row is absent. Legacy descriptors do not grant access, and proxy/Skill drafts stay disabled.
 - `FeedNugetEndpoints`, `FeedNpmEndpoints`, `FeedCargoEndpoints`, `FeedPyPiEndpoints`, `FeedOciEndpoints`, `FeedMavenEndpoints`, `FeedGoEndpoints` and `FeedRawEndpoints`: native private routes that check the exact feed permission and active kind before querying scoped metadata. Private OCI occupies `/v2/feeds/{id}/{repository}/`; the global OCI repository prefix `feeds/` is reserved.
 - `FeedAssetEntry` / `FeedPackageStore`: native coordinate validation, feed-qualified object identity and immutable metadata/payload bundles for npm/Cargo/PyPI. `FeedGoBundle` binds the Go triplet to the feed. NuGet retains its dedicated immutable checksum ledger; OCI uses digest assets with separate mutable tag references.
 - `SkillEndpoints`: archive validation, manifest metadata, versioned downloads. No archive extraction/execution on disk.

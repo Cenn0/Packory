@@ -1,6 +1,6 @@
 # API and native client compatibility (experimental)
 
-**Hosted feeds:** NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw have independent private routes and exact feed grants. Their native route table is [below](#private-hosted-feed-api-e0), with limits in [feed operations](feeds.md). The current change's complete CI/provider/recovery acceptance is tracked in [E0 acceptance](e0-acceptance.md).
+**Hosted feeds:** NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw have independent private routes and exact feed grants. Their native route table is [below](#private-hosted-feed-api-e0), with limits in [feed operations](feeds.md). Passing local native/provider/restore results and the completed published-commit GitHub checks are recorded in [E0 acceptance](e0-acceptance.md).
 
 **Go hosted:** global publication uses multipart POST `/api/go/modules`; private publication uses `/feeds/{id}/api/go/modules` (module, version, mod, zip, optional time). Responses include the archive SHA-256 and locally computed Go `h1:` integrity; this is not external checksum-database verification. Native clients consume `/go/` or the authorized `/feeds/{id}/go/` root. Upstream mirroring remains separate E3 work. See [global Go](go-proxy.md) and [private Go](feeds.md#go-modules).
 
@@ -40,7 +40,7 @@ Writes to NuGet push, npm publish and Skills import are subject to `PACKORY_PUBL
 
 The PR CI executes `scripts/smoke-hosted.sh` with .NET 10 and npm under Node.js 22: `dotnet pack` / `dotnet nuget push` for a privately reserved package, then a NuGet source-cleared project restore/build; plus `npm publish` for `@packory-smoke/demo`, then unauthenticated `npm install` and fresh-cache `npm ci`. The source restrictions prevent public registry fallback in these tests. These are tested behaviors, not certification of the full native protocol. `scripts/smoke-nuget.sh` and `scripts/smoke-npm.sh` remain external mirror acceptance tests in a separate scheduled GitHub workflow.
 
-Private feed tests additionally exercise independently authorized same-name revisions in two feeds. Native npm 11.9.0, Go 1.24.13, Cargo 1.99.1, Python 3.12/pip 26.2.1/Twine 6.2.0 and Helm 3.22.0 have passed the documented local SQLite/filesystem scenarios. These versioned observations do not establish other client/provider combinations. Full commands, per-scenario coverage and pending gates are in [E0 acceptance](e0-acceptance.md).
+Private feed tests additionally exercise independently authorized same-name revisions in two feeds. .NET SDK 10.0.402, npm 11.9.0, Go 1.24.13, Cargo 1.99.1, Python 3.12/pip 26.2.1/Twine 6.2.0, Helm 3.22.0, Maven 3.9.11/OpenJDK 17.0.20 and curl 8.5.0 have passed the documented local SQLite/filesystem scenarios. The npm/Cargo/PyPI/Helm profiles also passed against PostgreSQL 16 and Moto S3. These versioned observations do not establish untested client/provider combinations. Full commands, per-scenario coverage, local suite totals and the GitHub gate are in [E0 acceptance](e0-acceptance.md).
 
 ## NuGet v3
 
@@ -146,7 +146,9 @@ Administrator lifecycle routes are `POST /api/v1/admin/feeds/drafts`,
 `DELETE /api/v1/admin/feeds/drafts/{id}` for a never-activated, completely
 unreferenced disabled draft. A previously activated feed ID stays reserved
 even when empty/deactivated, preserving the identity of managed/OIDC grants;
-reactivation remains available. Managed grants and pending publication intents
+reactivation remains available. Creation also rejects historically deleted IDs
+that retain activation audit, exact managed-grant or pending-publication
+references. Managed grants and pending publication intents
 also prevent draft deletion.
 Activation supports private hosted NuGet, npm, Cargo, PyPI, OCI, Maven, Go
 and Raw. Proxy and Skill drafts stay disabled; group mode is not accepted.
