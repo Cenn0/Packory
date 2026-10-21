@@ -173,14 +173,14 @@ import (
 )
 func main() { fmt.Println(hello.Message()) }
 GO
-# Go's standard netrc credential lookup handles the private proxy's Basic challenge.
+# Go's GOAUTH netrc lookup matches the HTTPS authority, including its port.
 # Caches and HOME must be independent to detect cross-feed cache contamination.
 for feed in go-alpha go-beta; do
   if [ "$feed" = go-alpha ]; then READ="$A_READ"; EXPECT=alpha; else READ="$B_READ"; EXPECT=beta; fi
   mkdir -p "$WORK/$feed/home" "$WORK/$feed/modcache"
   cp -a "$WORK/consumer" "$WORK/$feed/consumer"
   chmod 700 "$WORK/$feed/home"
-  printf 'machine 127.0.0.1 login packory password %s\n' "$READ" >"$WORK/$feed/home/.netrc"
+  printf 'machine %s login packory password %s\n' "${TLSBASE#https://}" "$READ" >"$WORK/$feed/home/.netrc"
   chmod 600 "$WORK/$feed/home/.netrc"
   (
     cd "$WORK/$feed/consumer"
