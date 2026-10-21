@@ -6,6 +6,16 @@ namespace Packory;
 /// <summary>Verify against publication-time metadata, never a hash learned from suspect bytes.</summary>
 public static class ArtifactDigests
 {
+    public static async Task<bool> MatchesRemoteAsync(BlobStore blobs, string key,
+        string algorithm, byte[] expected, long expectedSize, long maximum, CancellationToken ct)
+    {
+        if (expectedSize < 0 || expectedSize > maximum) return false;
+        if (blobs is not S3BlobStore remote) return true;
+        var probe = await remote.InspectRemoteAsync(key, algorithm, maximum, ct);
+        return probe.Exists && !probe.ExceedsLimit && probe.Size == expectedSize &&
+            probe.Digest is not null && CryptographicOperations.FixedTimeEquals(probe.Digest, expected);
+    }
+
     public static bool ValidSha256(string? value) => value is { Length: 64 } &&
         value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 

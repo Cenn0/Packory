@@ -21,6 +21,8 @@ Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatal
 
 > **Status: aktive Entwicklung mit dokumentiertem Funktionsumfang.** Die Adapter und optionalen Speicher-Backends sind nur begrenzt getestet; vollständige Protokollkompatibilität, Recovery nach Migrationen und Mehrinstanzgarantien sind nicht nachgewiesen. Der Katalog zeigt lokal gehostete oder bereits gecachte Pakete, nicht den vollständigen Inhalt der Upstream-Registries. Die [Support-Matrix](docs/support-matrix.md) nennt den jeweils implementierten und getesteten Umfang.
 
+**Private Hosted-Feeds nach E0 sind für NuGet, npm, Cargo, PyPI, OCI, Maven, Go und Raw implementiert.** Jeder aktive Feed besitzt eigene native Routen, exakte Lese-/Publikationsrechte und unveränderliche Artefaktidentitäten. Private Anfragen greifen niemals auf globale Pakete oder Upstreams zurück. Die Abnahme der aktuellen Änderung wartet noch auf die vollständigen CI- und Provider-/Recovery-Prüfungen in [E0-Abnahme](docs/e0-acceptance.md). Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche bleiben eigene Aufgaben.
+
 ## Schnellstart
 
 Voraussetzung: Docker Compose. Für die lokale Erprobung:
@@ -49,13 +51,13 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | Bereich | Umgesetzter Umfang |
 | --- | --- |
 | **NuGet V3** | Service-Index, Paket-/Versionsdownloads, Read-through-Caching von nuget.org und Veröffentlichung eigener Pakete; experimentelle getrennte private NuGet-Feeds mit eigenen Berechtigungen |
-| **npm** | Caching von Upstream-Metadaten und Tarballs, Scoped Packages und einfache Veröffentlichung einzelner Versionen |
-| **OCI (experimentell)** | Distribution-v2-Endpunkte für SHA-256-Blobs, Uploads, Manifeste, Tags und Referrer; Client-/Auth-Abdeckung noch unvollständig |
-| **Cargo & PyPI (experimentell)** | Cargo als gehostete Alternate Registry (Sparse Index und Upload), PyPI Simple API (HTML/JSON) und grundlegender Upload; keine vollständige Unterstützung |
+| **npm** | Globale Metadaten-/Tarball-Caches sowie private Veröffentlichung mit und ohne Scope, Packuments, Tags bei Veröffentlichung und geprüfte Tarballs; native Install-/CI-Abläufe |
+| **OCI (experimentell)** | Globale und private Distribution-v2-Blobs, fortsetzbare Uploads, Manifeste, veränderliche Tags und Referrer; private Repositories unter `/v2/feeds/{id}/` |
+| **Cargo & PyPI (experimentell)** | Globale und private Cargo-Sparse-Registries mit nativem Publish; PyPI Simple HTML/JSON und Twine-Upload unveränderlicher Distributionsdateien |
 | **Helm 3 über OCI (experimentell)** | Native Helm-OCI-Push/Pull/Show/Template-Smoke-Tests mit festgelegter CLI-Version; kein allgemeiner Helm- oder Kubernetes-Konformitätsnachweis |
-| **Maven-Release-Dateien (experimentell)** | Globale unveränderliche Release-Dateien, POM-GAV-Prüfung, SHA-256, Versionsmetadaten und Maven-Verbrauchertest; kein Maven-Deploy, SNAPSHOT, Proxy oder separate Maven-Feeds |
-| **Go-Module (experimentelles Hosting)** | Authentifizierter Modulimport und native GOPROXY-Downloads aus unveränderlichen Versionen mit atomarer Sichtbarkeit und `h1:`-Abgleich gegen `go.sum`; kein Proxy, keine privaten Go-Feeds oder vollständige Go-Konformitätsfreigabe |
-| **Raw / Generic (experimentell)** | Binärdateien über HTTP mit SHA-256, Metadaten und Range-Downloads; globaler Namensraum, kein natives Paketmanager-Protokoll |
+| **Maven-Release-Dateien (experimentell)** | Globale und private unveränderliche Release-Dateien, POM-GAV-Prüfung, Prüfsummen und erzeugte Versionsmetadaten; native Abhängigkeitsauflösung, kein Maven-Deploy, SNAPSHOT oder Proxy |
+| **Go-Module (experimentelles Hosting)** | Globaler und privater authentifizierter Import/native GOPROXY-Downloads; unveränderliche Modultripel und kanonische `h1:`-Inhaltshashes; kein Upstream-Mirror oder externes Prüfsummendatenbank-Vertrauen |
+| **Raw / Generic (experimentell)** | Globale und private unveränderliche HTTP-Uploads/-Downloads mit SHA-256-Metadaten und Range-Lesezugriff; generische Dateien ohne natives Paketmanager-Protokoll |
 | **Agent Skills** | Versionierter ZIP-Import mit Quarantäne, offline statischer SkillSpector-Prüfung, expliziter Freigabe vor REST-/MCP-Auslieferung bei aktivierter Durchsetzung sowie Widerruf/erneuter Prüfung |
 | **Statische Skill-Qualität** | Deterministische Dokumentationsbefunde, Verbesserungsvorschläge und Prüfungsabdeckung für veröffentlichte unveränderliche Skills über MCP, REST und Dashboard; getrennt von Sicherheits- und Verhaltenstests |
 | **Packory MCP** | Authentifizierter, nur lesender Streamable-HTTP-Endpunkt `/mcp` mit Tools, Ressourcen, Prompts und Skills Extension; seitenweise globale Artefakt-/Versionssuche einschließlich Maven und Raw |
@@ -64,7 +66,9 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | **Zugriff** | Statische Read-/Write-/Admin-Tokens sowie optionale OIDC-JWT-Prüfung mit expliziten `packory.read`-, `packory.write`- und `packory.admin`-Scopes; noch kein Browser-SSO/BFF |
 | **Speicher** | SQLite und Dateisystem standardmäßig; optional PostgreSQL-Metadaten und S3-kompatible Blobs für neue Einzelinstanz-Installationen |
 
-**Go (V4 E3, experimentelles Hosting):** Authentifizierter Import für Go-Module und native GOPROXY-Leseendpunkte für `.info`, `.mod` und `.zip` mit unveränderlicher Veröffentlichung. Der berechnete kanonische `h1:`-Hash wird im nativen Go-Clienttest mit `go.sum` abgeglichen; dies ist **keine unabhängige Prüfsummendatenbank-Verifikation**. Upstream-Spiegelung, private Go-Feeds und umfassende Clientkonformität fehlen weiterhin. Siehe [Go-Dokumentation](docs/go-proxy.md) und [Checkpoint vom 20. Oktober](docs/roadmap-status-2026-10-20.md).
+**Privates Hosted-Profil:** Einen deaktivierten Entwurf anlegen, als Administrator ausdrücklich aktivieren und einen exakten verwalteten Grant `feed:{id}:read` oder `feed:{id}:publish` ausgeben. Die meisten Quellen liegen unter `/feeds/{id}/{protokoll}/`; OCI behält seinen nativen Präfix unter `/v2/feeds/{id}/{repository}/`. Die bisherigen globalen URLs bleiben erhalten; der OCI-Repository-Präfix `feeds/` ist für private Routen reserviert. [Feed-Lebenszyklus, Clientkonfiguration und Grenzen](docs/feeds.md) beschreiben die Details.
+
+Privates npm unterstützt Tags bei der Veröffentlichung, aber keine separate veränderliche Tag-/Unpublish-API. Privates Cargo hat keine Yank-API. Privates PyPI akzeptiert ein begrenztes kanonisches PEP-440-Profil ohne Epoch; der native Nachweis gilt für Wheels, direkte Dependency-URLs werden abgelehnt. Maven unterstützt unveränderliche Release-Dateien und ihren Bezug, ohne `mvn deploy` oder SNAPSHOT. Go benötigt für native GOAUTH-Zugangsdaten HTTPS und bietet weder Upstream-Mirror noch Prüfsummendatenbank-Verifikation. Die [Support-Matrix](docs/support-matrix.md) nennt die exakt geprüften Clients und offenen Funktionen.
 
 ### Packory als Paketquelle nutzen
 
@@ -111,15 +115,16 @@ flowchart LR
   Out --> Catalog
 ```
 
-NuGet und npm behalten ihre **eigenen Protokolle**, teilen sich aber Katalog und Speicher. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architektur](docs/architecture.md).
+Jeder Adapter behält sein natives Protokoll und verwendet gemeinsame Autorisierung, Persistenz und Recovery. Schema V10 enthält das private Artefakt-Ledger und OCI-Tag-Referenzen; npm/Cargo/PyPI speichern Protokollmetadaten und originale Paketbytes zusammen in einem geprüften unveränderlichen Bundle. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Architektur](docs/architecture.md), [Feed-Betrieb](docs/feeds.md) und [S3](docs/s3.md).
 
 ## Einschränkungen und Sicherheit
 
 - NuGet und npm unterstützen wesentliche Registry-Abläufe, aber **nicht alle Protokollfunktionen**. Die konkret verwendeten Clients und Versionen müssen getestet werden.
 - Die Suche umfasst nur lokal indexierte Artefakte. Aktuelle Upstream-Metadaten und noch nicht gecachte Downloads können Netzwerkzugriff benötigen.
-- Statische Tokens sind keine individuellen Benutzerkonten. **OIDC-JWT-Prüfung ist implementiert; Browser-SSO/BFF, paketbezogene Rechte, persönliche Akteurszuordnung, vollständige/unveränderbare Audit-Protokolle und Hochverfügbarkeit fehlen noch.** Das vorhandene Admin-Audit erfasst **erfolgreiche Veröffentlichungen**, aber weder alle Aktionen noch verweigerte Versuche.
+- Statische Tokens sind keine individuellen Benutzerkonten. **OIDC-JWT-Prüfung ist implementiert; Browser-SSO/BFF, paketbezogene Rechte, persönliche Akteurszuordnung, vollständige/unveränderbare Audit-Protokolle und Hochverfügbarkeit fehlen noch.** Das Admin-Audit erfasst erfolgreiche Veröffentlichungen und ausgewählte Verwaltungsaktionen einschließlich Feed-Lebenszyklus, aber nicht jede Anfrage oder verweigerte Zugriffe.
 - Konfigurierbare private NuGet-ID-Präfixe und npm-Scopes können einen Rückgriff auf öffentliche Registries für reservierte Namensräume verhindern. Das ist **keine vollständige Paket- oder Malware-Sicherheitsrichtlinie**. Signaturdurchsetzung, Cache-Eviction und automatische Lizenzkonformitätsprüfung fehlen weiterhin.
-- **Cargo, PyPI, OCI und globale Maven-Release-Dateien sind experimentell implementiert.** PostgreSQL und S3 sind auswählbare Backends; automatische Datenmigration und verteilte DB-/Blob-Transaktionen fehlen. Ein eingeschränkter lesender Mehrinstanzmodus existiert, **mehrere gleichzeitig schreibende Instanzen sind nicht unterstützt**.
+- Private Hosted-Feeds besitzen getrennte Grants und Speicheridentitäten. Proxy-/Group-Routing, private Skills, Feed-bezogene MCP-Suche, Kapazitätsabrechnung pro Feed und browsergestützte Rechteverwaltung sind weiterhin offen.
+- **Native Adapter besitzen einen begrenzten Funktionsumfang.** PostgreSQL und S3 sind auswählbare Backends; automatische Migration von SQLite/Dateisystem zu PostgreSQL/S3 und verteilte DB-/Blob-Transaktionen fehlen. Ein eingeschränkter lesender Mehrinstanzmodus existiert, **mehrere gleichzeitig schreibende Instanzen sind nicht unterstützt**.
 
 Nach Tokenrolle begrenzte Schreibzugriffe ergänzen die Schutzmaßnahmen, **ersetzen aber keine Ratenbegrenzung am Reverse-Proxy**. Sperren innerhalb eines Prozesses garantieren **keine Konsistenz über mehrere Instanzen**. Der Speicherabgleich beim Start kann ausgewählte inkonsistente Artefakte erkennen oder isolieren, ersetzt aber keine geprüften Backups. Der Standard-Docker-Port ist nur über Loopback erreichbar. Für gemeinsame Installationen sind HTTPS und explizite Zugriffskontrollen erforderlich. Tokens sicher verwahren, Logging und Upstream-Netzwerkzugriff prüfen sowie **Metadatenbank und Artefaktspeicher konsistent** sichern. Nicht vertrauenswürdige Skills oder Pakete dürfen nicht auf dem Server ausgeführt werden. Siehe [Sicherheit und Betrieb](docs/operations.md).
 
@@ -136,6 +141,8 @@ bash scripts/smoke-ecosystems.sh
 ```
 
 Die [CI](.github/workflows/ci.yml) führt Build-, Integrations- und [echte CLI-Veröffentlichungstests](scripts/smoke-hosted.sh) aus: `dotnet nuget push` mit anschließendem isoliertem `dotnet restore/build` sowie `npm publish` für ein Scoped Package mit anschließendem `npm install` und `npm ci` in einem frischen Cache. Zugangsdaten entstehen nur temporär im Test. Die CI testet zusätzlich Cargo Publish/Consumption, einen echten pip-Installationslauf mit gehosteter transitiver Abhängigkeit und einen Docker-OCI-Push/Pull-Test mit lokal erstelltem Scratch-Image. Ein [separater Live-Smoke-Workflow](.github/workflows/smoke-live.yml) prüft öffentliche Upstream-Registries. Ein bestandener CLI-Test bedeutet noch keine vollständige Protokollkompatibilität.
+
+Die privaten Feed-Tests ergänzen zwei Feeds mit gleichen Koordinaten und verschiedenen Bytes, exakte Berechtigungsfehler, leere Clientcaches und die jeweils dokumentierten Neustartprüfungen. [E0-Abnahme](docs/e0-acceptance.md) ordnet jedem Adapter Tests und Befehle zu, trennt lokale Ergebnisse von offenen CI-/Provider-Läufen und nennt die tatsächlich verwendeten Clientversionen.
 
 ## Dokumentation und Mitwirkung
 

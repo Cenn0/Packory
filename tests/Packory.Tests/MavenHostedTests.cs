@@ -380,7 +380,7 @@ public sealed class MavenHostedTests
             Assert.Single(db.MavenVersions("org.example", "fixture"));
             db.Initialize();
             Assert.Equal(record, db.GetMavenAsset(record.Path));
-            Assert.Equal(9, SchemaVersionGuard.Current);
+            Assert.Equal(10, SchemaVersionGuard.Current);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

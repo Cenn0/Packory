@@ -4,14 +4,14 @@ using Npgsql;
 namespace Packory;
 
 /// <summary>
-/// Explicit forward-only database versions. V1 is the historical global-catalog
-/// schema; V2 adds legacy feed inventory; V3 adds immutable NuGet SHA-512
-/// publication-time records. No native routes or feed isolation change.
+/// Explicit forward-only database versions. V10 completes the immutable private
+/// artifact ledger and adds repository-scoped OCI tags, while retaining all
+/// historical global and private-feed rows and physical blob identities.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 9;
+    public const int Current = 10;
 
     private static int RequireKnown(object? value)
     {
@@ -177,6 +177,36 @@ public static class SchemaVersionGuard
             ON feed_assets(feed_id,kind,name,version);
         """;
 
+    // V10: all delivered private hosted adapters share one immutable ledger.
+    // Zero bytes are valid OCI blob content; other artifact kinds remain nonempty.
+    private const string SqliteFeedAssetV10Migration = """
+        CREATE TABLE feed_assets_v10_new (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            kind TEXT NOT NULL CHECK(kind IN ('raw','maven','go','npm','cargo','pypi','oci')),
+            path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+            media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size > 0 OR (kind='oci' AND size=0)),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,kind,path)
+        );
+        INSERT INTO feed_assets_v10_new
+            (feed_id,kind,path,name,version,media_type,sha256,size,created_at)
+        SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+        FROM feed_assets;
+        DROP TABLE feed_assets;
+        ALTER TABLE feed_assets_v10_new RENAME TO feed_assets;
+        CREATE INDEX feed_assets_identity ON feed_assets(feed_id,kind,name,version);
+        """;
+
+    private const string FeedOciTagSchema = """
+        CREATE TABLE IF NOT EXISTS feed_oci_tags (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL, tag TEXT NOT NULL, digest TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,name,tag)
+        );
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -320,6 +350,19 @@ public static class SchemaVersionGuard
             if (violations.Read())
                 throw new InvalidOperationException("Foreign-key violation after V9 feed migration.");
         }
+        if (version < 10)
+        {
+            using var migration = connection.CreateCommand();
+            migration.Transaction = tx;
+            migration.CommandText = SqliteFeedAssetV10Migration + FeedOciTagSchema;
+            migration.ExecuteNonQuery();
+            using var check = connection.CreateCommand();
+            check.Transaction = tx;
+            check.CommandText = "PRAGMA foreign_key_check";
+            using var violations = check.ExecuteReader();
+            if (violations.Read())
+                throw new InvalidOperationException("Foreign-key violation after V10 feed migration.");
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -433,6 +476,18 @@ public static class SchemaVersionGuard
                 ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_kind_check
                     CHECK(kind IN ('raw','maven','go'));
                 """, connection, tx);
+            schema.ExecuteNonQuery();
+        }
+        if (version < 10)
+        {
+            using var schema = new NpgsqlCommand("""
+                ALTER TABLE feed_assets DROP CONSTRAINT IF EXISTS feed_assets_kind_check;
+                ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_kind_check
+                    CHECK(kind IN ('raw','maven','go','npm','cargo','pypi','oci'));
+                ALTER TABLE feed_assets DROP CONSTRAINT IF EXISTS feed_assets_size_check;
+                ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_size_check
+                    CHECK(size > 0 OR (kind='oci' AND size=0));
+                """ + FeedOciTagSchema, connection, tx);
             schema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(

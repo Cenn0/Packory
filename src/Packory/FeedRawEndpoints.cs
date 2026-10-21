@@ -108,7 +108,11 @@ public static class FeedRawEndpoints
             if (asset is null) return Results.NotFound();
             if (!FeedAssetEntry.Valid(asset) || asset.Size > cfg.MaxArtifactBytes)
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-            var stored = blobs.Existing(BlobKey(feedId, name, version));
+            var key = BlobKey(feedId, name, version);
+            if (!await ArtifactDigests.MatchesRemoteAsync(blobs, key, "sha256",
+                Convert.FromHexString(asset.Sha256), asset.Size, cfg.MaxArtifactBytes, ctx.RequestAborted))
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            var stored = blobs.Existing(key);
             if (stored is null || !await ArtifactDigests.MatchesSha256Async(
                 stored, asset.Sha256, asset.Size, ctx.RequestAborted))
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

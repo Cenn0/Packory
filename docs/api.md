@@ -1,6 +1,8 @@
 # API and native client compatibility (experimental)
 
-**Go hosted:** publish using authenticated multipart POST `/api/go/modules` (module, version, mod, zip, optional time). A 201 response includes `zipSha256` (compressed archive digest) and `zipH1` (Go's locally computed module-content hash; not checksum-database verification). Native clients consume `/go/{encoded-module}/@v/list`, `.info`, `.mod`, `.zip`, and `/@latest`. See [Go hosted guide](go-proxy.md). Upstream mirroring and per-feed Go isolation are not implemented.
+**Hosted feeds:** NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw have independent private routes and exact feed grants. Their native route table is [below](#private-hosted-feed-api-e0), with limits in [feed operations](feeds.md). The current change's complete CI/provider/recovery acceptance is tracked in [E0 acceptance](e0-acceptance.md).
+
+**Go hosted:** global publication uses multipart POST `/api/go/modules`; private publication uses `/feeds/{id}/api/go/modules` (module, version, mod, zip, optional time). Responses include the archive SHA-256 and locally computed Go `h1:` integrity; this is not external checksum-database verification. Native clients consume `/go/` or the authorized `/feeds/{id}/go/` root. Upstream mirroring remains separate E3 work. See [global Go](go-proxy.md) and [private Go](feeds.md#go-modules).
 
 All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `http://localhost:8080` for loopback-only development. Registry URLs embed the configured public origin and must be routable by the client.
 
@@ -10,13 +12,15 @@ Three optional environment variables define independent static permissions:
 
 | Variable | Allowed operations |
 | --- | --- |
-| `PACKORY_ADMIN_TOKEN` | Read, write, future admin operations |
-| `PACKORY_WRITE_TOKEN` | Read and publish |
-| `PACKORY_READ_TOKEN` | Read |
+| `PACKORY_ADMIN_TOKEN` | Global/private read, write and administrator operations |
+| `PACKORY_WRITE_TOKEN` | Global read and publish, subject to configured namespace policy |
+| `PACKORY_READ_TOKEN` | Global read |
 
 Token values must be **at least 32 characters**, distinct, and delivered via `Authorization: Bearer <token>` or (for NuGet publish) `X-NuGet-ApiKey: <token>`. NuGet native restore can also authenticate using HTTP Basic where the password is the token. Tokens are compared in constant time after SHA-256 hashing in memory. No built-in login or browser session is implemented.
 
 `PACKORY_ANONYMOUS_READ=true` by default. Setting it to `false` blocks anonymous registry and catalog requests. Health endpoints and the dashboard HTML remain public. Browser clients must supply a Bearer token; some native clients need additional configuration. Authentication must be protected with HTTPS except for loopback testing.
+
+Private hosted routes always authenticate, regardless of anonymous global read configuration. They require an exact managed `feed:{id}:read`/`feed:{id}:publish` grant or a corresponding validated OIDC feed claim; generic static read/write tokens do not grant access. Publish permits same-feed read. When anonymous global reads are disabled, scoped managed credentials cannot read global registries or catalog data. The authenticated OCI `/v2/` handshake does not confer repository permission. See [feed authorization](feeds.md#exact-feed-authorization).
 
 ## Private namespace reservations
 
@@ -28,13 +32,15 @@ Optional `PACKORY_DENIED_NUGET_PREFIXES` and `PACKORY_DENIED_NPM_SCOPES` configu
 
 ## Administrative audit and write throttling
 
-`GET /api/admin/audit?limit=50&before=<exclusive-id>` returns up to 100 successful hosted publish events, ordered newest first. **Only `PACKORY_ADMIN_TOKEN` can read this endpoint**; a write token receives 403, no token receives 401. Event fields: `id`, `action`, `kind`, `name`, `version`, `actor`, `createdAt`. `actor` is a static credential class (`admin-token` or `write-token`), not a person. Tokens, passwords, IP addresses and email addresses are not written into audit rows. Audit creation is part of the same SQLite transaction as hosted metadata publication, but blob storage remains outside SQLite transactions.
+`GET /api/admin/audit?limit=50&before=<exclusive-id>` returns up to 100 events, newest first, including successful hosted publications and selected management actions such as feed lifecycle changes. Administrator access is required; an ordinary write token receives 403 and missing credentials receive 401. Fields are `id`, `action`, `kind`, `name`, `version`, `actor` and `createdAt`. Actors identify credential classes or managed-token IDs rather than a person. Tokens, passwords, IP addresses and email addresses are not written into these rows. Publication metadata and its audit event share a metadata transaction; blob storage remains outside that transaction.
 
 Writes to NuGet push, npm publish and Skills import are subject to `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` (default `60`) separately per credential class. Requests exceeding the limit receive HTTP 429. Since the limiter is in-process, its counters reset on restart and it does not coordinate multiple instances; it is not a replacement for upstream rate limiting at the reverse proxy.
 
 ## Native-client compatibility evidence
 
 The PR CI executes `scripts/smoke-hosted.sh` with .NET 10 and npm under Node.js 22: `dotnet pack` / `dotnet nuget push` for a privately reserved package, then a NuGet source-cleared project restore/build; plus `npm publish` for `@packory-smoke/demo`, then unauthenticated `npm install` and fresh-cache `npm ci`. The source restrictions prevent public registry fallback in these tests. These are tested behaviors, not certification of the full native protocol. `scripts/smoke-nuget.sh` and `scripts/smoke-npm.sh` remain external mirror acceptance tests in a separate scheduled GitHub workflow.
+
+Private feed tests additionally exercise independently authorized same-name revisions in two feeds. Native npm 11.9.0, Go 1.24.13, Cargo 1.99.1, Python 3.12/pip 26.2.1/Twine 6.2.0 and Helm 3.22.0 have passed the documented local SQLite/filesystem scenarios. These versioned observations do not establish other client/provider combinations. Full commands, per-scenario coverage and pending gates are in [E0 acceptance](e0-acceptance.md).
 
 ## NuGet v3
 
@@ -91,7 +97,7 @@ Skill imports validate required `name`/`description` metadata and bounded ZIP co
 
 ## HTTP error codes
 
-Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient token permission, `404` absent package/skill, `409` version already exists, `413` artifact too large, `502` upstream/error data, `504` upstream timeout. Errors do not intentionally expose environment secrets, connection strings, or upstream credentials. Inconsistent unindexed/missing local immutable blobs fail closed (502) rather than silently serving or substituting bytes from another origin. Readiness is 503 if a hosted blob is missing at startup. npm proxy tarballs require an upstream `sha512-` integrity or SHA-1 `shasum` claim that matches the downloaded bytes.
+Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient permission, `404` absent package/skill or authorized inactive feed, `409` immutable revision conflict, `413` artifact too large, `502` upstream/error data, `503` unavailable committed content, and `504` upstream timeout. For private routes, authorization precedes feed/package existence checks: a foreign-feed credential receives 403 rather than learning whether the target exists. Corrupted/missing committed private bundles fail closed with 503; they are never replaced from another origin. Existing global adapters retain their documented error profiles. Readiness is 503 if a hosted blob is missing at startup. npm proxy tarballs require upstream SHA-512 integrity or SHA-1 shasum claims that match the bytes.
 
 ## OCI upload and integrity contract
 
@@ -109,8 +115,10 @@ returns **429** with Retry-After. Existing artifact size limits still return 413
 A process restart can resume current-format sessions on the same data directory;
 old session formats without committed offsets are preserved but not trusted.
 Filesystem OCI digest corruption is refused with **503** on read/mount, not
-returned as artifact bytes. This does not add independent private-feed read
-permissions, a Bearer grant service, multi-node sessions or provider certification.
+returned as artifact bytes. Private OCI applies the same bounded upload model
+under `/v2/feeds/{id}/{repository}/` with exact feed/repository session identity.
+A Bearer-token issuer, multi-node sessions and broader provider qualification
+remain outside this profile.
 Referrers honor `artifactType` before setting OCI-Filters-Applied. Accepted subject
 associations return OCI-Subject; `tags/list?n=0` returns an empty page.
 
@@ -131,33 +139,53 @@ point-in-time observation, never an automatic production certification. See
 for interpretation, caveats and a redacted invocation example.
 
 
-## Hosted NuGet feed API (V4 experimental)
+## Private hosted feed API (E0)
 
-`POST /api/v1/admin/feeds/{id}/activate` enables a reviewed **private
-NuGet hosted** draft only. `POST .../{id}/deactivate` disables client
-traffic while retaining immutable package bytes and metadata. Both are
-admin-only, audited and rate-limited. Other feed kinds remain drafts.
-
-Under `/feeds/{id}/nuget/v3/` the supported native operations are:
-`GET index.json`, `GET flatcontainer/{package}/index.json`,
-`GET flatcontainer/{package}/{version}/{file}` for exact
-`.nupkg`, `.nupkg.sha512` and `.nuspec`, plus
-`PUT/POST push` with the existing multipart NuGet package contract.
-There is **no** mirror fetch, public anonymous read, cross-feed
-fallback or generic catalog exposure.
+Administrator lifecycle routes are `POST /api/v1/admin/feeds/drafts`,
+`POST /api/v1/admin/feeds/{id}/activate`, `POST .../{id}/deactivate` and
+`DELETE /api/v1/admin/feeds/drafts/{id}` for a never-activated, completely
+unreferenced disabled draft. A previously activated feed ID stays reserved
+even when empty/deactivated, preserving the identity of managed/OIDC grants;
+reactivation remains available. Managed grants and pending publication intents
+also prevent draft deletion.
+Activation supports private hosted NuGet, npm, Cargo, PyPI, OCI, Maven, Go
+and Raw. Proxy and Skill drafts stay disabled; group mode is not accepted.
+Deactivation preserves package data and denies further native traffic.
+Inventory includes `isolatedHostedKinds`; the legacy
+`isolationSupported: false` compatibility field still describes the
+non-routing inventory/default descriptors.
 
 Use revocable tokens via `POST /api/admin/tokens` with
 `{"role":"read","namespace":"feed:alpha-feed:read","expiresInHours":1}`
-or the analogous `write/publish` grant. Never check issued tokens into
-source files. Generic `packory.read`, legacy static read/write
-credentials and tokens for other feeds do not grant private feed access.
-See [feed operations](feeds.md) for precise limitations.
+or `role: "write"` and `namespace: "feed:alpha-feed:publish"`.
+Every route below enforces exact feed permission, active kind and hosted mode.
+There is no anonymous, cross-feed, global or upstream fallback.
+
+| Adapter | Native private operations | Bounded profile |
+| --- | --- | --- |
+| NuGet | `/feeds/{id}/nuget/v3/index.json`, flat-container lists/files and `PUT/POST push` | Immutable nupkg/SHA-512/nuspec; no private registration/search or symbols |
+| npm | `PUT /feeds/{id}/npm/{package}`; `GET/HEAD` packument, version/tag and `{package}/-/{version}.tgz` | One version/attachment; tags supplied during publish; no mutable tag API or unpublish |
+| Cargo | `/feeds/{id}/cargo/index/config.json`, sparse index paths; `PUT .../cargo/api/v1/crates/new`; `GET/HEAD .../crates/{name}/{version}/download` | Authenticated sparse registry, immutable metadata/crate bundle; no yank |
+| PyPI | `GET/HEAD /feeds/{id}/pypi/simple/` and project pages; `/files/{name}/{filename}`; `POST .../pypi/legacy/` | Simple HTML/JSON and Twine upload; bounded canonical PEP 440 without epochs; no direct dependency URLs or extra-index fallback |
+| OCI | `/v2/feeds/{id}/{repository}/blobs/...`, `/manifests/{reference}`, `/tags/list`, `/referrers/{digest}` | SHA-256 digest assets, mutable tags and durable sessions; alternate descriptor URLs rejected, inline data digest/size-bound; no blob/manifest deletion |
+| Maven | `PUT/GET/HEAD /feeds/{id}/maven/{release-path}`, generated `maven-metadata.xml` and checksum sidecars | Immutable validated release files; matching checksum acknowledgements; no mutable metadata PUT/deploy/SNAPSHOT |
+| Go | `POST /feeds/{id}/api/go/modules`; `GET /feeds/{id}/go/{module}/@v/list`, `.info/.mod/.zip`, `@latest` | Immutable triplet; native GOAUTH over HTTPS; no upstream mirror or external checksum trust |
+| Raw | `PUT/GET/HEAD /feeds/{id}/raw/{name}/{version}`; `GET .../metadata` | Immutable generic bytes with SHA-256/range reads, without a native package format |
+
+OCI preserves the native `/v2/` prefix, so `feeds/` is reserved as a global
+OCI repository prefix. Other legacy roots are retained. Schema V10 records
+scoped asset identity and separate OCI tags. npm/Cargo/PyPI publish metadata
+and original bytes in one immutable bundle; Go publishes one immutable
+triplet. [Feed operations](feeds.md) gives client configuration, exact
+storage/authorization semantics and supported features. Private feed records
+are excluded from global REST/MCP discovery; [MCP-P5](mcp-roadmap.md) is separate.
 
 
 ## MCP
 
 The MCP Registry accepts a bounded, inert `server.json` descriptor with remote and/or package distributions; package descriptors never trigger installation, execution, interpolation or outbound requests. See [Registry profile and rejected shapes](mcp-registry-catalog.md). Full official schema conformance, publisher verification and signatures remain separate roadmap tasks.
- artifact and Skill discovery
+
+### Artifact and Skill discovery
 
 The authenticated Streamable HTTP endpoint is `/mcp`. It requires an explicit global Bearer read credential even when REST reads are anonymous. Managed credentials restricted to a feed or publishing namespace receive 403. Native C# SDK tests cover MCP revisions 2025-06-18, 2025-11-25 and 2026-07-28.
 
@@ -180,7 +208,7 @@ REST follows explicit anonymous-read configuration and otherwise requires global
 
 ## MCP Registry metadata
 
-Packory provides a versioned, **remote-only** MCP server.json catalog separate from its own Streamable HTTP MCP service. For operator staging and digest-bound approval/revocation, use `POST /api/v1/admin/mcp/servers/stage` (raw 16 KiB server.json) and `POST /api/v1/admin/mcp/servers/decide` (name, version, sha256, action and reason). Both require an administrator; publish/revoke decisions are immutable-key and auditable.
+Packory provides a versioned, bounded **remote/package** MCP server.json catalog separate from its own Streamable HTTP MCP service. For operator staging and digest-bound approval/revocation, use `POST /api/v1/admin/mcp/servers/stage` (raw 16 KiB server.json) and `POST /api/v1/admin/mcp/servers/decide` (name, version, sha256, action and reason). Both require an administrator; publish/revoke decisions are immutable-key and auditable.
 
 The supported Registry v0.1 read contract provides `GET /v0.1/servers`, `GET /v0.1/servers/{serverName}/versions` and `GET /v0.1/servers/{serverName}/versions/{version}` (exact or `latest`). Lists use official `servers`/`metadata` envelopes and opaque `nextCursor`; per-entry Packory review information lives in `_meta["io.github.cenn0.packory/registry"]`. Search is literal and name-only, limits are 1–100/default 30. Encode a complete server name as one path segment. Unsupported synchronization/deleted-record filters are explicitly rejected.
 

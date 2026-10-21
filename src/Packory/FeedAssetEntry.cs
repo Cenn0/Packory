@@ -14,6 +14,8 @@ public sealed record FeedAssetEntry(string FeedId, string Kind, string Path,
         "raw" => $"feeds/{entry.FeedId}/raw/{entry.Name}/{entry.Version}/payload.blob",
         "maven" => $"feeds/{entry.FeedId}/maven/{entry.Path}",
         "go" => FeedGoBundle.BundleKey(entry.FeedId, entry.Name, entry.Version),
+        "npm" or "cargo" or "pypi" => FeedPackageStore.BlobKey(entry.FeedId, entry.Kind, entry.Path),
+        "oci" => FeedOciEndpoints.BlobKey(entry),
         _ => throw new ArgumentException("Unsupported private artifact kind.")
     };
 
@@ -26,7 +28,7 @@ public sealed record FeedAssetEntry(string FeedId, string Kind, string Path,
     public static bool Valid(FeedAssetEntry? item)
     {
         if (item is null || !FeedDefinition.ValidId(item.FeedId) ||
-            !ArtifactDigests.ValidSha256(item.Sha256) || item.Size <= 0 ||
+            !ArtifactDigests.ValidSha256(item.Sha256) || (item.Size < 0 || (item.Size == 0 && item.Kind != "oci")) ||
             !DateTimeOffset.TryParse(item.CreatedAt, out _))
             return false;
 
@@ -44,6 +46,10 @@ public sealed record FeedAssetEntry(string FeedId, string Kind, string Path,
                 item.MediaType == MavenEndpoints.AssetMediaType(coordinates.Extension);
 
         if (item.Kind == "go") return FeedGoBundle.Valid(item);
+        if (item.Kind == "npm") return FeedNpmEndpoints.ValidAsset(item);
+        if (item.Kind == "cargo") return FeedCargoEndpoints.ValidAsset(item);
+        if (item.Kind == "pypi") return FeedPyPiEndpoints.ValidAsset(item);
+        if (item.Kind == "oci") return FeedOciEndpoints.ValidAsset(item);
 
         return false;
     }

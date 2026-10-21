@@ -74,6 +74,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('maven_assets') IS NOT NULL
                     AND to_regclass('go_modules') IS NOT NULL
                     AND to_regclass('feed_assets') IS NOT NULL
+                    AND to_regclass('feed_oci_tags') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -488,6 +489,64 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=@feed AND kind=@kind
+              AND (CAST(@name AS TEXT) IS NULL OR name=@name) ORDER BY name,version,path
+            """, null, ("feed", feedId), ("kind", kind), ("name", (object?)name ?? DBNull.Value));
+        using var reader = cmd.ExecuteReader();
+        var result = new List<FeedAssetEntry>();
+        while (reader.Read()) result.Add(ReadFeedAsset(reader));
+        return result;
+    }
+
+    public string? GetFeedOciTag(string feedId, string name, string tag)
+    {
+        using var db = Open();
+        using var cmd = Command(db,
+            "SELECT digest FROM feed_oci_tags WHERE feed_id=@feed AND name=@name AND tag=@tag",
+            null, ("feed", feedId), ("name", name), ("tag", tag));
+        return cmd.ExecuteScalar() as string;
+    }
+
+    public IReadOnlyList<string> FeedOciTags(string feedId, string name)
+    {
+        using var db = Open();
+        using var cmd = Command(db,
+            "SELECT tag FROM feed_oci_tags WHERE feed_id=@feed AND name=@name ORDER BY tag",
+            null, ("feed", feedId), ("name", name));
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public void SetFeedOciTag(string feedId, string name, string tag, string digest, string actor)
+    {
+        if (!FeedDefinition.ValidId(feedId) || !OciEndpoints.ValidRepository(name) ||
+            !OciEndpoints.ValidReference(tag) || OciEndpoints.ValidDigest(tag) || !OciEndpoints.ValidDigest(digest))
+            throw new InvalidOperationException("Invalid private OCI tag.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            INSERT INTO feed_oci_tags(feed_id,name,tag,digest,updated_at)
+            SELECT @feed,@name,@tag,@digest,@at
+            WHERE EXISTS (SELECT 1 FROM feeds WHERE id=@feed AND kind='oci'
+                AND mode='hosted' AND visibility='private' AND enabled=1)
+              AND EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=@feed AND kind='oci'
+                AND name=@name AND version=@digest AND path=@path)
+            ON CONFLICT(feed_id,name,tag) DO UPDATE SET digest=excluded.digest,updated_at=excluded.updated_at
+            """, tx, ("feed", feedId), ("name", name), ("tag", tag), ("digest", digest),
+                ("path", FeedOciEndpoints.AssetPath(name, digest, true)), ("at", DateTimeOffset.UtcNow.ToString("O")));
+        if (cmd.ExecuteNonQuery() != 1)
+            throw new InvalidOperationException("Private OCI tag requires an active feed and committed manifest.");
+        Audit(db, tx, "tag", "feed-oci", feedId + "/" + name, tag, actor);
+        tx.Commit();
+    }
+
     public IReadOnlyList<string> FeedMavenVersions(string feedId, string groupId, string artifactId)
     {
         using var db = Open();
@@ -579,11 +638,19 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
     {
         if (feed.Enabled || feed.Visibility != "private" || feed.Mode is not ("hosted" or "proxy"))
             throw new ArgumentException("Only disabled private draft feeds may be created.", nameof(feed));
+        // Older versions could remove the feed row while retaining its
+        // activation history, grants or journal. Those IDs cannot be reassigned.
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var insert = Command(db, """
             INSERT INTO feeds(id,kind,mode,visibility,display_name,enabled,created_at,updated_at)
-            VALUES(@id,@kind,@mode,'private',@name,0,@at,@at)
+            SELECT @id,@kind,@mode,'private',@name,0,@at,@at
+            WHERE NOT EXISTS (SELECT 1 FROM audit_events
+                WHERE action='feed-hosted-activate' AND kind='feed' AND name=@id)
+                AND NOT EXISTS (SELECT 1 FROM managed_tokens
+                    WHERE namespace IN ('feed:' || @id || ':read', 'feed:' || @id || ':publish'))
+                AND NOT EXISTS (SELECT 1 FROM publication_intents
+                    WHERE kind LIKE 'feed-%' AND substr(name,1,length(@id)+1)=@id || '|')
             ON CONFLICT(id) DO NOTHING
             """, tx, ("id", feed.Id), ("kind", feed.Kind), ("mode", feed.Mode),
                 ("name", feed.DisplayName), ("at", feed.CreatedAt));
@@ -595,6 +662,9 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
 
     public bool TryDeleteDraftFeed(string id, string actor)
     {
+        // Activated IDs are durable authorization identities, including for
+        // externally signed OIDC grants. The append-only activation audit is
+        // their tombstone; imported grants and pending evidence also retain IDs.
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var delete = Command(db, """
@@ -606,6 +676,12 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                 AND NOT EXISTS (SELECT 1 FROM feed_upstreams WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_nuget_versions WHERE feed_id=@id)
                 AND NOT EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=@id)
+                AND NOT EXISTS (SELECT 1 FROM audit_events
+                    WHERE action='feed-hosted-activate' AND kind='feed' AND name=@id)
+                AND NOT EXISTS (SELECT 1 FROM managed_tokens
+                    WHERE namespace IN ('feed:' || @id || ':read', 'feed:' || @id || ':publish'))
+                AND NOT EXISTS (SELECT 1 FROM publication_intents
+                    WHERE kind LIKE 'feed-%' AND substr(name,1,length(@id)+1)=@id || '|')
             """, tx, ("id", id));
         if (delete.ExecuteNonQuery() != 1) return false;
         Audit(db, tx, "feed-draft-delete", "feed", id, "", actor);
@@ -621,7 +697,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
 
     public bool TrySetHostedFeedEnabled(string id, string kind, bool enabled, string actor)
     {
-        if (!FeedDefinition.ValidId(id) || kind is not ("nuget" or "raw" or "maven" or "go")) return false;
+        if (!FeedDefinition.ValidId(id) || !FeedDefinition.SupportsIsolatedHosted(kind)) return false;
         using var db = Open();
         using var tx = db.BeginTransaction();
         using var cmd = Command(db, """

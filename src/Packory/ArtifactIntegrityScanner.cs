@@ -92,7 +92,7 @@ public sealed class ArtifactIntegrityScanner(
         {
             var valid = FeedAssetEntry.Valid(asset);
             refs.Add(new Reference("feed-" + asset.Kind, asset.Name,
-                asset.Version, asset.Kind == "maven" ? asset.Path : null,
+                asset.Version, asset.Path,
                 "hosted", valid ? FeedAssetEntry.BlobKey(asset) : null,
                 valid ? asset.Sha256 : null, valid ? asset.Size : null, asset.FeedId));
         }
@@ -143,6 +143,8 @@ public sealed class ArtifactIntegrityScanner(
     {
         if (entry.Key is null || entry.Origin is not ("hosted" or "mirror"))
             return With(entry, "invalid_reference", "none");
+        var storedLimit = entry.Kind is "feed-npm" or "feed-cargo" or "feed-pypi"
+            ? FeedPackageStore.MaxStoredBytes(settings.MaxArtifactBytes) : settings.MaxArtifactBytes;
         try
         {
             if (blobs is S3BlobStore remote)
@@ -151,7 +153,7 @@ public sealed class ArtifactIntegrityScanner(
                 // local copy must not hide a changed S3 object.
                 var expectedRemote = await ExpectedAsync(entry, ct);
                 var probe = await remote.InspectRemoteAsync(entry.Key,
-                    expectedRemote?.Algorithm, settings.MaxArtifactBytes, ct);
+                    expectedRemote?.Algorithm, storedLimit, ct);
                 if (!probe.Exists) return With(entry, "missing", "none");
                 if (probe.ExceedsLimit) return With(entry, "size_limit", "none");
                 if (expectedRemote is null)
@@ -173,7 +175,7 @@ public sealed class ArtifactIntegrityScanner(
             var path = blobs.Existing(entry.Key);
             if (path is null) return With(entry, "missing", "none");
             var size = new FileInfo(path).Length;
-            if (size > settings.MaxArtifactBytes)
+            if (size > storedLimit)
                 return With(entry, "size_limit", "none");
             var expected = await ExpectedAsync(entry, ct);
             if (expected is null) return With(entry, "unverifiable", "no-stored-digest");

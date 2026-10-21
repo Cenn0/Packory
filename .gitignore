@@ -25,3 +25,7 @@ NuGet.Config
 # Editor and OS
 .DS_Store
 .vscode/
+
+# Python test and smoke bytecode
+__pycache__/
+*.pyc

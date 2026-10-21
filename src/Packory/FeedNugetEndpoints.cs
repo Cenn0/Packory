@@ -78,7 +78,11 @@ public static class FeedNugetEndpoints
             if (revision is null) return Results.NotFound();
             if (!NugetDigest.Valid(revision.Sha512) || revision.Size < 0)
                 throw new InvalidDataException("Private feed has invalid immutable checksum metadata.");
-            var path = blobs.Existing(BlobKey(feedId, id, version)) ??
+            var key = BlobKey(feedId, id, version);
+            if (!await ArtifactDigests.MatchesRemoteAsync(blobs, key, "sha512",
+                Convert.FromBase64String(revision.Sha512), revision.Size, cfg.MaxArtifactBytes, ctx.RequestAborted))
+                throw new InvalidDataException("Remote private feed package integrity mismatch.");
+            var path = blobs.Existing(key) ??
                 throw new InvalidDataException("Private feed package bytes are missing.");
             if (!await NugetDigest.MatchesAsync(path,
                 new NugetDigest(revision.Sha512, revision.Size, "hosted"), ctx.RequestAborted))

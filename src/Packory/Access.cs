@@ -59,6 +59,21 @@ public static class Access
         return null;
     }
 
+    public static bool CanPingPrivateOci(HttpContext context, Settings settings)
+    {
+        if (RequireMcp(context, settings) is not null) return false;
+        var candidates = new List<string>();
+        if (context.Items[ManagedNamespaceKey] is string grant && ValidFeedGrant(grant))
+            candidates.Add(grant.Split(':')[1]);
+        if (settings.OidcEnabled && context.User.Identity?.IsAuthenticated == true)
+            candidates.AddRange(context.User.FindAll("packory_feed")
+                .Select(claim => claim.Value.Split(':')[0]).Where(FeedDefinition.ValidId));
+        var db = context.RequestServices.GetRequiredService<IPackageDatabase>();
+        return candidates.Any(id => db.Feed(id) is
+            { Kind: "oci", Mode: "hosted", Visibility: "private", Enabled: true } &&
+            RequireFeed(context, settings, id) is null);
+    }
+
     // A per-feed or package namespace managed token must never become a global
     // Raw catalog reader when the instance disables anonymous reads.
     public static IResult? RequireGlobalRaw(HttpContext context, Settings settings)
@@ -280,11 +295,18 @@ public static class Access
             }
             catch (FormatException) { }
         }
-        if (string.IsNullOrWhiteSpace(token) && context.Request.Path.StartsWithSegments("/cargo") &&
+        if (string.IsNullOrWhiteSpace(token) && (context.Request.Path.StartsWithSegments("/cargo") || IsPrivateCargoPath(context.Request.Path)) &&
             !string.IsNullOrWhiteSpace(auth) && !auth.Contains(' ') && !auth.Contains('\t'))
             token = auth; // Cargo's registry API uses a bare Authorization token.
         if (string.IsNullOrWhiteSpace(token)) token = context.Request.Headers["X-NuGet-ApiKey"].ToString();
         return !string.IsNullOrWhiteSpace(token) && token.Length <= 8192 ? token : null;
+    }
+
+    private static bool IsPrivateCargoPath(PathString path)
+    {
+        var pieces = (path.Value ?? "").Split('/');
+        return pieces.Length >= 4 && pieces[1] == "feeds" &&
+            FeedDefinition.ValidId(pieces[2]) && pieces[3] == "cargo";
     }
 
     private static bool Matches(string provided, string? expected)

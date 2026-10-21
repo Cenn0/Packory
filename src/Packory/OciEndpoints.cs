@@ -35,12 +35,13 @@ public static class OciEndpoints
         app.MapGet("/v2/", (Settings cfg, HttpContext ctx) =>
         {
             ctx.Response.Headers["Docker-Distribution-API-Version"] = "registry/2.0";
-            if (cfg.OciAuthenticatedPing && Access.Require(ctx, cfg, write: true) is { } pingDenied)
-            {
-                ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";
-                return pingDenied;
-            }
-            if (Access.Require(ctx, cfg) is { } denied)
+            // Preserve legacy ping policy, while allowing independently scoped
+            // private OCI clients to authenticate this data-free capability route.
+            var denied = cfg.OciAuthenticatedPing
+                ? Access.Require(ctx, cfg, write: true) : Access.Require(ctx, cfg);
+            if (denied is null && cfg.OciAuthenticatedPing)
+                denied = Access.Require(ctx, cfg);
+            if (denied is not null && !Access.CanPingPrivateOci(ctx, cfg))
             {
                 ctx.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Packory OCI\"";
                 return denied;
@@ -60,6 +61,8 @@ public static class OciEndpoints
                 return denied;
             }
             var value = resource ?? "";
+            if (value == "feeds" || value.StartsWith("feeds/", StringComparison.Ordinal))
+                return Error(404, "NAME_UNKNOWN", "Private feed route required");
             if (value.Length > 512 || value.Contains('\\') || value.Contains('%') ||
                 value.Split('/').Any(part => part is "." or ".."))
                 return Error(400, "NAME_INVALID", "Invalid OCI registry path");

@@ -22,7 +22,7 @@ jobs:
   test:
     name: Build and integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,6 +54,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_pg_s3_snapshot.py -v
           python3 -m unittest discover -s tests -p test_pg_s3_snapshot_safety.py -v
+          python3 -m unittest discover -s tests -p test_pg_s3_snapshot_feeds.py -v
       - name: Validate offline NVIDIA SkillSpector scan bridge
         run: |
           python3 -m py_compile workers/skillspector/worker.py
@@ -65,7 +66,7 @@ jobs:
       - name: Verify dashboard ecosystem parity with implemented catalog
         run: python3 -m unittest discover -s tests -p test_dashboard_contract.py -v
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-go.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-go.sh scripts/smoke-feed-nuget.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh scripts/smoke-feed-npm.sh scripts/smoke-feed-ecosystems.sh scripts/smoke-feed-oci.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
       - name: Exercise real private multi-feed NuGet publish and restore
@@ -86,6 +87,14 @@ jobs:
         run: bash scripts/smoke-feed-maven.sh
       - name: Exercise isolated private Go feeds with native Go CLI
         run: bash scripts/smoke-feed-go.sh
+      - name: Exercise isolated npm feeds with publish, install and fresh-cache ci
+        run: bash scripts/smoke-feed-npm.sh
+      - name: Exercise isolated Cargo and PyPI feeds with native publishers and consumers
+        run: bash scripts/smoke-feed-ecosystems.sh
+      - name: Verify offline restore across all eight private package kinds
+        run: python3 scripts/smoke-feed-recovery.py
+      - name: Exercise isolated OCI feeds with pinned Helm push, pull and restart
+        run: bash scripts/smoke-feed-oci.sh
       - name: Exercise real Helm OCI chart push and pull with pinned Helm 3
         run: bash scripts/smoke-oci-helm.sh
       - name: Exercise Docker with anonymous generic reads and forced OCI authenticated ping
