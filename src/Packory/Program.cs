@@ -434,7 +434,8 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     {
         var feedId = feedGrant.Split(':')[1];
         if (db.Feed(feedId) is not
-            { Kind: "nuget" or "raw" or "maven" or "go", Mode: "hosted", Visibility: "private", Enabled: true })
+            { Mode: "hosted", Visibility: "private", Enabled: true } tokenFeed ||
+            !FeedDefinition.SupportsIsolatedHosted(tokenFeed.Kind))
             return Results.BadRequest(new { error = "Feed grants require an active private hosted feed" });
     }
     var id = Guid.NewGuid().ToString("N");
@@ -506,6 +507,10 @@ FeedNugetEndpoints.Map(app);
 FeedRawEndpoints.Map(app);
 FeedMavenEndpoints.Map(app);
 FeedGoEndpoints.Map(app);
+FeedNpmEndpoints.Map(app);
+FeedCargoEndpoints.Map(app);
+FeedPyPiEndpoints.Map(app);
+FeedOciEndpoints.Map(app);
 RawEndpoints.Map(app);
 MavenEndpoints.Map(app);
 GoEndpoints.Map(app);

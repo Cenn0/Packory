@@ -174,28 +174,28 @@ import (
 func main() { fmt.Println(hello.Message()) }
 GO
 # Go's GOAUTH netrc lookup matches the HTTPS authority, including its port.
-# Caches and HOME must be independent to detect cross-feed cache contamination.
+# Credentials, module caches and build caches are independent for each feed.
 for feed in go-alpha go-beta; do
   if [ "$feed" = go-alpha ]; then READ="$A_READ"; EXPECT=alpha; else READ="$B_READ"; EXPECT=beta; fi
-  mkdir -p "$WORK/$feed/home" "$WORK/$feed/modcache"
+  mkdir -p "$WORK/$feed/home" "$WORK/$feed/modcache" "$WORK/$feed/buildcache"
   cp -a "$WORK/consumer" "$WORK/$feed/consumer"
   chmod 700 "$WORK/$feed/home"
   printf 'machine %s login packory password %s\n' "${TLSBASE#https://}" "$READ" >"$WORK/$feed/home/.netrc"
   chmod 600 "$WORK/$feed/home/.netrc"
   (
     cd "$WORK/$feed/consumer"
-    HOME="$WORK/$feed/home" NETRC="$WORK/$feed/home/.netrc" \
-      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc \
+    NETRC="$WORK/$feed/home/.netrc" \
+      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc GOENV=off GOWORK=off \
       GOPROXY="$TLSBASE/feeds/$feed/go" \
       GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
-      GOMODCACHE="$WORK/$feed/modcache" GOTOOLCHAIN=local \
+      GOMODCACHE="$WORK/$feed/modcache" GOCACHE="$WORK/$feed/buildcache" GOTOOLCHAIN=local \
       go mod download "$MODULE@$VERSION" >"$WORK/$feed-download.log" 2>&1
-    HOME="$WORK/$feed/home" NETRC="$WORK/$feed/home/.netrc" \
-      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc \
+    NETRC="$WORK/$feed/home/.netrc" \
+      SSL_CERT_FILE="$WORK/localhost.pem" GOAUTH=netrc GOENV=off GOWORK=off \
       GOPROXY="$TLSBASE/feeds/$feed/go" \
       GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
-      GOMODCACHE="$WORK/$feed/modcache" GOTOOLCHAIN=local \
-      go build -o "$WORK/$feed-client" ./... >"$WORK/$feed-build.log" 2>&1
+      GOMODCACHE="$WORK/$feed/modcache" GOCACHE="$WORK/$feed/buildcache" GOTOOLCHAIN=local \
+      go build -buildvcs=false -o "$WORK/$feed-client" ./... >"$WORK/$feed-build.log" 2>&1
   ) || {
     echo "Native Go client rejected $feed" >&2
     grep -Ei 'error|fail|unrecognized|status|unauthorized|forbidden' "$WORK/$feed-"*.log | tail -n 12 >&2 || true
@@ -203,7 +203,47 @@ for feed in go-alpha go-beta; do
   }
   test "$("$WORK/$feed-client")" = "$EXPECT"
 done
+
+# A rejected native request must fail on this single private proxy. Separate
+# module/build caches and disabled per-user Go settings prevent a cached module
+# or external GOPROXY/direct fallback from masking an authorization failure.
+native_rejection() {
+  local label="$1" expected="$2" token="$3" module="$4" version="$5" feed="${6:-go-alpha}"
+  local directory="$WORK/negative-$label"
+  mkdir -p "$directory/consumer" "$directory/modcache" "$directory/buildcache"
+  cp "$WORK/consumer/go.mod" "$directory/consumer/go.mod"
+  if [ -n "$token" ]; then
+    printf 'machine %s login packory password %s\n' \
+      "${TLSBASE#https://}" "$token" >"$directory/netrc"
+  else
+    : >"$directory/netrc"
+  fi
+  chmod 600 "$directory/netrc"
+  if (
+    cd "$directory/consumer"
+    NETRC="$directory/netrc" SSL_CERT_FILE="$WORK/localhost.pem" \
+      GOAUTH=netrc GOENV=off GOWORK=off \
+      GOPROXY="$TLSBASE/feeds/$feed/go" \
+      GOPRIVATE="example.com" GONOPROXY=none GOSUMDB=off \
+      GOMODCACHE="$directory/modcache" GOCACHE="$directory/buildcache" \
+      GOTOOLCHAIN=local \
+      go mod download "$module@$version" >"$directory/client.log" 2>&1
+  ); then
+    echo "Native Go $label unexpectedly succeeded" >&2
+    exit 1
+  fi
+  if ! grep -Eq "(^|[[:space:]])$expected([[:space:]]|$)" "$directory/client.log"; then
+    echo "Native Go $label did not return expected HTTP $expected" >&2
+    exit 1
+  fi
+}
+native_rejection unauthenticated 401 '' "$MODULE" "$VERSION"
+native_rejection foreign-feed 403 "$B_READ" "$MODULE" "$VERSION"
+native_rejection missing-module 404 "$A_READ" example.com/e0-private-missing "$VERSION"
+native_rejection missing-version 404 "$A_READ" "$MODULE" v1.9.9
+native_rejection missing-feed 404 "$ADMIN" "$MODULE" "$VERSION" go-missing
 admin_post "/api/v1/admin/feeds/go-alpha/deactivate" '' >/dev/null
 test "$(status -H "Authorization: Bearer $A_READ" "$A_URL")" = 404
 test "$(status -H "Authorization: Bearer $B_READ" "$B_URL")" = 200
-echo "E0 private Go: two-feed CLI download/build isolation, immutable bundles and auth passed."
+native_rejection deactivated-feed 404 "$A_READ" "$MODULE" "$VERSION"
+echo "E0 private Go: two-feed CLI download/build isolation, immutable bundles and native 401/403/404 failures passed."

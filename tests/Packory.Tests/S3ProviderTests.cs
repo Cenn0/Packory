@@ -115,7 +115,8 @@ public sealed class S3ProviderTests
                 });
             await sdk.PutBucketAsync(new PutBucketRequest { BucketName = bucket });
             var original = Encoding.UTF8.GetBytes("original canonical bytes");
-            var changed = Encoding.UTF8.GetBytes("remote object was changed");
+            var changed = original.ToArray();
+            changed[^1] ^= 0x20; // Same length: only the authoritative digest detects this change.
             const string filename = "remote_integrity-1.0.0-py3-none-any.whl";
             var file = new PyFileEntry("remote-integrity", "1.0.0", filename,
                 Convert.ToHexStringLower(SHA256.HashData(original)), original.Length);
@@ -125,6 +126,10 @@ public sealed class S3ProviderTests
                 new MemoryStream(original, writable: false), 4096, CancellationToken.None));
             var oldCache = store.Existing(key)!;
             Assert.Equal(original, await File.ReadAllBytesAsync(oldCache));
+            foreach (var algorithm in new[] { "sha256", "sha512" })
+                Assert.True(await ArtifactDigests.MatchesRemoteAsync(store, key, algorithm,
+                    algorithm == "sha256" ? SHA256.HashData(original) : SHA512.HashData(original),
+                    original.Length, 4096, CancellationToken.None));
 
             var scanner = new ArtifactIntegrityScanner(db, store, security, cfg);
             var initial = await scanner.ScanAsync(0, 1, CancellationToken.None);
@@ -139,6 +144,10 @@ public sealed class S3ProviderTests
                     InputStream = payload, AutoCloseStream = false
                 });
             Assert.Equal(original, await File.ReadAllBytesAsync(oldCache));
+            foreach (var algorithm in new[] { "sha256", "sha512" })
+                Assert.False(await ArtifactDigests.MatchesRemoteAsync(store, key, algorithm,
+                    algorithm == "sha256" ? SHA256.HashData(original) : SHA512.HashData(original),
+                    original.Length, 4096, CancellationToken.None));
             var corrupted = await scanner.ScanAsync(0, 1, CancellationToken.None);
             Assert.Equal("digest_mismatch", Assert.Single(corrupted.Items).State);
 

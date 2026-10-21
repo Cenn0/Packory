@@ -1,262 +1,320 @@
-# Feed control plane — E0 private hosted NuGet, Raw, Maven and Go (experimental)
+# Private hosted feeds — E0 package foundation
 
-Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and explicitly activated, private NuGet and Raw hosted adapters. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
+**Implemented:** independently routed private hosted NuGet, npm, Cargo, PyPI,
+OCI, Maven, Go and Raw feeds. **Current acceptance:** local native, provider,
+fault/restore and complete test suites have passed; the published-commit
+GitHub gate remains open in [E0 acceptance](e0-acceptance.md).
+The protocol profiles below describe available operations and their limits.
+Proxy feeds and private Skills remain disabled drafts; group routing and
+feed-aware MCP discovery are separate work.
 
-| ID | Kind | Mode | Wire behavior |
-| --- | --- | --- | --- |
-| `default-nuget` | NuGet | legacy | Existing `/nuget/v3/index.json` |
-| `default-npm` | npm | legacy | Existing `/npm/` |
-| `default-cargo` | Cargo | legacy | Existing `/cargo/index/` |
-| `default-pypi` | PyPI | legacy | Existing `/pypi/simple/` |
-| `default-oci` | OCI | legacy | Existing `/v2/` |
-| `default-skill` | Agent Skills | legacy | Existing `/api/skills` |
+## Inventory and legacy URLs
 
-## Authenticated read endpoints
+The administrator-only control plane inventories both legacy descriptors and
+private feed definitions. It does not make a global package private merely by
+creating a record. Existing global routes remain available:
 
-`GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `{apiVersion:"v1",items:[...],nextCursor, isolationSupported:false}`. Valid limits are 1–100; invalid cursors or IDs fail closed. `GET /api/v1/admin/feeds/{id}` returns one descriptor or 404. Admin API tokens or correctly scoped OIDC admin access are required; a read or publish credential is forbidden. Responses use `Cache-Control: no-store`.
+| Kind | Legacy root | Private hosted root |
+| --- | --- | --- |
+| NuGet | `/nuget/v3/` | `/feeds/{id}/nuget/v3/` |
+| npm | `/npm/` | `/feeds/{id}/npm/` |
+| Cargo | `/cargo/` | `/feeds/{id}/cargo/` |
+| PyPI | `/pypi/` | `/feeds/{id}/pypi/` |
+| OCI | `/v2/{repository}/` | `/v2/feeds/{id}/{repository}/` |
+| Maven | `/maven/` | `/feeds/{id}/maven/` |
+| Go | `/go/` | `/feeds/{id}/go/` |
+| Raw | `/raw/` | `/feeds/{id}/raw/` |
+| Agent Skills | `/api/skills` | Not implemented |
 
-## Staged administrative drafts (only reviewed private NuGet, Raw, Maven or Go hosted feeds can be activated)
+**OCI compatibility boundary:** the repository prefix `feeds/` under `/v2/`
+is reserved for private routing. It cannot also name a legacy global OCI
+repository. Other existing global roots and artifact keys are retained.
+There is no automatic migration of global artifacts into a private feed.
 
-Admins may **prepare disabled, private** feed descriptors for review. This
-capability is a database-backed metadata staging step, **not** hosted/proxy
-feed functionality. It does not register native URLs, publish artifacts, grant
-access, connect upstreams, reserve namespaces, or make feeds visible to
-native clients.
+The six seeded `default-*` descriptors describe NuGet, npm, Cargo, PyPI, OCI
+and Skills legacy routes. They do not confer read authorization or isolation.
+`GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `apiVersion`,
+`items`, `nextCursor`, the retained compatibility field
+`isolationSupported: false`, and `isolatedHostedKinds` for the implemented
+package adapters. That compatibility field is not a statement that an active
+private hosted package feed lacks isolation. Limits are 1–100.
+`GET /api/v1/admin/feeds/{id}` returns one descriptor or 404.
+Both operations require an administrator and return `Cache-Control: no-store`.
 
-`POST /api/v1/admin/feeds/drafts` accepts **exactly** four JSON string
-properties, e.g.:
+## Draft, activate and deactivate
+
+`POST /api/v1/admin/feeds/drafts` accepts exactly four string properties:
 
 ```json
-{"id":"example-staging","kind":"nuget","mode":"hosted","displayName":"Example staging"}
+{"id":"alpha-feed","kind":"npm","mode":"hosted","displayName":"Example packages"}
 ```
 
-`kind` is one of `nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`, `raw`, `maven`, `go`.
-`mode` is `hosted` or `proxy`. The service **always** assigns
-`enabled: false` and `visibility: private`; clients cannot submit these
-fields or an upstream URL. New IDs cannot start with `default-`. Successful
-creation returns 201 with `operational: false` and
-`isolationSupported: false`; duplicate IDs return 409. The submission
-must be <=4096 bytes. Admin tokens or scoped OIDC administrators are
-required; ordinary write/read tokens cannot create drafts.
+The body is bounded to 4096 bytes. IDs contain 3–64 lowercase ASCII letters,
+digits or hyphens, begin with a letter and end with a letter or digit; new
+IDs cannot begin with `default-`. Kinds are `nuget`, `npm`, `cargo`, `pypi`,
+`oci`, `skill`, `raw`, `maven` or `go`. Modes accepted for staging are
+`hosted` and `proxy`; `group` is not an accepted draft mode.
+The server assigns `visibility: private` and `enabled: false`; callers cannot
+supply these fields or an upstream URL. Success returns 201 with
+`operational: false`, and duplicate or historically reserved IDs return 409.
+Creation also rejects a previously deleted ID if an activation audit, exact
+managed read/publish grant or pending feed publication still references it.
+An unreferenced, never-activated draft ID may be reused after deletion.
 
-`DELETE /api/v1/admin/feeds/drafts/{id}` removes only an **unused, disabled,
-private, non-legacy** draft with no namespace, policy or upstream references.
-It returns 204 on removal, 409 if missing/non-draft/referenced, and 400
-for invalid identifiers. Both create and delete persist an audit event in
-the same DB transaction. Listing remains admin-only and never exposes
-native-route declarations. Do not mistake the presence of a staged descriptor
-for an operating feed.
+A draft alone has no serving capability or granted access. For one of the
+eight implemented hosted package kinds, an administrator may call
+`POST /api/v1/admin/feeds/{id}/activate` without a body. Unsupported kinds,
+proxy drafts or an invalid lifecycle transition return 409.
+`POST /api/v1/admin/feeds/{id}/deactivate` stops client reads and writes while
+retaining package bytes, metadata, tags, grants and publication evidence.
+Reactivation is a separate explicit call.
 
-## Non-goals and pending MS2 gates
+`DELETE /api/v1/admin/feeds/drafts/{id}` removes only a **never-activated**,
+disabled, private, non-legacy draft with no package, namespace, policy,
+upstream, managed feed-grant or pending-publication references. Once a feed
+has been activated, its ID remains reserved even when empty and disabled;
+old managed credentials or external OIDC claims cannot attach to a newly
+created identity with the same ID. Reactivating that original feed remains
+possible. Removal returns 204; an invalid ID returns 400; a missing,
+previously activated or referenced draft returns 409. Lifecycle mutations require
+administrator access, use the publish rate limiter and persist audit records.
 
-This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet, Raw, Maven and Go hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
+## Exact feed authorization
 
+Every private native operation authenticates and checks the exact feed grant,
+including metadata, downloads, upload sessions, tag lists and referrers.
+`PACKORY_ANONYMOUS_READ=true` applies to configured global routes and never
+makes private feeds public.
 
-## V4 experimental private hosted NuGet feeds — first operational slice
+Managed tokens are issued through the existing administrator endpoint
+`POST /api/admin/tokens` with either of these grant shapes:
 
-Packory now has an **independently routed, private hosted NuGet adapter**.
-This is a narrow MS2 slice, **not** universal multi-feed isolation or a
-verified group/proxy implementation. Only an admin may activate/deactivate
-an existing disabled draft with `kind=nuget` and `mode=hosted`. All
-drafts for npm/Cargo/PyPI/OCI/Skills and all proxy feeds remain
-**non-operational**. The legacy `/nuget/v3/` namespace is unchanged.
+```json
+{"role":"read","namespace":"feed:alpha-feed:read","expiresInHours":1}
+```
 
-### Lifecycle
+```json
+{"role":"write","namespace":"feed:alpha-feed:publish","expiresInHours":1}
+```
 
-1. As administrator, `POST /api/v1/admin/feeds/drafts` with
-   `{"id":"alpha-feed","kind":"nuget","mode":"hosted","displayName":"Synthetic"}`.
-2. Review the descriptor, then use
-   `POST /api/v1/admin/feeds/alpha-feed/activate` (no body).
-3. Distribute the scoped private source
-   `/feeds/alpha-feed/nuget/v3/index.json` to authorized clients.
-   Service index, flat-container versions, packages, checksums, nuspec
-   and NuGet push are supported on this route with **no upstream fallback**.
-4. To stop reads and writes without deleting bytes, call
-   `POST /api/v1/admin/feeds/alpha-feed/deactivate`. The package data,
-   immutable SHA-512, audit and publication journal are retained.
-   Reactivation requires an explicit administrative call. A feed
-   containing published revisions cannot be deleted as an unused draft.
+A publish grant also allows reads from that same feed. Generic static
+read/write credentials, package namespace grants and another feed's token do
+not allow private feed access. Static administrators and validated OIDC
+administrators may operate on all feeds. OIDC readers/publishers need the
+appropriate `packory.read`/`packory.write` scope plus a signed `packory_feed`
+claim of `{id}:read` or `{id}:publish`. Tokens are revocable on subsequent
+requests. This is authorization at feed granularity, without per-package
+ownership or a browser account/session system.
 
-These endpoints are **never anonymously readable**, even if `PACKORY_ANONYMOUS_READ`
-permits public legacy registry reads.
-Unrecognized or disabled feeds return 404 **after feed authorization**,
-so credentials lacking a feed grant receive a uniform 403.
+For valid private route shapes, missing/invalid credentials return 401;
+authenticated credentials without the exact permission return 403. The
+adapter checks its active feed and coordinate after authorization, so an
+authorized missing/deactivated/wrong-kind feed or missing package returns
+404. A token for a different feed continues to receive 403, including when
+the requested feed is absent. Invalid coordinates are rejected before any
+storage-key construction.
 
-### Least-privilege scoped credentials
+When anonymous global reads are disabled, a managed feed or package namespace
+token receives 403 from global registry reads and catalog discovery. The
+OCI `/v2/` capability ping is a protocol handshake exception: it may accept
+an authenticated feed credential without granting access to any global
+repository. `/mcp` requires a global reader and excludes private feed rows;
+feed-aware discovery is [MCP-P5](mcp-roadmap.md).
 
-The existing revocable managed-token admin endpoint accepts these
-**exact** `namespace` grants (no wildcard):
+## Hosted origin and storage contract
 
-- `feed:alpha-feed:read` with `role: "read"`
-- `feed:alpha-feed:publish` with `role: "write"`
+A private request queries only its feed's ledger and storage. Missing content
+is never substituted from another feed, a global coordinate, a configured
+NuGet/npm mirror, or an arbitrary URL. Generated download URLs use
+`PACKORY_PUBLIC_BASE_URL`, never an untrusted Host header. Client test configs
+also disable alternative sources; a registry cannot prevent arbitrary code
+on a client machine from opening its own network connections.
 
-A publish grant also permits reads for **that same feed**. Generic
-read/write tokens, another feed's tokens and anonymous clients do not
-gain entry. Static administrators may perform both operations. An
-authenticated OIDC access token may use `packory.read` (or
-`packory.write` for publication) plus a signed
-`packory_feed` claim of `alpha-feed:read` or
-`alpha-feed:publish`. No browser token is persisted.
+Schema **V10** extends `feed_assets`, keyed by `(feed_id, kind, path)`, for
+Raw, Maven, Go, npm, Cargo, PyPI and OCI. NuGet retains its existing
+`feed_nuget_versions` ledger and immutable SHA-512. OCI mutable tag pointers
+are separate `feed_oci_tags` references to immutable manifest digests.
 
-A feed-specific managed token cannot publish into the old global
-`/nuget/v3/push` endpoint; the standard package namespace grant
-parser rejects feed grants. Runtime token revocation is immediate on
-subsequent requests. This is feed-level—not per-package—authorization.
+npm, Cargo and PyPI use `FeedPackageStore` to commit protocol metadata and
+original package bytes together in one immutable object at
+`feeds/{id}/{kind}/{sha256(canonical-path)}.bundle`. The envelope binds feed,
+kind, canonical path, native name/version, payload size and payload SHA-256.
+Reads verify the committed outer SHA-256/length, inner identity and payload
+digest before exposing metadata or bytes. Adapters also validate archive
+identity and protocol-specific checksum claims. Go similarly commits its
+`.info`, `.mod` and `.zip` in one validated immutable triplet bundle.
 
-**Global read boundary:** when `PACKORY_ANONYMOUS_READ=false`, managed tokens
-with any feed grant or package publish-namespace grant receive **403** on
-legacy/global NuGet, npm, Cargo, PyPI, OCI, Raw, Maven and Go read APIs,
-as well as the global catalog. Such grants authorize their exact private
-feed or publication namespace, **not** global discovery. Unscoped managed
-readers and static readers retain access. When anonymous legacy reads are
-explicitly enabled, those public URLs remain public regardless of a supplied
-token; private feed URLs continue to enforce exact grants and never honor
-anonymous reads. This is a fail-closed interim measure: it does **not**
-implement package-level private reads for the global registries or add
-private feeds for other protocols.
+Publishing writes a durable intent before the object, then commits scoped
+metadata and audit. A crash between object and metadata writes does not
+publish a guessed package entry. Recovery retains pending evidence or
+quarantines an unindexed local object; a committed missing/corrupted object
+fails closed. Recovery, integrity scans and offline snapshots enumerate the
+same feed references, including OCI tags. Database/object storage writes
+remain separate operations, without a distributed transaction or multiple
+active writers. See [architecture](architecture.md) and the exact
+[provider/recovery acceptance](e0-acceptance.md).
 
-### Isolation, data safety and limits
+## NuGet
 
-Two feeds may each host `same.package@1.0.0` with different bytes and
-SHA-512. Keys are physically separated as
-`feeds/<feed-id>/nuget/<id>/<version>/<id>.<version>.nupkg`, and
-metadata is keyed by `(feed_id,name,version)`. Private revision records
-are excluded from the general package search and legacy NuGet listing.
-Published bytes have a durable publication-intent journal and a
-transactional immutable digest/audit record.
+Native source: `/feeds/{id}/nuget/v3/index.json`.
+Supported operations are service index, flat-container version list,
+`.nupkg`, `.nupkg.sha512`, `.nuspec` and multipart `PUT/POST push`.
+Read credentials use the native NuGet source configuration; publication also
+accepts `X-NuGet-ApiKey`. Private reads issue a Basic authentication challenge
+when a native client needs to retry with its configured credentials.
 
-The new `feed_nuget_versions` table is included in V4 PostgreSQL/S3
-offline backup fingerprints, recovery orphan protection, missing-blob
-checks, and the maintenance integrity scanner.
+Identical ID/version pairs can have different bytes in different feeds.
+Package files remain under `feeds/{feedId}/nuget/{packageId}/{version}/...` with their
+immutable digest ledger. The private profile does not implement registration,
+search, symbols, unlisting or proxy/group feeds. Native evidence is a bounded
+pack/push and isolated restore, including fresh-cache native 401/403/404
+failures, not a broad NuGet client/OS matrix.
 
-**Out of scope:** NuGet registration/search for isolated feeds, private
-proxy/group feeds, feed-specific S3 capacity accounting, per-package
-ownership, tenant web UI/BFF and support for the other ecosystems.
-Native CLI CI covers a bounded `dotnet nuget push` + restore use case
-but does not certify all NuGet versions or tooling combinations.
-Operational single-writer and real-provider release gates still apply.
+## npm
 
-## V8 isolated private Raw feeds (E0 incremental)
+Registry root: `/feeds/{id}/npm/`. Native `npm publish` sends a one-version
+packument with one base64 tarball attachment to `PUT {package}`. Scoped and
+unscoped names are accepted. Reads provide the packument, exact version or
+publication tag, and verified `/{package}/-/{version}.tgz` bytes; authenticated
+`-/ping` and `-/whoami` support native tooling. Configure `_authToken` for the
+exact feed URL path and clear unrelated registry configuration when testing.
 
-Private Raw is independently activated with `kind=raw`, `mode=hosted`,
-`visibility=private`. Only administrators may activate/deactivate it. For
-example, create a disabled draft with
-`{"id":"alpha-feed","kind":"raw","mode":"hosted","displayName":"Synthetic Raw"}`
-and then call `POST /api/v1/admin/feeds/alpha-feed/activate`.
+The manifest and archive package identity must agree. Canonical publication
+versions follow npm's cleaned SemVer identity; build metadata does not create
+a second immutable version. Incoming SHA-512/SHA-1 and attachment length are
+checked; returned tarball URLs and integrity values derive from stored bytes.
+Publication tags are recorded with the version, and later publications may
+update the packument's tag selection. There is no separate mutable dist-tag
+API, unpublish, npm login, audit API or provenance-attachment workflow.
+Dependencies may use registry ranges/tags/aliases; direct Git, HTTP, file and
+workspace dependency origins are rejected in this private hosted profile.
 
-For exact `feed:alpha-feed:publish` and `feed:alpha-feed:read`
-managed-token grants, the following routes are available:
+## Cargo
 
-- `PUT /feeds/alpha-feed/raw/{name}/{version}` (nonempty fixed Content-Length)
-- `GET|HEAD /feeds/alpha-feed/raw/{name}/{version}`
-- `GET /feeds/alpha-feed/raw/{name}/{version}/metadata`
+Configure a native alternate registry with the sparse URL
+`sparse+https://<host>/feeds/{id}/cargo/index/` and its own Cargo token provider.
+`GET index/config.json` returns feed-local `dl` and `api` URLs with
+`auth-required: true`. Sparse index entries, native
+`PUT api/v1/crates/new` publishing and
+`GET|HEAD api/v1/crates/{name}/{version}/download` require exact feed grants.
 
-Raw name/version/media type constraints match the global Raw adapter. Uploads
-are immutable and SHA-256 validated, returning 201 or 409 for an existing
-revision. Every write stores a publication intent **before** the immutable
-blob and commits the checksum, scoped metadata and audit together. Two
-private feeds can use exactly the same name/version with different bytes.
-Private keys are `feeds/<id>/raw/<name>/<version>/payload.blob` and the
-metadata key is `(feed_id,kind,path)`. Private revisions cannot appear in
-the global Raw catalog or legacy `/raw/` URLs. There is no upstream proxy,
-fallback, automatic mirror, cross-feed read, URL-controlled fetch, delete or
-arbitrary remote execution. A disabled feed retains all bytes and grants but
-neither reads nor publishes. Deleting a referenced disabled feed is refused.
+Index metadata and unchanged `.crate` bytes share one immutable bundle.
+Strict SemVer is bounded; build metadata is ignored for uniqueness.
+Explicit foreign dependency registries are rejected. Private yank/unyank,
+crates.io replacement/proxy, search and broad Cargo-version compatibility
+remain outside this profile.
 
-Recovery and integrity enumeration include the V8 ledger; the PostgreSQL/S3
-snapshot tool requires row fingerprints for `feed_assets`. CLI/API and
-SQLite/PostgreSQL coverage are **experimental**, not real S3-provider DR
-certification. This slice does not implement Go feeds,
-other private ecosystem adapters, cross-feed search, per-feed quotas,
-browser-based permissions or production-grade multiwriter semantics.
+## PyPI
 
-## V4 E0 private Maven hosted release transport (experimental)
+Use `/feeds/{id}/pypi/simple/` as the sole pip index and
+`/feeds/{id}/pypi/legacy/` as Twine's upload repository. Simple project pages
+support HTML and JSON with file hashes, sizes, versions and `requires-python`;
+files are served from `/feeds/{id}/pypi/files/{name}/{filename}`. Names are
+normalized, filenames and archive metadata must agree, and uploaded SHA-256
+claims are verified. Multiple immutable distribution filenames can belong to
+one project version.
 
-Private Maven feeds use the same disabled-draft and administrator-activation
-lifecycle as Raw. Create a draft with `kind: "maven"`, `mode: "hosted"`,
-then explicitly activate it. Proxy drafts are not activatable; supplying
-an upstream URL to a draft is not supported.
+The version parser accepts a bounded canonical PEP 440 subset with prerelease,
+post/dev and local segments; epochs and noncanonical aliases are rejected.
+Wheel, ZIP and `.tar.gz` archive validation exists, while current native
+consumption evidence covers pure Python wheels and a transitive dependency.
+It does not establish source-build/backend compatibility. Direct-reference
+`Requires-Dist` URLs are rejected, and tests disable `extra-index-url` and
+alternative sources. There is no separate PEP 658/714 core-metadata endpoint,
+yank API or PyPI proxy.
 
-For a private feed `alpha-maven`, the native repository root is
-`/feeds/alpha-maven/maven/`. This is independently authorized, without
-upstream or legacy namespace fallback. Use exact managed token grants
-`feed:alpha-maven:read` for consumers and `feed:alpha-maven:publish`
-for uploaders. The latter also permits same-feed reads. Native Maven 3
-consumers can use a configured server ID and Basic password containing
-the scoped token. Every request requires authentication even when
-anonymous reads are enabled for the legacy global `/maven/` route.
+## OCI and Helm
 
-Available operations:
+Native repository names begin `feeds/{id}/{repository}` beneath `/v2/`, for
+example `oci://<host>/feeds/alpha-feed/charts`. Blobs, manifests, tags,
+referrers and durable upload sessions are scoped by both feed and repository.
+Digest identities use SHA-256 and are immutable; tags are intentionally
+mutable references to validated immutable manifests. Manifest content
+references must resolve within the same private repository. A subject may be
+absent as permitted by the accepted OCI profile.
 
-- `PUT /feeds/{feedId}/maven/{groupPath}/{artifact}/{version}/{file}`
-  accepts validated immutable Maven release POM and binary/classifier files.
-  POMs must match the requested group/artifact/version; XML external entities
-  and DTDs are rejected. Duplicate assets return 409.
-- `GET|HEAD` at the same path verifies the stored SHA-256 and length
-  before delivery. Missing/tampered artifacts fail closed.
-- The `.sha256`, `.sha1` and `.md5` GET sidecars are derived from
-  verified immutable stored bytes. Matching checksum PUT acknowledgements
-  are accepted only after the corresponding asset is committed; they never
-  mutate bytes or trust client-provided digests.
-- `GET|HEAD {groupPath}/{artifact}/maven-metadata.xml` returns a
-  synthesized private version list only from the requested feed.
-  Checksum GETs are supported for that synthetic metadata.
+Alternate descriptor `urls` are unsupported and rejected, including on
+config, layers, blobs, manifests and subjects. Inline descriptor `data` must
+be canonical Base64 with the exact declared SHA-256 and size; it does not
+replace the required same-feed/repository ledger reference. This prevents a
+manifest from directing a native client to an alternate artifact origin.
 
-Files use `feeds/<feedId>/maven/<canonical-path>` keys with immutable
-`feed_assets` metadata, transactional audit and a durable
-`feed-maven` publication intent for cross-store reconciliation.
-No private coordinate appears in the global Maven catalog or the
-legacy `/maven/` namespace. Deactivation disables requests while
-retaining the immutable metadata and bytes.
+Uploads support monolithic and chunked flow, acknowledged offsets, bounded
+staging, cancellation and restart on the same data directory. Cross-feed or
+cross-repository upload session reuse is rejected. Mount requests return a
+new upload session instead of reusing another namespace's blob. Reads verify
+length and SHA-256 before serving data. Referrers are bounded to 1000 manifests
+per repository and return 503 instead of a silently incomplete larger result.
 
-**Not supported:** native Maven `mvn deploy` (mutable metadata PUT),
-SNAPSHOT, private Maven upstream proxy, full Gradle conformance,
-per-feed quotas, multi-writer coordination, real-provider S3 disaster
-recovery or production suitability. The CI native Maven dependency
-consumption is a bounded test of the specified client/operation only.
+The private Helm smoke uses pinned Helm **3.22.0** for two-feed push/pull/template,
+exact chart byte comparison, credentials, deactivation and a process restart.
+Private Docker and ORAS flows have not been qualified by this run. No standard
+Docker Bearer-token issuer, manifest/blob deletion, multi-node session handoff
+or complete OCI/Helm/Kubernetes conformance is claimed.
 
-## V4 E0 private Go modules — bounded hosted GOPROXY
+## Maven
 
-An administrator may explicitly activate disabled `kind=go`,
-`mode=hosted`, private drafts. Private Go clients use
-`/feeds/{feedId}/go/` as their GOPROXY root. Packory-specific publishing
-accepts an authenticated multipart POST to
-`/feeds/{feedId}/api/go/modules` with `module`, `version`,
-`mod` and `zip` plus optional RFC3339 `time`.
+Repository root: `/feeds/{id}/maven/`. Exact read/publish tokens may be supplied
+through a Maven server ID with HTTP Basic password credentials. Immutable
+release `PUT` accepts validated POM and binary/classifier paths. POM group,
+artifact and version must match the URL; DTDs and external entities are rejected.
+`GET|HEAD` verifies stored length/SHA-256. Generated `maven-metadata.xml`
+contains only versions from that feed.
 
-Exact managed grants `feed:{feedId}:read` and
-`feed:{feedId}:publish` are required. Missing credentials get 401;
-credentials for a different feed get 403. An inactive but otherwise
-authorized feed returns 404. No global Go module, public mirror, or
-other feed is consulted as a fallback. Private module discovery does not
-appear in global catalog routes.
+SHA-256, SHA-1 and MD5 GET sidecars derive from verified bytes. Matching checksum
+PUT acknowledgements are accepted only after the original immutable asset is
+committed, without changing that asset. Keys remain
+`feeds/{id}/maven/{canonical-path}`. Native Maven dependency consumption is
+covered; `mvn deploy` with mutable metadata PUT, SNAPSHOT, atomic multi-file
+releases, Maven Central proxy and full Gradle variants remain separate E2 work.
 
-One validated GOPROXY revision consists of `.info`, `.mod` and
-`.zip` in a single immutable bundle under
-`feeds/{feedId}/go/<hashed-module>/<hashed-version>.bundle`.
-The shared V8 `feed_assets` ledger stores the canonical encoded
-coordinate and SHA-256+size of the atomic bundle. The nested Go resource
-digests are independently re-derived and checked only **after**
-the committed bundle hash is verified; they are not trusted from an
-incoming request. Publication uses the durable `feed-go` intent,
-feed-qualified lock, immutable blob, then transactional ledger+audit.
-Offline recovery and integrity scans enumerate the same ledger.
+The native harness bootstraps its pinned public plugin separately, then uses
+`mirrorOf=*` to replace every Maven repository with the selected private feed.
+Each native success/denial has a separate local repository and credential
+configuration. Merely adding `remoteRepositories` would still let
+`maven-dependency-plugin:3.7.1:get` consult Central, as documented by its
+[versioned native contract](https://maven.apache.org/plugins-archives/maven-dependency-plugin-3.7.1/get-mojo.html).
 
-Read-only GOPROXY supports `@v/list`, `@latest`, versioned
-`.info`, `.mod` and `.zip`. The native client harness checks
-two private feeds storing different bytes under identical coordinates,
-with separate credentials and module caches over an ephemeral HTTPS proxy.
-The official Go command sends GOAUTH/.netrc credentials **only via HTTPS**;
-plaintext HTTP private Go clients must not be advertised as supported.
-A `.netrc` entry is scoped to a hostname, not a URL path: multiple
-independently scoped feeds on the same host require separate client
-credential contexts, dedicated hosts, or a reviewed path-scoped
-`GOAUTH` helper on supported Go versions (Go 1.24+). Never embed
-long-lived tokens in `GOPROXY` URLs, shell history or CI logs.
-The isolated synthetic test disables the external Go checksum database;
-**public checksum trust is not implemented**.
+## Go modules
 
-No public read-through mirror, automatic checksum database trust,
-universal Go archive acceptance, multi-writer/tenant isolation,
-real-provider restore certification, or production suitability is
-claimed. Keep broad Go ecosystem support gated on E3/E11.
+Private GOPROXY root: `/feeds/{id}/go/`. Publishing is a Packory-specific
+multipart `POST /feeds/{id}/api/go/modules` with `module`, `version`, `mod`,
+`zip` and optional RFC3339 `time`. Reads support `@v/list`, `@latest` and
+versioned `.info`, `.mod`, `.zip`. A validated triplet is stored at
+`feeds/{id}/go/{hashed-module}/{hashed-version}.bundle`; publication and
+integrity checks bind its native coordinate to the committed ledger.
+
+Native Go sends GOAUTH/.netrc credentials only over HTTPS. For the verified
+Go **1.24.13** client, the `.netrc` machine key must match the HTTPS authority,
+including a nondefault port. It is not URL-path scoped: multiple feeds on
+one authority require separate client credential contexts, dedicated hosts,
+or a separately reviewed path-scoped GOAUTH helper. Do not put tokens in
+GOPROXY URLs. Use exactly one private proxy, separate caches and appropriate
+private-module settings to avoid direct/public fallback.
+
+The native harness verifies two feeds with different bytes at the same module
+version and actual 401/403/404 failures with empty caches. It disables the
+external checksum database for the synthetic private namespace. Locally
+computed Go `h1:` integrity is not public checksum-database verification.
+Upstream mirror, broad Go archive acceptance and the remaining E3 profile
+are separate work.
+
+## Raw / Generic
+
+`PUT /feeds/{id}/raw/{name}/{version}` accepts a nonempty fixed-length body.
+`GET|HEAD` returns verified bytes with range support; `GET .../metadata`
+returns the immutable SHA-256, size and media type. Name/version/media rules
+match the global Raw adapter. The key is
+`feeds/{id}/raw/{name}/{version}/payload.blob`; duplicate revisions return 409.
+This is generic HTTP storage, without a native package-manager protocol.
+
+## Later milestones and verification
+
+The E0 hosted foundation does not implement proxy/group routing, private
+Skills distribution, feed-aware MCP discovery, per-feed S3 capacity/retention,
+full declarative feed CRUD/import/export, CAS reference counting or browser
+permission management. These remain in [MS2/MS4/MS5](roadmap.md) and
+[MCP-P5](mcp-roadmap.md); broader native features remain adapter milestones.
+[E0 acceptance](e0-acceptance.md) is the command/file/evidence map for this
+change. Real-provider restore, release operations and multiple active writers
+retain their separate [release gates](release-gates.md).

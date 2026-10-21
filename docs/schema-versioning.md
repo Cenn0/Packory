@@ -1,14 +1,14 @@
-# Database schema versioning — immutable checksum ledger
+# Database schema versioning and immutable feed ledgers
 
-Packory uses a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. **Version 1** is the historical global registry. **Version 2** adds feed inventory tables; **version 3** adds an immutable `nuget_digests` (name, version, canonical SHA-512 Base64, byte size and immutable origin) ledger, all inside a transactional, forward-only upgrade: `feeds`, `feed_namespaces`, `feed_policies`, `feed_upstreams`. All existing artifact/package tables and physical blob keys are unchanged.
+The current metadata schema is **V10**, recorded by a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. Upgrades are transactional and forward only. The sections below describe the historical increments; the V10 section defines the current shared private-feed storage contract. Existing artifact bytes and keys are preserved through migration.
 
-On upgrade from v1 or an unmarked historical installation, six deterministic `default-*` feeds are seeded (`nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`) with `mode=legacy` and `visibility=runtime`. **These are administrative descriptors only.** The native routes, client permissions, upstream selection, package storage and collision behavior are still global; **none of these feeds yet isolate artifacts**. A `mode=legacy` feed does not claim support for independent hosted/proxy routing.
+On upgrade from V1 or an unmarked historical installation, six deterministic `default-*` feeds are seeded (`nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`) with `mode=legacy` and `visibility=runtime`. These descriptors retain their historical global routes and catalog. Separate, explicitly activated private hosted feeds provide independent artifact identities and exact feed permissions for NuGet, npm, Cargo, PyPI, OCI, Raw, Maven and Go. A legacy descriptor does not itself confer isolation. Private Agent Skills feeds remain outside this delivered profile; their existing approval gates are retained.
 
-Migrations reject unknown future versions before initialization and atomically stamp v3 after creating tables and defaults. A failed transaction leaves the previous version for explicit diagnosis and retry. Downgrading to an earlier Packory executable is **not supported**: old binaries reject future schemas. The rollback path is a verified **offline restoration of the pre-upgrade database and blob snapshot**, not an automatic DOWN script.
+Migrations reject unknown future versions before initialization and atomically stamp the current version after all changes and integrity checks. A failed transaction leaves the previous version for diagnosis and retry. Downgrading to an earlier executable requires a verified **offline restoration of the pre-upgrade database and blob snapshot**; there is no automatic DOWN script. Editing the marker cannot reverse a migration.
 
-Security: the read-only `GET /api/v1/admin/feeds` and `GET /api/v1/admin/feeds/{id}` inventory require full admin authorization, even if anonymous registry reads are enabled. Cursor pagination is bounded and inputs validated. Feed mutation, namespace enforcement, provisioning, per-feed quota/audit and multiple namesake packages are *not* implemented by this PR.
+Feed inventory and lifecycle mutations require admin authorization, including when anonymous global registry reads are enabled. Native private reads and publications require grants for the exact feed. See [the API](api.md), [operations](operations.md), and [V4 roadmap](roadmap-v4.md) for supported routes and protocol limits.
 
-This is an increment toward MS0.4 / M2.1 and M2.6, **not** completion of MS2 or a supported production migration. Full rollback and PostgreSQL/S3 real-provider restore drills must precede upgrades of production data. See [release gates](release-gates.md) and [roadmap](roadmap.md).
+Deterministic migration, isolated restore and emulator tests do not establish external S3 provider certification or production disaster recovery readiness. See [release gates](release-gates.md).
 
 
 ## V3 NuGet checksum ledger and migrations
@@ -66,7 +66,7 @@ V8 expands the permitted `feeds.kind` values to include staged `raw`,
 metadata ledger with composite key `(feed_id,kind,path)`, canonical
 coordinate/media validation, published SHA-256/size, and a restricted
 foreign key to the existing administrative feed record. **Only private
-hosted Raw is activated in this delivery; Maven and Go remain drafts.**
+hosted Raw was activated in the original V8 increment; Maven and Go remained drafts at that point.**
 Existing default/global registries retain their original routes and bytes.
 
 SQLite upgrades reconstruct the constrained `feeds` table using the
@@ -110,3 +110,98 @@ are preserved.
 
 No high-availability rolling downgrade compatibility or real-provider
 disaster-recovery guarantee is inferred from this migration.
+
+## V10: shared private package assets and OCI tags
+
+V10 extends `feed_assets.kind` to `raw,maven,go,npm,cargo,pypi,oci` while preserving
+its composite primary key `(feed_id,kind,path)`, immutable SHA-256/byte count,
+creation timestamp, identity index and foreign key to `feeds`. NuGet retains its
+separate `feed_nuget_versions` SHA-512 ledger. Existing rows and blob bytes are
+copied unchanged. No default/global content is silently imported into a private
+feed and no digest is fabricated from legacy bytes.
+
+SQLite rebuilds only the child `feed_assets` table inside the version-gated
+transaction. `PRAGMA foreign_key_check` must succeed before commit; enforcement
+is restored even if migration fails. PostgreSQL replaces the kind and size
+constraints within its migration transaction. A zero-byte object is permitted
+only for OCI; native validation further restricts that case to blobs and still
+requires nonempty manifests. Other artifact kinds retain `size > 0`.
+
+The new `feed_oci_tags(feed_id,name,tag,digest,updated_at)` table has primary key
+`(feed_id,name,tag)` and a restricted foreign key to `feeds`. Tags can move to a
+new immutable manifest digest. The database publication method checks the active
+OCI feed and a committed manifest in that exact feed and repository in the same
+transaction as the tag update and audit. A digest belonging only to a blob,
+another repository or another feed cannot become a tag target. Old manifest
+revisions remain readable by digest after a tag moves.
+
+### Storage identities
+
+The stored key is derived from validated coordinates, never accepted from an
+HTTP request or snapshot reference as an arbitrary path:
+
+| Kind | Key under the blob root / configured S3 prefix |
+| --- | --- |
+| Raw | `feeds/{id}/raw/{name}/{version}/payload.blob` |
+| Maven | `feeds/{id}/maven/{canonical-artifact-path}` |
+| Go | `feeds/{id}/go/{sha256(module)}/{sha256(version)}.bundle` |
+| npm, Cargo, PyPI | `feeds/{id}/{kind}/{sha256(canonical-path)}.bundle` |
+| OCI blob | `feeds/{id}/oci/blob/{repository}/{sha256-hex}.blob` |
+| OCI manifest | `feeds/{id}/oci/manifest/{repository}/{sha256-hex}.json` |
+
+String hashes use UTF-8. npm canonical paths are `name/version`, Cargo paths
+omit SemVer build metadata from the uniqueness key, and PyPI paths are
+`normalized-name/filename`. Go's existing `.info/.mod/.zip` bundle and legacy
+Raw/Maven keys remain unchanged.
+
+An npm/Cargo/PyPI bundle is a ZIP with exactly two uncompressed entries:
+`metadata.json` and `payload`. The original package bytes form `payload`.
+The JSON wrapper binds `schemaVersion=1`, feed, kind, path, name and version
+to payload SHA-256/size and the adapter metadata. The outer ledger records
+the SHA-256/size of the complete bundle. Reads verify both layers before
+exposing content. Wrapper metadata is bounded to 4 MiB; payloads remain bounded
+by the configured artifact limit and ZIP overhead to 64 KiB. Swapping a bundle
+between two feeds fails its inner identity check even if an outer reference
+were also replaced.
+
+### Coordinated PostgreSQL/S3 snapshots
+
+Database schema V10 requires snapshot format 3, all existing authoritative table
+fingerprints, the `feed_oci_tags` fingerprint, and `feed_references` containing
+the immutable asset and OCI tag identities. This inventory contains package
+metadata; keep the entire archive under the same access controls as the source
+registry. It does not add credentials or actor identities to the manifest.
+
+Before a restore writes any target object, the verifier checks:
+
+- Reference counts and uniqueness against the database inventory, exact derived
+  keys, media/coordinate shape and the current live object's committed hash and
+  size. A historical version or a latest delete marker cannot satisfy a live
+  artifact reference.
+- Exact bounded bundle members, embedded feed/package identity, original payload
+  digest/length and adapter checksum metadata for npm, Cargo and PyPI; Go info and
+  module identity are checked within its existing triplet bundle.
+- Every OCI config/layer/index descriptor against the committed manifest/blob
+  graph in the exact feed and repository. OCI subjects may precede publication,
+  as permitted by that protocol. Alternate descriptor `urls` are unsupported
+  in the private hosted profile; inline `data` must be canonical Base64 with
+  the exact descriptor SHA-256 and size. Inline content does not replace a
+  committed config/layer/index reference. Every tag must resolve to its own
+  committed manifest.
+
+After `pg_restore`, complete row fingerprints and the recaptured feed references
+must equal the verified snapshot. Historical S3 versions remain archived as
+evidence, while the isolated restore reconstructs current live content. Provider
+version IDs, retention settings and resumable upload sessions are not recreated
+by this database/object snapshot tool. Older V1–V9 archives retain their own
+version-specific validation contract; they do not acquire V10 reference evidence
+by changing a manifest marker.
+
+Migration regressions exercise preservation of pre-upgrade bytes, primary and
+foreign keys, rollback after a failed foreign-key check, zero-byte OCI handling,
+and rejection of tags targeting uncommitted/foreign content. Snapshot tests cover
+cross-feed bundle replacement, live-versus-deleted versions, graph/reference
+failures before restore writes, and a restored database disagreeing with its
+artifact inventory. The optional PostgreSQL/S3 emulator drill adds actual
+`pg_dump`/`pg_restore` and versioned object API coverage; external-provider
+qualification remains a separate release gate.

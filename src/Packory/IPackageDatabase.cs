@@ -21,6 +21,10 @@ public interface IPackageDatabase
         string sha256, long size, string actor);
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
+    IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null);
+    string? GetFeedOciTag(string feedId, string name, string tag);
+    IReadOnlyList<string> FeedOciTags(string feedId, string name);
+    void SetFeedOciTag(string feedId, string name, string tag, string digest, string actor);
     IReadOnlyList<string> FeedMavenVersions(string feedId, string groupId, string artifactId);
     IReadOnlyList<string> FeedGoVersions(string feedId, string module);
     bool PublishFeedAsset(FeedAssetEntry asset, string actor);

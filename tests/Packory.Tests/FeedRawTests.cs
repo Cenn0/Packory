@@ -229,7 +229,7 @@ public sealed class FeedRawTests
     {
         using var host = new Host();
         using var client = host.CreateClient();
-        foreach (var kind in new[] { "npm", "oci" })
+        foreach (var kind in new[] { "skill" })
         {
             var id = "draft-" + kind;
             using var create = Req(HttpMethod.Post, "/api/v1/admin/feeds/drafts", Admin);

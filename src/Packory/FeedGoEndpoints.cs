@@ -164,7 +164,11 @@ public static class FeedGoEndpoints
         if (asset is null) return Results.NotFound();
         if (!FeedAssetEntry.Valid(asset))
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-        var stored = blobs.Existing(FeedAssetEntry.BlobKey(asset));
+        var key = FeedAssetEntry.BlobKey(asset);
+        if (!await ArtifactDigests.MatchesRemoteAsync(blobs, key, "sha256",
+            Convert.FromHexString(asset.Sha256), asset.Size, GoModuleBundle.MaxBundleBytes, ctx.RequestAborted))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var stored = blobs.Existing(key);
         if (stored is null || !await ArtifactDigests.MatchesSha256Async(
                 stored, asset.Sha256, asset.Size, ctx.RequestAborted))
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

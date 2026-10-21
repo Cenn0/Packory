@@ -52,10 +52,25 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         return missing;
     }
 
+    private static bool IsImmutableFeedKey(string key)
+    {
+        var parts = key.Split('/');
+        if (parts.Length < 4 || parts[0] != "feeds" || !FeedDefinition.ValidId(parts[1])) return false;
+        return parts[2] switch
+        {
+            "nuget" => key.EndsWith(".nupkg", StringComparison.Ordinal),
+            "raw" => key.EndsWith("/payload.blob", StringComparison.Ordinal),
+            "maven" => true,
+            "go" or "npm" or "cargo" or "pypi" => key.EndsWith(".bundle", StringComparison.Ordinal),
+            "oci" => key.EndsWith(".blob", StringComparison.Ordinal) || key.EndsWith(".json", StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
     public bool MetadataCommitted(PendingPublication pending) => pending.Kind switch
     {
         "feed-nuget" => FeedPublicationCommitted(pending),
-        "feed-raw" or "feed-maven" or "feed-go" => FeedAssetCommitted(pending),
+        "feed-raw" or "feed-maven" or "feed-go" or "feed-npm" or "feed-cargo" or "feed-pypi" or "feed-oci" => FeedAssetCommitted(pending),
         "go" when GoModuleBundle.ValidCoordinates(pending.Name, pending.Version) &&
             pending.Key == GoModuleBundle.Key(pending.Name, pending.Version) =>
             database.GetGoModule(pending.Name, pending.Version) is not null,
@@ -89,7 +104,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         var feedId = pending.Name[..sep];
         var name = pending.Name[(sep + 1)..];
         if (!FeedDefinition.ValidId(feedId)) return false;
-        var kind = pending.Kind switch { "feed-raw" => "raw", "feed-maven" => "maven", "feed-go" => "go", _ => "" };
+        var kind = pending.Kind["feed-".Length..];
         var path = kind == "raw" ? FeedAssetEntry.RawPath(name, pending.Version) : name;
         var asset = database.GetFeedAsset(feedId, kind, path);
         return asset is not null && asset.Version == pending.Version &&
@@ -260,8 +275,7 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
             {
                 var key = Path.GetRelativePath(root, path).Replace('\\', '/');
-                var immutable = key.StartsWith("feeds/", StringComparison.Ordinal) &&
-                    key.EndsWith(".nupkg", StringComparison.Ordinal) ||
+                var immutable = IsImmutableFeedKey(key) ||
                     key.StartsWith("nuget/", StringComparison.Ordinal) && key.EndsWith(".nupkg", StringComparison.Ordinal) ||
                     key.StartsWith("npm/", StringComparison.Ordinal) && key.EndsWith(".tgz", StringComparison.Ordinal) ||
                     key.StartsWith("skills/", StringComparison.Ordinal) && key.EndsWith(".zip", StringComparison.Ordinal) ||

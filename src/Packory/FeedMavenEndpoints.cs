@@ -107,6 +107,9 @@ public static class FeedMavenEndpoints
         if (entry is null) return Results.NotFound();
         if (!FeedAssetEntry.Valid(entry) || entry.Size > cfg.MaxArtifactBytes)
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        if (!await ArtifactDigests.MatchesRemoteAsync(blobs, Key(feedId, path), "sha256",
+            Convert.FromHexString(entry.Sha256), entry.Size, cfg.MaxArtifactBytes, ctx.RequestAborted))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
         var stored = blobs.Existing(Key(feedId, path));
         if (stored is null || !await ArtifactDigests.MatchesSha256Async(
                 stored, entry.Sha256, entry.Size, ctx.RequestAborted))
@@ -149,6 +152,9 @@ public static class FeedMavenEndpoints
             var entry = db.GetFeedAsset(feedId, "maven", assetPath);
             if (entry is null) return Results.NotFound();
             if (!FeedAssetEntry.Valid(entry) || entry.Size > cfg.MaxArtifactBytes)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            if (!await ArtifactDigests.MatchesRemoteAsync(blobs, Key(feedId, assetPath), "sha256",
+                Convert.FromHexString(entry.Sha256), entry.Size, cfg.MaxArtifactBytes, ctx.RequestAborted))
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             var stored = blobs.Existing(Key(feedId, assetPath));
             if (stored is null || !await ArtifactDigests.MatchesSha256Async(

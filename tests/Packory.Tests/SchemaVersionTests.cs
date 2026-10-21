@@ -209,7 +209,7 @@ public sealed class SchemaVersionTests
             Assert.Equal(checksum, db.GetFeedNugetRevision(
                 "old-nuget", "same.package", "1.0.0")?.Sha512);
             Assert.Equal("nuget", db.Feed("old-nuget")?.Kind);
-            Assert.Equal(9, SchemaVersionGuard.Current);
+            Assert.Equal(10, SchemaVersionGuard.Current);
             Assert.True(db.TryCreateDraftFeed(new FeedDefinition("new-raw", "raw",
                 "hosted", "private", "New private Raw", false, now, now), "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("new-raw", "raw", true, "fixture"));
@@ -279,7 +279,7 @@ public sealed class SchemaVersionTests
             using var check = db.Open();
             using var version = check.CreateCommand();
             version.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(9, Convert.ToInt32(version.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(version.ExecuteScalar()));
             version.CommandText = "PRAGMA foreign_key_check";
             using var violations = version.ExecuteReader();
             Assert.False(violations.Read());
@@ -347,7 +347,7 @@ public sealed class SchemaVersionTests
             check.Open();
             using var cmd = new NpgsqlCommand(
                 "SELECT version FROM packory_schema_version WHERE slot=1", check);
-            Assert.Equal(9, Convert.ToInt32(cmd.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
             Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v9-go", "go",
                 "hosted", "private", "Synthetic Go", false, at, at), "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("v9-go", "go", true, "fixture"));
@@ -364,6 +364,199 @@ public sealed class SchemaVersionTests
                 "DROP SCHEMA " + schema + " CASCADE", admin);
             cleanup.ExecuteNonQuery();
         }
+    }
+
+    [Fact]
+    public async Task SqliteV9ToV10PreservesBytesForeignKeysAndAddsPrivatePackageAndOciLedgers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v10-migration-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var settings = new Settings { DataDirectory = root };
+            var db = new Database(settings);
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            var original = SeedV9Raw(db, at);
+            var content = "synthetic immutable pre-upgrade bytes"u8.ToArray();
+            var blobs = new BlobStore(settings);
+            var key = FeedAssetEntry.BlobKey(original);
+            Assert.True(await blobs.PutAsync(key, new MemoryStream(content), content.Length, CancellationToken.None));
+            using (var old = db.Open())
+            using (var cmd = old.CreateCommand())
+            {
+                cmd.CommandText = """
+                    PRAGMA foreign_keys=OFF;
+                    DROP TABLE feed_oci_tags;
+                    CREATE TABLE feed_assets_old_v9 (
+                        feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+                        kind TEXT NOT NULL CHECK(kind IN ('raw','maven','go')),
+                        path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+                        media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+                        size BIGINT NOT NULL CHECK(size > 0), created_at TEXT NOT NULL,
+                        PRIMARY KEY(feed_id,kind,path)
+                    );
+                    INSERT INTO feed_assets_old_v9 SELECT * FROM feed_assets;
+                    DROP TABLE feed_assets;
+                    ALTER TABLE feed_assets_old_v9 RENAME TO feed_assets;
+                    CREATE INDEX feed_assets_identity ON feed_assets(feed_id,kind,name,version);
+                    UPDATE packory_schema_version SET version=9 WHERE slot=1;
+                    PRAGMA foreign_keys=ON;
+                    """;
+                cmd.ExecuteNonQuery();
+            }
+            db.Initialize();
+            db.Initialize();
+            Assert.Equal(original, db.GetFeedAsset(original.FeedId, "raw", original.Path));
+            Assert.Equal(content, await File.ReadAllBytesAsync(blobs.Existing(key)!));
+            Assert.Equal("feeds/v10-raw/raw/same.name/1.0.0/payload.blob", key);
+            VerifyV10Publication(db, at);
+            using var connection = db.Open();
+            using var query = connection.CreateCommand();
+            query.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(10, Convert.ToInt32(query.ExecuteScalar()));
+            query.CommandText = "PRAGMA foreign_key_check";
+            using (var rows = query.ExecuteReader()) Assert.False(rows.Read());
+            query.CommandText = "PRAGMA foreign_key_list(feed_assets)";
+            using (var rows = query.ExecuteReader())
+            {
+                Assert.True(rows.Read());
+                Assert.Equal("feeds", rows.GetString(2));
+            }
+            query.CommandText = "UPDATE feed_assets SET size=0 WHERE kind='raw'";
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => query.ExecuteNonQuery());
+            query.CommandText = "DELETE FROM feeds WHERE id='v10-oci'";
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => query.ExecuteNonQuery());
+            query.CommandText = "INSERT INTO feed_oci_tags SELECT * FROM feed_oci_tags";
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => query.ExecuteNonQuery());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void SqliteV10MigrationRollsBackMarkerAndChildTableWhenForeignKeysAreInvalid()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v10-rollback-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var original = SeedV9Raw(db, DateTimeOffset.UtcNow.ToString("O"));
+            using (var connection = db.Open())
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = """
+                    PRAGMA foreign_keys=OFF;
+                    UPDATE feed_assets SET feed_id='missing-feed';
+                    UPDATE packory_schema_version SET version=9 WHERE slot=1;
+                    PRAGMA foreign_keys=ON;
+                    """;
+                cmd.ExecuteNonQuery();
+            }
+            Assert.Throws<InvalidOperationException>(() => db.Initialize());
+            using var check = db.Open();
+            using var query = check.CreateCommand();
+            query.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(9, Convert.ToInt32(query.ExecuteScalar()));
+            query.CommandText = "SELECT sha256 FROM feed_assets WHERE feed_id='missing-feed'";
+            Assert.Equal(original.Sha256, query.ExecuteScalar());
+            query.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name='feed_assets_v10_new'";
+            Assert.Equal(0, Convert.ToInt32(query.ExecuteScalar()));
+            query.CommandText = "PRAGMA foreign_keys";
+            Assert.Equal(1, Convert.ToInt32(query.ExecuteScalar()));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void PostgresV9ToV10PreservesRowsAndEnforcesOciTagAndZeroByteConstraints()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var schema = "packory_feed_v10_" + Guid.NewGuid().ToString("N");
+        using var admin = new NpgsqlConnection(connectionString);
+        admin.Open();
+        using (var create = new NpgsqlCommand("CREATE SCHEMA " + schema, admin)) create.ExecuteNonQuery();
+        try
+        {
+            var isolated = new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema };
+            var db = new PostgresDatabase(new Settings { MetadataProvider = "postgresql", PostgresConnectionString = isolated.ConnectionString });
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            var original = SeedV9Raw(db, at);
+            using (var connection = new NpgsqlConnection(isolated.ConnectionString))
+            {
+                connection.Open();
+                using var old = new NpgsqlCommand("""
+                    DROP TABLE feed_oci_tags;
+                    ALTER TABLE feed_assets DROP CONSTRAINT feed_assets_kind_check;
+                    ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_kind_check CHECK(kind IN ('raw','maven','go'));
+                    ALTER TABLE feed_assets DROP CONSTRAINT feed_assets_size_check;
+                    ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_size_check CHECK(size > 0);
+                    UPDATE packory_schema_version SET version=9 WHERE slot=1;
+                    """, connection);
+                old.ExecuteNonQuery();
+            }
+            db.Initialize();
+            db.Initialize();
+            Assert.Equal(original, db.GetFeedAsset(original.FeedId, "raw", original.Path));
+            VerifyV10Publication(db, at);
+            using var check = new NpgsqlConnection(isolated.ConnectionString);
+            check.Open();
+            using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", check);
+            Assert.Equal(10, Convert.ToInt32(cmd.ExecuteScalar()));
+            cmd.CommandText = "UPDATE feed_assets SET size=0 WHERE kind='raw'";
+            Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.Throws<PostgresException>(() => cmd.ExecuteNonQuery()).SqlState);
+            cmd.CommandText = "DELETE FROM feeds WHERE id='v10-oci'";
+            Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, Assert.Throws<PostgresException>(() => cmd.ExecuteNonQuery()).SqlState);
+            cmd.CommandText = "INSERT INTO feed_oci_tags SELECT * FROM feed_oci_tags";
+            Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.Throws<PostgresException>(() => cmd.ExecuteNonQuery()).SqlState);
+        }
+        finally
+        {
+            using var drop = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", admin);
+            drop.ExecuteNonQuery();
+        }
+    }
+
+    private static FeedAssetEntry SeedV9Raw(IPackageDatabase db, string at)
+    {
+        Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v10-raw", "raw", "hosted", "private", "Synthetic old raw", false, at, at), "synthetic"));
+        Assert.True(db.TrySetHostedFeedEnabled("v10-raw", "raw", true, "synthetic"));
+        var content = "synthetic immutable pre-upgrade bytes"u8.ToArray();
+        var original = new FeedAssetEntry("v10-raw", "raw", "same.name/1.0.0", "same.name", "1.0.0", "application/octet-stream",
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content)), content.Length, at);
+        Assert.True(db.PublishFeedAsset(original, "synthetic"));
+        return original;
+    }
+
+    private static void VerifyV10Publication(IPackageDatabase db, string at)
+    {
+        foreach (var kind in new[] { "npm", "cargo", "pypi", "oci" })
+        {
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("v10-" + kind, kind, "hosted", "private", "Synthetic " + kind, false, at, at), "synthetic"));
+            Assert.True(db.TrySetHostedFeedEnabled("v10-" + kind, kind, true, "synthetic"));
+        }
+        foreach (var kind in new[] { "npm", "cargo", "pypi" })
+        {
+            var path = kind == "pypi" ? "same-package/same_package-1.0.0-py3-none-any.whl" : "same-package/1.0.0";
+            var row = new FeedAssetEntry("v10-" + kind, kind, path, "same-package", "1.0.0",
+                "application/vnd.packory." + kind + "-package+zip", new string('a', 64), 123, at);
+            Assert.True(db.PublishFeedAsset(row, "synthetic"));
+            Assert.Equal(row, db.GetFeedAsset(row.FeedId, kind, path));
+            Assert.False(db.PublishFeedAsset(row with { Sha256 = new string('b', 64) }, "synthetic"));
+        }
+        var empty = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData([]));
+        var blob = new FeedAssetEntry("v10-oci", "oci", "blob/team/image/" + empty,
+            "team/image", "sha256:" + empty, "application/octet-stream", empty, 0, at);
+        Assert.True(db.PublishFeedAsset(blob, "synthetic"));
+        Assert.Throws<InvalidOperationException>(() => db.SetFeedOciTag("v10-oci", "team/image", "latest", blob.Version, "synthetic"));
+        var digest = new string('b', 64);
+        var manifest = blob with { Path = "manifest/team/image/" + digest, Version = "sha256:" + digest,
+            Sha256 = digest, MediaType = FeedOciEndpoints.ManifestMedia, Size = 123 };
+        Assert.True(db.PublishFeedAsset(manifest, "synthetic"));
+        db.SetFeedOciTag("v10-oci", "team/image", "latest", manifest.Version, "synthetic");
+        Assert.Equal(manifest.Version, db.GetFeedOciTag("v10-oci", "team/image", "latest"));
+        Assert.Throws<InvalidOperationException>(() => db.SetFeedOciTag("v10-oci", "different/image", "latest", manifest.Version, "synthetic"));
     }
 
     [Fact]

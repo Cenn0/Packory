@@ -27,7 +27,7 @@ public sealed class S3BlobStore : BlobStore, IDisposable
         _settings = settings;
         _bucket = settings.S3Bucket ?? throw new InvalidOperationException("S3 bucket is not configured.");
         _prefix = settings.S3KeyPrefix.TrimEnd('/') + "/";
-        _maxReadBytes = Math.Max(settings.MaxArtifactBytes, settings.MaxMetadataBytes);
+        _maxReadBytes = Math.Max(FeedPackageStore.MaxStoredBytes(settings.MaxArtifactBytes), settings.MaxMetadataBytes);
         var config = new AmazonS3Config
         {
             ForcePathStyle = true,

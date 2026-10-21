@@ -3,8 +3,8 @@ using System.Text.Json;
 namespace Packory;
 
 /// <summary>
-/// V3 feed metadata inventory and disabled-only draft lifecycle.
-/// Drafts do not route native clients or confer any isolation/authorization.
+/// Administrative feed inventory, unused draft deletion and private hosted
+/// activation. A draft alone never routes clients or grants authorization.
 /// </summary>
 public static class FeedEndpoints
 {
@@ -25,7 +25,9 @@ public static class FeedEndpoints
             var nextCursor = hasMore ? results[^1].Id : null;
             ctx.Response.Headers.CacheControl = "no-store";
             return Results.Json(new { apiVersion = "v1", items = results,
-                nextCursor, isolationSupported = false });
+                nextCursor, isolationSupported = false,
+                isolatedHostedKinds = RegistryCapabilities.All.Where(c => FeedDefinition.SupportsIsolatedHosted(c.Ecosystem))
+                    .Select(c => c.Ecosystem).ToArray() });
         });
 
         app.MapPost("/api/v1/admin/feeds/drafts", async (Settings cfg, IPackageDatabase db,
@@ -80,16 +82,17 @@ public static class FeedEndpoints
             if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
             ctx.Response.Headers.CacheControl = "no-store";
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest(new { error = "Invalid feed ID" });
-            // Preserve existing default feeds and every draft referenced by policy,
-            // upstream or namespace metadata. A no-op is a conflict, not success.
+            // Preserve every previously activated identity and any draft with
+            // references, grants or publication evidence. Old external OIDC
+            // grants must never attach to a newly created feed with the same ID.
             if (!db.TryDeleteDraftFeed(id, Access.Actor(ctx)))
                 return Results.Conflict(new { error = "Feed is not a removable unused draft" });
             return Results.NoContent();
         }).RequireRateLimiting("publish");
 
-        // Activating a reviewed private NuGet-hosted draft is a separate,
-        // auditable administrator decision; proxy/group/other ecosystems remain
-        // draft-only until their native isolation suites are implemented.
+        // Activation is a separate, auditable administrator decision for an
+        // implemented private hosted profile. Proxy and unsupported-kind drafts
+        // stay disabled until their isolation profiles are implemented.
         app.MapPost("/api/v1/admin/feeds/{id}/activate", (
             string id, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
@@ -97,10 +100,11 @@ public static class FeedEndpoints
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
             var feed = db.Feed(id);
-            if (feed is not { Kind: "nuget" or "raw" or "maven" or "go", Mode: "hosted",
+            if (feed is not { Mode: "hosted",
                 Visibility: "private", Enabled: false } ||
+                !FeedDefinition.SupportsIsolatedHosted(feed.Kind) ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, true, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only reviewed private NuGet/Raw hosted drafts can be activated" });
+                return Results.Conflict(new { error = "Only implemented private hosted package feeds can be activated" });
             return Results.Ok(new { id, enabled = true, kind = feed.Kind, mode = "hosted",
                 visibility = "private" });
         }).RequireRateLimiting("publish");
@@ -112,10 +116,11 @@ public static class FeedEndpoints
             if (!FeedDefinition.ValidId(id)) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
             var feed = db.Feed(id);
-            if (feed is not { Kind: "nuget" or "raw" or "maven" or "go", Mode: "hosted",
+            if (feed is not { Mode: "hosted",
                 Visibility: "private", Enabled: true } ||
+                !FeedDefinition.SupportsIsolatedHosted(feed.Kind) ||
                 !db.TrySetHostedFeedEnabled(id, feed.Kind, false, Access.Actor(ctx)))
-                return Results.Conflict(new { error = "Only active private NuGet/Raw hosted feeds can be disabled" });
+                return Results.Conflict(new { error = "Only active private hosted package feeds can be disabled" });
             // Keep every revision, digest, journal and blob. Re-activation
             // is a separate explicit operator action; no GC is performed.
             return Results.Ok(new { id, enabled = false, retained = true });
