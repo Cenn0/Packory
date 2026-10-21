@@ -97,29 +97,37 @@ def postgres():
     return con
 
 
-def metadata_tables(connection):
-    """Select all authoritative tables for a supported Packory schema version."""
+def database_schema_version(connection):
+    """Read the exact Packory version, not a guess from table existence."""
     marker = connection.execute(
         "SELECT to_regclass('packory_schema_version')").fetchone()[0]
     if marker is None:
-        return CORE_TABLES
+        return 0
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in (1, 2, 3, 4, 5, 6, 7, 8):
+    if not row or type(row[0]) is not int or row[0] not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise SnapshotError("Unknown Packory database schema version")
-    if row[0] >= 7:
+    return row[0]
+
+
+def metadata_tables(connection):
+    """Select all authoritative tables for a supported Packory schema version."""
+    version = database_schema_version(connection)
+    if version == 0:
+        return CORE_TABLES
+    if version >= 7:
         for table in SECURITY_REGISTRY_TABLES:
             if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is None:
                 raise SnapshotError("Missing authoritative Skill/MCP security metadata table")
     return (CORE_TABLES + ("packory_schema_version",) +
-            (FEED_TABLES if row[0] >= 2 else ()) +
-            (DIGEST_TABLES if row[0] >= 3 else ()) +
-            (ISOLATED_FEED_TABLES if row[0] >= 4 else ()) +
-            (RAW_TABLES if row[0] >= 5 else ()) +
-            (MAVEN_TABLES if row[0] >= 6 else ()) +
-            (GO_TABLES if row[0] >= 7 else ()) +
-            (FEED_ASSET_TABLES if row[0] >= 8 else ()) +
-            (SECURITY_REGISTRY_TABLES if row[0] >= 7 else ()))
+            (FEED_TABLES if version >= 2 else ()) +
+            (DIGEST_TABLES if version >= 3 else ()) +
+            (ISOLATED_FEED_TABLES if version >= 4 else ()) +
+            (RAW_TABLES if version >= 5 else ()) +
+            (MAVEN_TABLES if version >= 6 else ()) +
+            (GO_TABLES if version >= 7 else ()) +
+            (FEED_ASSET_TABLES if version >= 8 else ()) +
+            (SECURITY_REGISTRY_TABLES if version >= 7 else ()))
 
 
 def counts(connection):
@@ -367,10 +375,10 @@ def verify(folder):
             raise SnapshotError("Invalid PostgreSQL row counts")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
+            if type(db_version) is not int or db_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
                 raise SnapshotError("Unknown Packory database schema version")
             required = set(CORE_TABLES)
-            if db_version in (1, 2, 3, 4, 5, 6, 7, 8):
+            if db_version in (1, 2, 3, 4, 5, 6, 7, 8, 9):
                 required.add("packory_schema_version")
             if db_version >= 2:
                 required.update(FEED_TABLES)
@@ -419,6 +427,7 @@ def backup(directory, s3, bucket, prefix, max_bytes):
     if not versioning_enabled(s3, bucket):
         raise SnapshotError("S3 bucket versioning must be enabled to snapshot all object versions")
     with postgres() as pg:
+        db_version = database_schema_version(pg)
         tables = metadata_tables(pg)
         initial = metadata_fingerprints(pg, tables)
         original_inventory = inventory(s3, bucket, prefix)
@@ -431,7 +440,7 @@ def backup(directory, s3, bucket, prefix, max_bytes):
             entries, markers, total = capture_object_versions(
                 s3, bucket, prefix, staged, max_bytes, source_inventory=original_inventory)
             final = metadata_fingerprints(pg, tables)
-            if final != initial or metadata_tables(pg) != tables:
+            if final != initial or metadata_tables(pg) != tables or database_schema_version(pg) != db_version:
                 raise SnapshotError("Metadata changed during supposedly offline snapshot")
             if (not versioning_enabled(s3, bucket) or
                     inventory_signature(*inventory(s3, bucket, prefix), prefix) != original_signature):
@@ -443,14 +452,7 @@ def backup(directory, s3, bucket, prefix, max_bytes):
                              "sha256": checksum(staged / "metadata.dump"),
                              "table_counts": {name: value["count"] for name, value in final.items()},
                              "table_fingerprints": final,
-                             "database_schema_version": (8 if "feed_assets" in tables else
-                                                         7 if "go_modules" in tables else
-                                                         6 if "maven_assets" in tables else
-                                                         5 if "raw_artifacts" in tables else
-                                                         4 if "feed_nuget_versions" in tables else
-                                                         3 if "nuget_digests" in tables else
-                                                         2 if "feeds" in tables else
-                                                         1 if "packory_schema_version" in tables else 0)},
+                             "database_schema_version": db_version},
                 "objects": entries, "delete_markers": markers,
                 "snapshot_bytes": total,
                 "historical_versions_retained_in_backup": True,

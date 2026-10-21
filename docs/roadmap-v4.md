@@ -20,7 +20,7 @@ Packory should distribute packages through existing native package managers. A R
 
 | ID | Priority | Scope | Acceptance for the milestone | State at this plan |
 | --- | --- | --- | --- | --- |
-| E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Partial**: private NuGet/Raw hosted feeds and a new private Maven hosted release slice; shared V8 feed asset ledger, exact token grants and isolation tests. Other native adapters, protocol conformance and real-provider recovery remain open |
+| E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Partial**: private NuGet/Raw hosted feeds and new private Maven and Go hosted slices; shared V8 feed asset ledger, exact token grants and isolation tests. Other native adapters, protocol conformance and real-provider recovery remain open |
 | E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90 merged**, experimental; no production/provider qualification |
 | E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90 merged**, pinned CLI smoke passed; no universal Helm/Kubernetes conformance |
 | E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** parser #92 and global immutable hosted release transport + V6 metadata/recovery + Maven native consume #93 merged; bounded Maven Central CI retry #95 merged; bounded verified checksum PUTs for already committed immutable release artifacts added. Native deploy (including mutable metadata PUT), Gradle conformance, private feeds, SNAPSHOT, atomic multi-file release and proxy remain open |
@@ -106,3 +106,14 @@ Do not mark E0 complete merely because this PR builds: per-feed npm,
 Cargo, PyPI, OCI and Go are not isolated, native client and recovery
 qualification needs widening and deployment-target real-provider testing
 still belongs to E11.
+
+### E0 continuation: private Go GOPROXY (branch acceptance pending)
+
+The existing immutable Go module triplet implementation is reused by
+private Go hosted feeds through the V8 feed asset ledger. The new native
+endpoints do not consult global Go coordinates, and managed grants
+never authorize another feed. Native Go two-feed consumption and
+file/DB/security negatives were added to the CI gate. This remains
+a bounded hosted subset without upstream mirror or external checksum
+trust. Overall E0 remains open pending other adapters, hosted/proxy
+origin policies, full fault/restart/restore and real-provider evidence.

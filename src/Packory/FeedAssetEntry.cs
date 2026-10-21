@@ -13,10 +13,15 @@ public sealed record FeedAssetEntry(string FeedId, string Kind, string Path,
     {
         "raw" => $"feeds/{entry.FeedId}/raw/{entry.Name}/{entry.Version}/payload.blob",
         "maven" => $"feeds/{entry.FeedId}/maven/{entry.Path}",
+        "go" => FeedGoBundle.BundleKey(entry.FeedId, entry.Name, entry.Version),
         _ => throw new ArgumentException("Unsupported private artifact kind.")
     };
 
     public static string RawPath(string name, string version) => name + "/" + version;
+
+    public static string GoPath(string module, string version) =>
+        GoProxyCoordinates.EncodeModulePath(module) + "/@v/" +
+        GoModuleBundle.EncodedVersion(version) + ".zip";
 
     public static bool Valid(FeedAssetEntry? item)
     {
@@ -37,6 +42,8 @@ public sealed record FeedAssetEntry(string FeedId, string Kind, string Path,
             return item.Name == coordinates.GroupId + ":" + coordinates.ArtifactId &&
                 item.Version == coordinates.Version &&
                 item.MediaType == MavenEndpoints.AssetMediaType(coordinates.Extension);
+
+        if (item.Kind == "go") return FeedGoBundle.Valid(item);
 
         return false;
     }

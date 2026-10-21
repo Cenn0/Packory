@@ -1,4 +1,4 @@
-# Feed control plane — E0 private hosted NuGet, Raw and Maven (experimental)
+# Feed control plane — E0 private hosted NuGet, Raw, Maven and Go (experimental)
 
 Packory exposes a versioned **admin-only feed inventory**, disabled drafts for all protocol types and explicitly activated, private NuGet and Raw hosted adapters. Six legacy descriptors explain which ecosystems share existing global native URLs. Read access is administrator-only and returns `isolationSupported: false` to prevent clients from interpreting descriptors as independently routed/authorized feeds.
 
@@ -15,7 +15,7 @@ Packory exposes a versioned **admin-only feed inventory**, disabled drafts for a
 
 `GET /api/v1/admin/feeds?limit=25&after=default-nuget` returns `{apiVersion:"v1",items:[...],nextCursor, isolationSupported:false}`. Valid limits are 1–100; invalid cursors or IDs fail closed. `GET /api/v1/admin/feeds/{id}` returns one descriptor or 404. Admin API tokens or correctly scoped OIDC admin access are required; a read or publish credential is forbidden. Responses use `Cache-Control: no-store`.
 
-## Staged administrative drafts (only reviewed private NuGet, Raw or Maven hosted feeds can be activated)
+## Staged administrative drafts (only reviewed private NuGet, Raw, Maven or Go hosted feeds can be activated)
 
 Admins may **prepare disabled, private** feed descriptors for review. This
 capability is a database-backed metadata staging step, **not** hosted/proxy
@@ -49,7 +49,7 @@ for an operating feed.
 
 ## Non-goals and pending MS2 gates
 
-This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet, Raw and Maven hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
+This implementation is **not** general hosted/proxy feed support, tenant separation or full feed-CRUD. The isolated NuGet, Raw, Maven and Go hosted slices are documented below; the other kinds and all proxy modes remain staging-only. Do not create draft feed records via the API or directly in the DB and expect native requests to route to them; ad hoc SQL mutations bypass policy validation and are unsupported. Next gates: explicit feed routing, legacy compatibility, authorization of native reads/writes, namespace reservations, durable CAS/reference migration, quota, audit, rollback and real provider restore tests. See [schema versioning](schema-versioning.md), [roadmap](roadmap.md), and [support matrix](support-matrix.md).
 
 
 ## V4 experimental private hosted NuGet feeds — first operational slice
@@ -214,3 +214,49 @@ SNAPSHOT, private Maven upstream proxy, full Gradle conformance,
 per-feed quotas, multi-writer coordination, real-provider S3 disaster
 recovery or production suitability. The CI native Maven dependency
 consumption is a bounded test of the specified client/operation only.
+
+## V4 E0 private Go modules — bounded hosted GOPROXY
+
+An administrator may explicitly activate disabled `kind=go`,
+`mode=hosted`, private drafts. Private Go clients use
+`/feeds/{feedId}/go/` as their GOPROXY root. Packory-specific publishing
+accepts an authenticated multipart POST to
+`/feeds/{feedId}/api/go/modules` with `module`, `version`,
+`mod` and `zip` plus optional RFC3339 `time`.
+
+Exact managed grants `feed:{feedId}:read` and
+`feed:{feedId}:publish` are required. Missing credentials get 401;
+credentials for a different feed get 403. An inactive but otherwise
+authorized feed returns 404. No global Go module, public mirror, or
+other feed is consulted as a fallback. Private module discovery does not
+appear in global catalog routes.
+
+One validated GOPROXY revision consists of `.info`, `.mod` and
+`.zip` in a single immutable bundle under
+`feeds/{feedId}/go/<hashed-module>/<hashed-version>.bundle`.
+The shared V8 `feed_assets` ledger stores the canonical encoded
+coordinate and SHA-256+size of the atomic bundle. The nested Go resource
+digests are independently re-derived and checked only **after**
+the committed bundle hash is verified; they are not trusted from an
+incoming request. Publication uses the durable `feed-go` intent,
+feed-qualified lock, immutable blob, then transactional ledger+audit.
+Offline recovery and integrity scans enumerate the same ledger.
+
+Read-only GOPROXY supports `@v/list`, `@latest`, versioned
+`.info`, `.mod` and `.zip`. The native client harness checks
+two private feeds storing different bytes under identical coordinates,
+with separate credentials and module caches over an ephemeral HTTPS proxy.
+The official Go command sends GOAUTH/.netrc credentials **only via HTTPS**;
+plaintext HTTP private Go clients must not be advertised as supported.
+A `.netrc` entry is scoped to a hostname, not a URL path: multiple
+independently scoped feeds on the same host require separate client
+credential contexts, dedicated hosts, or a reviewed path-scoped
+`GOAUTH` helper on supported Go versions (Go 1.24+). Never embed
+long-lived tokens in `GOPROXY` URLs, shell history or CI logs.
+The isolated synthetic test disables the external Go checksum database;
+**public checksum trust is not implemented**.
+
+No public read-through mirror, automatic checksum database trust,
+universal Go archive acceptance, multi-writer/tenant isolation,
+real-provider restore certification, or production suitability is
+claimed. Keep broad Go ecosystem support gated on E3/E11.

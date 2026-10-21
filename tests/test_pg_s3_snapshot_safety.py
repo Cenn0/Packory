@@ -249,6 +249,7 @@ class SourceInventoryTests(unittest.TestCase):
             sentinel = Path(temp) / "retain"
             sentinel.write_bytes(b"unrelated")
             with patch.object(mod, "postgres", return_value=nullcontext(object())), \
+                 patch.object(mod, "database_schema_version", return_value=0), \
                  patch.object(mod, "metadata_tables", return_value=mod.CORE_TABLES), \
                  patch.object(mod, "metadata_fingerprints", return_value=fingerprints), \
                  patch.object(mod, "pg_command", side_effect=lambda _op, path: path.write_bytes(b"pg")), \

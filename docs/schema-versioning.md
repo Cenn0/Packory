@@ -84,3 +84,29 @@ A V8 PostgreSQL/S3 snapshot requires `feed_assets` row fingerprints.
 Rollback is only a coordinated verified **pre-upgrade** database+blob
 restore; no in-place database downgrade is supported. Real-provider S3,
 fault-injection and production recovery qualification remain open.
+
+## V9: private Go feed asset kind and rollback boundary
+
+V9 is a **forward-only, transactional metadata migration**, not an
+automatic rollback. It extends the `feed_assets.kind` CHECK constraint
+from `raw,maven` to `raw,maven,go`. The existing parent feed table,
+individual raw/Maven rows, immutable blobs and audit/publication records
+are preserved.
+
+- SQLite rebuilds only the `feed_assets` child table inside a single
+  migration transaction. Foreign-key checking is suspended before
+  transaction start and `PRAGMA foreign_key_check` must pass before commit.
+- PostgreSQL replaces the `feed_assets_kind_check` constraint within
+  the version-gated transaction; the existing rows and PK/index remain.
+- The `packory_schema_version` marker advances from V8 to V9. An older
+  V8 executable will reject this state rather than silently write to it.
+  Operators must take a verified coordinated backup before upgrade;
+  reverting requires restoring a verified V8-era backup, **not**
+  editing the version marker.
+- The PostgreSQL/S3 offline snapshot verifier retains compatibility with
+  prior V8 manifests and now reads the actual database version from the
+  version marker. It refuses unsupported versions instead of inferring
+  schema solely from presence of `feed_assets`.
+
+No high-availability rolling downgrade compatibility or real-provider
+disaster-recovery guarantee is inferred from this migration.

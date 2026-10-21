@@ -11,7 +11,7 @@ namespace Packory;
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 8;
+    public const int Current = 9;
 
     private static int RequireKnown(object? value)
     {
@@ -126,7 +126,7 @@ public static class SchemaVersionGuard
     private const string FeedAssetSchema = """
         CREATE TABLE IF NOT EXISTS feed_assets (
             feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
-            kind TEXT NOT NULL CHECK(kind IN ('raw','maven')),
+            kind TEXT NOT NULL CHECK(kind IN ('raw','maven','go')),
             path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
             media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
             size BIGINT NOT NULL CHECK(size > 0), created_at TEXT NOT NULL,
@@ -154,6 +154,27 @@ public static class SchemaVersionGuard
         DROP TABLE feeds;
         ALTER TABLE feeds_e0_new RENAME TO feeds;
         CREATE INDEX feeds_kind_id ON feeds(kind,id);
+        """;
+
+    // V9: widen only the immutable child ledger kind CHECK. Existing private
+    // Raw/Maven data must survive bit-for-bit; never drop the parent feeds table.
+    private const string SqliteFeedAssetGoMigration = """
+        CREATE TABLE feed_assets_v9_new (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            kind TEXT NOT NULL CHECK(kind IN ('raw','maven','go')),
+            path TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+            media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size > 0), created_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,kind,path)
+        );
+        INSERT INTO feed_assets_v9_new
+            (feed_id,kind,path,name,version,media_type,sha256,size,created_at)
+        SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+        FROM feed_assets;
+        DROP TABLE feed_assets;
+        ALTER TABLE feed_assets_v9_new RENAME TO feed_assets;
+        CREATE INDEX feed_assets_identity
+            ON feed_assets(feed_id,kind,name,version);
         """;
 
     private static readonly (string Id, string Kind, string Name)[] Defaults =
@@ -286,6 +307,19 @@ public static class SchemaVersionGuard
             if (violations.Read())
                 throw new InvalidOperationException("Foreign-key violation after feed migration.");
         }
+        if (version >= 8 && version < 9)
+        {
+            using var migration = connection.CreateCommand();
+            migration.Transaction = tx;
+            migration.CommandText = SqliteFeedAssetGoMigration;
+            migration.ExecuteNonQuery();
+            using var check = connection.CreateCommand();
+            check.Transaction = tx;
+            check.CommandText = "PRAGMA foreign_key_check";
+            using var violations = check.ExecuteReader();
+            if (violations.Read())
+                throw new InvalidOperationException("Foreign-key violation after V9 feed migration.");
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -390,6 +424,15 @@ public static class SchemaVersionGuard
                 ALTER TABLE feeds ADD CONSTRAINT feeds_kind_check
                     CHECK(kind IN ('nuget','npm','cargo','pypi','oci','skill','raw','maven','go'));
                 """ + FeedAssetSchema, connection, tx);
+            schema.ExecuteNonQuery();
+        }
+        if (version >= 8 && version < 9)
+        {
+            using var schema = new NpgsqlCommand("""
+                ALTER TABLE feed_assets DROP CONSTRAINT IF EXISTS feed_assets_kind_check;
+                ALTER TABLE feed_assets ADD CONSTRAINT feed_assets_kind_check
+                    CHECK(kind IN ('raw','maven','go'));
+                """, connection, tx);
             schema.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(

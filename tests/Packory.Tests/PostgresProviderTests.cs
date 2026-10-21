@@ -37,7 +37,7 @@ public sealed class PostgresProviderTests
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.False(database.IsHealthy()); // Fail closed on future writer schema.
             using (var version = new NpgsqlCommand(
-                "UPDATE packory_schema_version SET version=8 WHERE slot=1", isolated))
+                "UPDATE packory_schema_version SET version=9 WHERE slot=1", isolated))
                 Assert.Equal(1, version.ExecuteNonQuery());
             Assert.True(database.IsHealthy());
             using (var drop = new NpgsqlCommand("DROP TABLE feeds CASCADE", isolated))
