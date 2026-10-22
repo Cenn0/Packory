@@ -46,6 +46,7 @@ jobs:
           package-manager-cache: false
       - name: Validate offline backup and restore tooling
         run: |
+          python3 -m unittest discover -s tests -p test_qualification_gate.py -v
           python3 -m unittest discover -s tests -p test_offline_backup.py -v
           python3 -m unittest discover -s tests -p test_maven_snapshot.py -v
       - name: Verify fail-closed signed production release evidence checks (synthetic fixtures)
@@ -159,3 +160,35 @@ jobs:
         run: docker compose -f compose.ghcr.yaml config --quiet
       - name: Build self-hosted image
         run: docker build -t packory:ci .
+  qualification:
+    name: Complete qualification
+    needs: [privacy, test, maven, dashboard, container]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require all local CI jobs
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -c 'import json,os; jobs=json.loads(os.environ["NEEDS_JSON"]); assert len(jobs)==5 and all(j["result"]=="success" for j in jobs.values()), "Required CI job did not pass"'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require exact-commit provider and interoperability workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_EVENT: ${{ github.event_name == 'pull_request' && 'pull_request' || 'push' }}
+        run: >-
+          python3 scripts/qualification_gate.py --sha "$SOURCE_SHA"
+          --event "$SOURCE_EVENT" --wait-seconds 1800
+          --output "$RUNNER_TEMP/ci-qualification.json"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ci-qualification-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-qualification.json
+          if-no-files-found: error
+          retention-days: 7

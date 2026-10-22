@@ -125,6 +125,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
     def test_v11_maven_snapshots_restore_exact_metadata_and_same_scope_references(self):
         self.coordinated_restore(11)
 
+    def test_v14_restores_exact_npm_tag_tombstones_and_cargo_yank_states(self):
+        self.coordinated_restore(14)
+
     def coordinated_restore(self, version):
         import boto3
         import psycopg
@@ -157,10 +160,14 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
             with psycopg.connect("dbname=" + source_db, autocommit=True) as source:
                 tables = (*mod.CORE_TABLES, *mod.FEED_TABLES, *mod.DIGEST_TABLES, *mod.ISOLATED_FEED_TABLES,
                           *((*mod.RAW_TABLES, *mod.MAVEN_TABLES, *mod.GO_TABLES, *mod.SECURITY_REGISTRY_TABLES) if version >= 10 else ()),
-                          *(mod.MAVEN_METADATA_TABLES if version >= 11 else ()))
+                          *(mod.MAVEN_METADATA_TABLES if version >= 11 else ()),
+                          *(mod.FEED_NPM_TAG_TABLES if version >= 13 else ()),
+                          *(mod.FEED_CARGO_YANK_TABLES if version >= 14 else ()))
                 for name in tables:
                     if ((version >= 10 and name == "feeds") or
-                            (version >= 11 and name in ("maven_assets", "maven_metadata"))):
+                            (version >= 11 and name in ("maven_assets", "maven_metadata")) or
+                            (version >= 13 and name == "feed_npm_tags") or
+                            (version >= 14 and name == "feed_cargo_yanks")):
                         continue
                     source.execute(
                         "CREATE TABLE " + name + " (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
@@ -211,6 +218,26 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                     for item in maven_metadata:
                         source.execute("INSERT INTO maven_metadata (" + ",".join(mod.maven.METADATA_COLUMNS) + ") VALUES (" + ",".join(["%s"] * len(mod.maven.METADATA_COLUMNS)) + ")",
                                        tuple(item[name] for name in mod.maven.METADATA_COLUMNS))
+                if version >= 13:
+                    source.execute("""CREATE TABLE feed_npm_tags (
+                        feed_id TEXT NOT NULL REFERENCES feeds(id), name TEXT NOT NULL,
+                        tag TEXT NOT NULL, version TEXT NOT NULL, deleted INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL, PRIMARY KEY(feed_id,name,tag))""")
+                    for item, _ in feed_objects:
+                        if item["kind"] == "npm":
+                            for tag, target, deleted in (("latest", item["version"], 0), ("retired", "", 1)):
+                                source.execute("INSERT INTO feed_npm_tags VALUES(%s,%s,%s,%s,%s,%s)",
+                                               (item["feed_id"], item["name"], tag, target, deleted, fixtures.STAMP))
+                if version >= 14:
+                    source.execute("""CREATE TABLE feed_cargo_yanks (
+                        feed_id TEXT NOT NULL REFERENCES feeds(id), name TEXT NOT NULL,
+                        version TEXT NOT NULL, yanked INTEGER NOT NULL CHECK(yanked IN (0,1)),
+                        updated_at TEXT NOT NULL, PRIMARY KEY(feed_id,name,version))""")
+                    for item, _ in feed_objects:
+                        if item["kind"] == "cargo":
+                            source.execute("INSERT INTO feed_cargo_yanks VALUES(%s,%s,%s,%s,%s)",
+                                           (item["feed_id"], item["name"], item["version"],
+                                            int(item["feed_id"].startswith("alpha-")), fixtures.STAMP))
                 before = mod.metadata_fingerprints(source)
                 self.assertEqual(
                     set(before),
@@ -257,6 +284,11 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                         self.assertEqual(saved["feed_references"], mod.feed_references(restored))
                         self.assertEqual(len(feed_objects), len(saved["feed_references"]["assets"]))
                         self.assertEqual(2, len(saved["feed_references"]["oci_tags"]))
+                    if version >= 14:
+                        references = mod.feed_references(restored)
+                        self.assertEqual(4, len(references["npm_tags"]))
+                        self.assertEqual(2, sum(row["deleted"] for row in references["npm_tags"]))
+                        self.assertEqual([1, 0], [row["yanked"] for row in references["cargo_yanks"]])
                     if version >= 11:
                         self.assertEqual(saved["maven_references"], mod.maven_references(restored))
                         restored_metadata = mod.maven_references(restored)["metadata"]

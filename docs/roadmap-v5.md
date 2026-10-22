@@ -148,4 +148,60 @@ The dependencies deliberately avoid blocking a **headless** release on every bro
 
 **Tracking:** keep [#36](https://github.com/Cenn0/Packory/issues/36) as the production release gate, [#76](https://github.com/Cenn0/Packory/issues/76) for required status checks, and [#91](https://github.com/Cenn0/Packory/issues/91) for native ecosystem expansion. Add focused issues for selected IDs when scheduled; avoid bulk-creating placeholder issues or asserting arbitrary percent completion. Close a parent only after each promised acceptance is independently linked and reviewed.
 
+## 7. Integration checkpoint — 22 October 2026
+
+The proposed integration combines #118 and #119, repairs their cross-branch
+Cargo consistency regression, reconciles V14 architecture/README statements,
+adds [complete CI qualification and a public result index](ci-qualification.md),
+and extends coordinated PostgreSQL/Moto recovery to npm tag tombstones and
+Cargo yank state. These are scoped implementation increments for V5-00,
+V5-01/V5-02/V5-03, V5-12 and V5-22. They do **not** close all acceptance
+criteria, constitute independent approval, or complete the 37-point roadmap.
+
+| IDs | Current boundary / next required acceptance |
+| --- | --- |
+| V5-00 | Integration reconciles npm/Cargo/V14 claims; final CI and independent review required |
+| V5-01 | Aggregate check implemented; administrator-required contexts, bypass review and red/green enforcement proof remain |
+| V5-02 | Full-workflow publish gate prepared; observe exact post-merge GHCR build/pull/digest and deployment smoke |
+| V5-03 | Minimal exact-commit CI index implemented; full version/provider/operation records and independent approval remain |
+| V5-10 | Requires selected real provider and authorized isolated resources; emulator success cannot close it |
+| V5-11 | Requires coordinated real-provider restore and measured RPO/RTO |
+| V5-12 | V14 PG/Moto recovery fixture added; historical release migration, crash matrix and operator rollback remain |
+| V5-13 | Change-scoped authorization/integrity review only; comprehensive route/SSRF/audit review remains |
+| V5-14 | SHA-pinned Actions and source integrity exist; complete SBOM/signatures/license/vulnerability/provenance review remains |
+| V5-15 | Deployment-specific load, alerts, secret rotation, incident and SLO measurements remain |
+| V5-16 | Blocked on applicable independent release acceptance; no tagged release authorized by a green CI index |
+| V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
+| V5-21 | Durable scoped npm tag API retained; broader client/concurrency/provenance/deprecation work remains |
+| V5-22 | Private V14 Cargo yank/unyank integrated; allowlisted mirror, broader clients and graduation evidence remain |
+| V5-23 | PyPI bounded profile; remaining version/distribution/sidecar/yank/proxy qualification unchanged |
+| V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
+| V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
+| V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |
+| V5-27 | Immutable Raw/ranges exist; per-feed accounting, retention and discovery remain |
+| V5-30 | Browser BFF and its security/E2E acceptance remain unimplemented |
+| V5-31 | Privileged dashboard depends on V5-30; current catalog UI does not satisfy it |
+| V5-32 | Existing static scan/approval does not verify publisher signatures or ownership |
+| V5-33 | Inert reviewed MCP Registry profile exists; full publisher/sync/lifecycle qualification remains |
+| V5-34 | Existing read-only global MCP; private discovery and broader independent clients remain |
+| V5-35 | Existing static Skill quality; durable behavioral assessment and isolated runner remain |
+| V5-36 | Optional gateway remains unimplemented and requires its separate trust boundary |
+| V5-40 | RubyGems/Bundler adapter and native acceptance remain unimplemented |
+| V5-41 | Composer adapter and native acceptance remain unimplemented |
+| V5-42 | Terraform/OpenTofu module registry and native acceptance remain unimplemented |
+| V5-43 | Provider protocol/signing/trust matrix remains unimplemented |
+| V5-44 | Conan revision/binary/native profile remains unimplemented |
+| V5-45 | Signed coherent APT snapshots/native trust checks remain unimplemented |
+| V5-46 | Signed RPM metadata/native trust checks remain unimplemented |
+| V5-50 | Conditional ecosystem research/selection requires demand and an ADR |
+| V5-51 | Conditional model manifests/licensing/client contract and capacity evidence required |
+| V5-52 | Conditional multi-writer work requires measured need, independent fencing and partition proof |
+| V5-53 | Conditional runtime split/broker work requires benchmarks and an ADR; monolith retained |
+
+All 37 IDs remain subject to their original objective acceptance. Do not
+reinterpret these scoped increments as completion of external or conditional
+gates. The effective ruleset observed at this checkpoint requires one
+independent approval; #118 and #119 had no submitted reviews. Their existing
+individual green runs cannot substitute for integrated-branch qualification.
+
 **No artificial schedule:** no dates, percent complete or estimates are asserted without assigned capacity and measured throughput. Prioritize completion of the limited supported single-writer core over expanding the unchecked protocol inventory.

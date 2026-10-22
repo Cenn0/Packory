@@ -18,7 +18,7 @@ public static class RegistryCapabilities
         new("npm", "npm registry", true, true, true, true, "experimental",
             "Private hosted feeds with mutable scoped dist-tags; no private proxy, unpublish or broader native-client qualification"),
         new("cargo", "Cargo sparse registry", true, false, true, true, "experimental",
-            "Private hosted sparse feeds; no private yank or crates.io proxy; bounded client matrix"),
+            "Private hosted sparse feeds with scoped yank/unyank; no crates.io proxy, owner management or broad client matrix"),
         new("pypi", "PyPI Simple API", true, false, true, true, "experimental",
             "Private hosted Simple API and Twine uploads; canonical bounded PEP 440 profile; no upstream proxy"),
         new("oci", "OCI Distribution v2", true, false, true, true, "experimental",

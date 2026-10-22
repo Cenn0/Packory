@@ -17,6 +17,11 @@ Review a new upstream patch release and its changes, fetch the **commit object b
 
 ## Remaining gates
 
+[Exact-commit CI qualification](ci-qualification.md) now aggregates provider,
+interoperability, source and scanner workflows and exports a minimal public
+evidence index. This prepares V5-01/V5-03 controls; required branch contexts,
+independent approval and production supply-chain evidence remain separate.
+
 Docker build/base images and PostgreSQL service images are not yet digest-pinned; SBOM, image signatures/provenance, dependency/license/SAST coverage and independent supply-chain review remain open in [release gates](release-gates.md). Public repository workflow jobs are generally free under GitHub's public-repository terms, but this cannot be treated as a permanent zero-quota guarantee.
 
 ## Exact-source CI artifact (V5 assurance slice)

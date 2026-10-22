@@ -187,6 +187,36 @@ PID=""
 start
 consume restarted
 
+# Native Cargo uses the new V14 feed-local API. The index flag changes
+# without mutating or deleting the immutable crate. Another feed with the same
+# crate coordinate remains unyanked.
+cargo_yank() {
+  action="$1"
+  (cd "$WORK/cargo-alpha-package" && CARGO_HOME="$WORK/cargo-alpha-publish-home" \
+    CARGO_REGISTRIES_PRIVATE_TOKEN="$(token cargo-alpha write)" \
+    cargo yank --registry private --version 1.0.0 $action packory-e0-private) \
+    >"$WORK/cargo-yank-$action.log" 2>&1 || {
+      echo "Native Cargo yank operation failed" >&2; exit 1;
+    }
+}
+assert_yanked() {
+  feed="$1"
+  credential="$(token "$feed" read)"
+  expected="$2"
+  curl --fail --silent --show-error -H "Authorization: $credential" \
+    "$BASE/feeds/$feed/cargo/index/pa/ck/packory-e0-private" |
+    python3 -c 'import json,sys; rows=[json.loads(row) for row in sys.stdin if row.strip()]; assert len(rows)==1; assert rows[0]["yanked"] is (sys.argv[1]=="true")' "$expected"
+}
+assert_yanked cargo-alpha false
+assert_yanked cargo-beta false
+test "$(status -X DELETE "$BASE/feeds/cargo-alpha/cargo/api/v1/crates/packory-e0-private/1.0.0/yank")" = 401
+test "$(status -X DELETE -H "Authorization: $(token cargo-beta write)" "$BASE/feeds/cargo-alpha/cargo/api/v1/crates/packory-e0-private/1.0.0/yank")" = 403
+cargo_yank ""
+assert_yanked cargo-alpha true
+assert_yanked cargo-beta false
+cargo_yank "--undo"
+assert_yanked cargo-alpha false
+
 # A foreign valid credential cannot authorize private discovery or assets.
 test "$(status "$BASE/feeds/cargo-alpha/cargo/index/config.json")" = 401
 test "$(status -H "Authorization: $(token cargo-beta read)" "$BASE/feeds/cargo-alpha/cargo/index/config.json")" = 403

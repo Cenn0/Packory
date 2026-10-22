@@ -26,6 +26,9 @@ public interface IPackageDatabase
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
     IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null);
+    // Mutable private Cargo sparse-index state; archive bytes remain immutable.
+    bool? FeedCargoYanked(string feedId, string name, string version);
+    bool SetFeedCargoYanked(string feedId, string name, string version, bool yanked, string actor);
     IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name);
     bool SetFeedNpmTag(string feedId, string name, string tag, string version, bool deleted, string actor);
     string? GetFeedOciTag(string feedId, string name, string tag);

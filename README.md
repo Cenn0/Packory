@@ -70,7 +70,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 
 **Private hosted profile:** create a disabled draft, explicitly activate it as an administrator and issue an exact `feed:{id}:read` or `feed:{id}:publish` managed grant. Most roots are `/feeds/{id}/{protocol}/`; OCI preserves its native `/v2/` prefix at `/v2/feeds/{id}/{repository}/`. Legacy roots remain available, with OCI repository prefix `feeds/` reserved for private routing. See [feed lifecycle, client setup and protocol limits](docs/feeds.md).
 
-Private npm includes a durable scoped mutable dist-tag API; unpublish/deprecation policy and broader client qualification remain open. Private Cargo has no yank API. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
+Private npm includes a durable scoped mutable dist-tag API; unpublish/deprecation policy and broader client qualification remain open. Private Cargo has an experimental, audited, scoped yank/unyank API (schema V14); owner controls and upstream proxy remain open. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
 
 ### Use Packory as a registry
 
@@ -117,7 +117,7 @@ flowchart LR
   Result --> Catalog
 ```
 
-Each adapter keeps its own native protocol while sharing authorization, persistence and recovery. Schema V11 retains the private artifact ledger and OCI tag references and adds atomic Maven metadata; npm/Cargo/PyPI commit protocol metadata and original package bytes in one verified immutable bundle. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
+Each adapter keeps its own native protocol while sharing authorization, persistence and recovery. Schema V14 retains private immutable artifact rows and separate OCI tags/Maven metadata, and adds durable npm tag and Cargo yank pointers; npm/Cargo/PyPI commit protocol metadata and original package bytes in one verified immutable bundle. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
 
 ## Limitations and security
 

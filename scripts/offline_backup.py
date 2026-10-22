@@ -61,7 +61,7 @@ def check_sqlite(folder: Path):
         if "packory_schema_version" not in tables:
             return  # Unversioned historical offline backups retain their existing profile.
         row = connection.execute("SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-        if not row or type(row[0]) is not int or row[0] not in range(1, 14):
+        if not row or type(row[0]) is not int or row[0] not in range(1, 15):
             raise ValueError("Unsupported Packory metadata schema version")
         if row[0] < 11:
             return
@@ -98,6 +98,19 @@ def check_sqlite(folder: Path):
                         (tag["deleted"] == 0 and
                          (tag["feed_id"], tag["name"], tag["version"]) not in assets)):
                     raise ValueError("Invalid or cross-feed npm dist-tag reference")
+
+        if row[0] >= 14:
+            if "feed_cargo_yanks" not in tables:
+                raise ValueError("V14 Cargo yank ledger missing")
+            cargo_assets = {(a["feed_id"], a["name"], a["version"])
+                            for a in rows("feed_assets", private_columns) if a["kind"] == "cargo"}
+            yanks = rows("feed_cargo_yanks",
+                         ("feed_id", "name", "version", "yanked", "updated_at"))
+            for pointer in yanks:
+                identity = pointer["feed_id"], pointer["name"], pointer["version"]
+                if (identity not in cargo_assets or pointer["yanked"] not in (0, 1) or
+                        not isinstance(pointer["updated_at"], str) or not pointer["updated_at"]):
+                    raise ValueError("Invalid or cross-feed Cargo yank reference")
 
 def manifest_for(folder: Path) -> dict:
     entries = []

@@ -2,7 +2,10 @@
 
 Packory publishes **development** container images to GitHub Container Registry
 (GHCR) after the complete `CI` GitHub Actions workflow succeeds for a push to
-`main`. A merged pull request produces such a push. A failed/canceled CI run
+`main`. `Complete qualification` additionally requires all eight independent
+provider/interoperability/source workflows at that exact commit; see
+[CI qualification](ci-qualification.md). The publisher rechecks their results
+before building. A merged pull request produces such a push. A failed/canceled CI run
 does **not** publish an image. A superseded CI commit is skipped **before**
 the workflow reads its build files, so the mutable `main` image tracks
 the most recent *successfully validated* main commit

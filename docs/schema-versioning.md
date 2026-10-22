@@ -1,6 +1,6 @@
 # Database schema versioning and immutable feed ledgers
 
-The current metadata schema is **V13**, recorded by a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. Upgrades are transactional and forward only. The sections below describe the historical increments; V10 defines the shared private-feed storage contract; V11/V12 add Maven metadata and V13 adds mutable npm dist-tag pointers. Existing artifact bytes and keys are preserved through migration.
+The current metadata schema is **V14**, recorded by a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. Upgrades are transactional and forward only. The sections below describe the historical increments; V10 defines the shared private-feed storage contract; V11/V12 add Maven metadata and V13 adds mutable npm dist-tag pointers; V14 adds private Cargo yank pointers. Existing artifact bytes and keys are preserved through migration.
 
 On upgrade from V1 or an unmarked historical installation, six deterministic `default-*` feeds are seeded (`nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`) with `mode=legacy` and `visibility=runtime`. These descriptors retain their historical global routes and catalog. Separate, explicitly activated private hosted feeds provide independent artifact identities and exact feed permissions for NuGet, npm, Cargo, PyPI, OCI, Raw, Maven and Go. A legacy descriptor does not itself confer isolation. Private Agent Skills feeds remain outside this delivered profile; their existing approval gates are retained.
 
@@ -229,3 +229,28 @@ tag targets against same-feed committed npm assets and verifies the isolated
 restore. SQLite offline backup validates tag targets before accepting the
 snapshot. Older executables reject the new marker; rollback requires an
 isolated restore of the pre-upgrade metadata and blobs, not a marker edit.
+
+## V14: private Cargo sparse-index yank state
+
+V14 adds `feed_cargo_yanks(feed_id,name,version,yanked,updated_at)`, keyed by
+the **exact** private Cargo feed, crate name and published version. A
+transactional insert/update succeeds only for an active private hosted Cargo
+feed and a committed `feed_assets` row with the canonical Cargo path.
+Every change creates an audit event; rejected or cross-feed requests do not
+change a version. The original verified Cargo bundle, checksum and download
+remain immutable. Index reads overlay only the selected feed's yank flag,
+regenerate the sparse-index ETag and preserve Cargo's rule that yanked
+versions remain downloadable by consumers with an existing lockfile.
+
+Both SQLite and PostgreSQL migrate V13 → V14 in their version-gated transaction,
+with no rewriting of prior crate blobs. Forward-only migration means older
+binaries refuse V14; rollback requires a verified **pre-upgrade** database and
+blob snapshot. SQLite offline-backup checks and PostgreSQL/S3 snapshot
+format 4 incorporate the V14 mutable pointer rows and reject cross-feed or
+dangling revision references. Emulator testing is not an external-provider
+restore qualification; see [release gates](release-gates.md).
+
+Native API and client instructions:
+[Cargo and PyPI](cargo-pypi.md). This does **not** implement crate owner
+management, crates.io mirrors, independent publisher signatures or complete
+Cargo interoperability.

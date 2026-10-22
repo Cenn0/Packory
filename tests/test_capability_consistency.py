@@ -38,14 +38,16 @@ class CapabilityConsistencyTests(unittest.TestCase):
         self.assertIn("Feed-begrenzte Dist-Tags", german)
         self.assertIn("Unpublish-/Deprecate-API fehlt weiterhin", german)
 
-    def test_private_cargo_yank_not_advertised(self):
+    def test_private_cargo_yank_is_scoped_without_claiming_full_graduation(self):
         capabilities = contents("src/Packory/RegistryCapabilities.cs")
         ledger = contents("docs/experimental-graduation.md")
         matrix = contents("docs/support-matrix.md")
-        self.assertIn("no private yank", capabilities)
-        self.assertIn("without private yank/unyank", ledger)
-        self.assertIn("Private yank/unyank", matrix)
-        self.assertNotIn("yank/unyank added after historical baseline", ledger)
+        self.assertIn("Private hosted sparse feeds with scoped yank/unyank", capabilities)
+        self.assertIn("no crates.io proxy, owner management or broad client matrix", capabilities)
+        self.assertIn("V14 private feed-local mutable yank overlay", ledger)
+        self.assertIn("scoped mutable private yank state (V14)", matrix)
+        for filename in ("README.md", "README.de.md"):
+            self.assertIn("V14", contents(filename))
 
     def test_public_release_recommendation_remains_explicitly_false(self):
         capabilities = contents("src/Packory/RegistryCapabilities.cs")

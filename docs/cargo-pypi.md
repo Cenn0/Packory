@@ -26,8 +26,9 @@ ETag/304 and records a SHA-256 checksum of each immutable `.crate` file.
 This registry is **not suitable as an interchangeable crates.io source-replacement**
 without a separately implemented, byte-exact crates.io mirror. Only lowercase ASCII
 crate names are currently accepted; this is an explicit subset of Cargo's name grammar.
-Yank/unyank, ownership, reverse dependencies, provenance, index consistency under
-multiple nodes and crates.io mirroring are not implemented.
+Ownership, reverse dependencies, provenance, index consistency under
+multiple nodes and crates.io mirroring are not implemented. Private Cargo
+now has a separately scoped V14 yank/unyank implementation; details follow.
 
 ## PyPI / pip
 
@@ -77,3 +78,36 @@ Primary specifications:
 Packory now exposes Cargo's native DELETE `/cargo/api/v1/crates/{name}/{version}/yank` and PUT `.../unyank` APIs. Both require a publisher/admin token and the matching Cargo namespace grant. They update only the `yanked` flag within the sparse index and write a transactional audit entry; immutable `.crate` bytes remain available for locked dependencies, following Cargo's interpretation. The sparse index ETag changes and is marked `no-cache` for revalidation. Concurrent requests within one writer are serialized by artifact locks.
 
 The CI hosted smoke invokes the native `cargo yank` CLI in both directions. Exact multi-version Cargo client compatibility, crates.io proxying and distributed races are still **unverified**; this is not complete Cargo registry conformance.
+
+## Private Cargo yank / unyank — V14 (experimental)
+
+Activated private hosted Cargo feeds support Cargo's native `DELETE
+/feeds/{feedId}/cargo/api/v1/crates/{name}/{version}/yank` and `PUT
+/feeds/{feedId}/cargo/api/v1/crates/{name}/{version}/unyank` endpoints. Both
+require an **exact feed publish** grant; an anonymous caller gets 401,
+a valid credential for the wrong feed gets 403, and unknown versions receive
+404. A disabled feed remains 404. A read token cannot change yank state.
+
+For a separately configured alternate Cargo registry `private`:
+
+```sh
+cargo yank --registry private --version 1.0.0 example-crate
+cargo yank --registry private --version 1.0.0 --undo example-crate
+```
+
+Provide the scoped token through the usual Cargo credential provider, never
+as a committed credential file. The V14 table stores a mutable overlay on
+the sparse index and an audit record; it never rewrites or deletes immutable
+crate bytes, so lockfile-pinned downloads remain available. The server emits
+a new ETag when state changes and uses private no-store cache control.
+
+Acceptance includes independently authorized same-coordinate private feeds,
+401/403/404, a real `cargo yank` / `--undo` client smoke, SQLite/
+PostgreSQL persistence and backup/snapshot reference validation. This is a
+**bounded Packory experimental profile**, not upstream-vendor endorsement or
+production certification. No owner-management API, secure upstream mirror,
+multiple active writers or full client/OS/provider matrix is implied.
+
+Official protocol references:
+- https://doc.rust-lang.org/cargo/commands/cargo-yank.html
+- https://doc.rust-lang.org/cargo/reference/registry-web-api.html
