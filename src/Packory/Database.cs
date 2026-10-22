@@ -21,6 +21,7 @@ public sealed record GoModuleRevision(string Name, string Version, string Bundle
     string ModSha256, long ModSize, string PublishedAt);
 public sealed record FeedNugetRevision(string FeedId, string Name, string Version,
     string Description, string Sha512, long Size);
+public sealed record FeedNpmTag(string Tag, string Version, bool Deleted);
 public sealed record OciManifestEntry(string Digest, string MediaType, long Size);
 public sealed record OciReferrerEntry(string Digest, string MediaType, long Size, string ArtifactType);
 
