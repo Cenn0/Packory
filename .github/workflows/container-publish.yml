@@ -38,14 +38,24 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
-      - name: Verify source is the commit that passed CI
+      - name: Verify CI source and skip superseded commits before using new build files
+        id: eligibility
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$current_main"
+          if [[ "$current_main" != "$SOURCE_SHA" ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Superseded CI commit; skip image build and publication." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           docker compose -f compose.ghcr.yaml config --quiet
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
 
       - name: Build Packory and offline SkillSpector images
+        if: steps.eligibility.outputs.eligible == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +72,7 @@ jobs:
             -t "$SCANNER_IMAGE:build" workers/skillspector
 
       - name: Smoke-test images before publishing
+        if: steps.eligibility.outputs.eligible == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -87,6 +98,7 @@ jobs:
             http://127.0.0.1:18080/health/ready >/dev/null
 
       - name: Publish SHA and main tags to GitHub Container Registry
+        if: steps.eligibility.outputs.eligible == 'true'
         shell: bash
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,6 +117,20 @@ jobs:
             docker push "$image:sha-$SOURCE_SHA"
           done
 
+          # Both named SHA tags must be retrievable under registry credentials
+          # and must carry the exact source revision that passed CI.
+          for image in "$PACKORY_IMAGE" "$SCANNER_IMAGE"; do
+            docker pull "$image:sha-$SOURCE_SHA" >/dev/null
+            actual_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image:sha-$SOURCE_SHA")"
+            test "$actual_revision" = "$SOURCE_SHA"
+            image_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$image:sha-$SOURCE_SHA")"
+            case "$image_digest" in
+              "$image@sha256:"*) ;;
+              *) echo "Digest read-back failed for published SHA image." >&2; exit 1 ;;
+            esac
+            echo "- Registry-authenticated SHA image read-back: `$image_digest`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
           # Check again before moving the mutable main tags. These two image
           # names cannot be updated atomically; deploy matching SHA tags.
           current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -117,5 +143,16 @@ jobs:
             docker tag "$image:build" "$image:main"
             docker push "$image:main"
             echo "- Published \`$image:main\` and \`$image:sha-$SOURCE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # GHCR package visibility is configured outside this workflow. Report
+          # an anonymous manifest read separately from authenticated digest checks.
+          anonymous_config="$(mktemp -d)"
+          trap 'rm -rf "$anonymous_config"' EXIT
+          for image in "$PACKORY_IMAGE" "$SCANNER_IMAGE"; do
+            if DOCKER_CONFIG="$anonymous_config" docker manifest inspect "$image:sha-$SOURCE_SHA" >/dev/null 2>&1; then
+              echo "- Anonymous manifest access verified: `$image:sha-$SOURCE_SHA`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- Anonymous manifest access NOT verified for `$image`; review package visibility." >> "$GITHUB_STEP_SUMMARY"
+            fi
           done
           echo 'These development images are NOT independently approved production releases.' >> "$GITHUB_STEP_SUMMARY"
