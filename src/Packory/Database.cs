@@ -659,6 +659,54 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return true;
     }
 
+    public bool? FeedCargoYanked(string feedId, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT yanked FROM feed_cargo_yanks
+            WHERE feed_id=$feed AND name=$name AND version=$version
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        var value = cmd.ExecuteScalar();
+        return value is null or DBNull ? null : Convert.ToInt32(value) == 1;
+    }
+
+    public bool SetFeedCargoYanked(string feedId, string name, string version,
+        bool yanked, string actor)
+    {
+        if (!FeedDefinition.ValidId(feedId) || !CargoEndpoints.IsName(name) ||
+            !FeedCargoEndpoints.IsVersion(version))
+            throw new ArgumentException("Invalid private Cargo yank identity.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO feed_cargo_yanks(feed_id,name,version,yanked,updated_at)
+            SELECT $feed,$name,$version,$yanked,$at
+            WHERE EXISTS (SELECT 1 FROM feeds WHERE id=$feed AND kind='cargo'
+                AND mode='hosted' AND visibility='private' AND enabled=1)
+              AND EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=$feed
+                AND kind='cargo' AND name=$name AND version=$version AND path=$path)
+            ON CONFLICT(feed_id,name,version) DO UPDATE
+                SET yanked=excluded.yanked,updated_at=excluded.updated_at
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$yanked", yanked ? 1 : 0);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("$path", FeedCargoEndpoints.AssetPath(name, version));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, yanked ? "yank" : "unyank",
+            "feed-cargo", feedId + "/" + name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public string? GetFeedOciTag(string feedId, string name, string tag)
     {
         using var db = Open();
