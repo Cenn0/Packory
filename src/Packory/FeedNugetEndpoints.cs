@@ -19,6 +19,7 @@ public static class FeedNugetEndpoints
 
     public static void Map(WebApplication app)
     {
+        FeedNugetDiscovery.Map(app);
         app.MapGet("/feeds/{feedId}/nuget/v3/index.json", (
             string feedId, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
         {
@@ -35,6 +36,16 @@ public static class FeedNugetEndpoints
                     {
                         ["@id"] = root + "flatcontainer/",
                         ["@type"] = "PackageBaseAddress/3.0.0"
+                    },
+                    new Dictionary<string,string>
+                    {
+                        ["@id"] = root + "registration/",
+                        ["@type"] = "RegistrationsBaseUrl/3.6.0"
+                    },
+                    new Dictionary<string,string>
+                    {
+                        ["@id"] = root + "search",
+                        ["@type"] = "SearchQueryService/3.5.0"
                     },
                     new Dictionary<string,string>
                     {
