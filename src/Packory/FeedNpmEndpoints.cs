@@ -51,7 +51,7 @@ public static partial class FeedNpmEndpoints
         db.Feed(feedId) is
         { Kind: "npm", Mode: "hosted", Visibility: "private", Enabled: true };
 
-    private static string? DecodePath(string? value)
+    internal static string? DecodePath(string? value)
     {
         if (string.IsNullOrEmpty(value) || value.Length > 1024) return null;
         var decoded = Uri.UnescapeDataString(value);
@@ -66,6 +66,7 @@ public static partial class FeedNpmEndpoints
 
     public static void Map(WebApplication app)
     {
+        FeedNpmTagEndpoints.Map(app);
         app.MapPut("/feeds/{feedId}/npm/{**resource}", async (
             string feedId, string? resource, Settings cfg, IPackageDatabase db,
             BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
@@ -222,6 +223,7 @@ public static partial class FeedNpmEndpoints
                     foreach (var tag in package.Metadata.GetProperty("tags").EnumerateObject())
                         tags[tag.Name] = tag.Value.GetString();
                 }
+                FeedNpmTagEndpoints.ApplyPointers(tags, feedId, packageName, db);
                 if (requestedVersion is not null)
                 {
                     var selected = ValidVersion(requestedVersion)
@@ -287,7 +289,7 @@ public static partial class FeedNpmEndpoints
                 Convert.ToHexStringLower(SHA1.HashData(tarball)), StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void ValidateStoredMetadata(JsonElement metadata, byte[] tarball, string name, string version)
+    internal static void ValidateStoredMetadata(JsonElement metadata, byte[] tarball, string name, string version)
     {
         if (!UniqueProperties(metadata) || metadata.ValueKind != JsonValueKind.Object ||
             !metadata.TryGetProperty("manifest", out var manifest) ||
