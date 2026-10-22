@@ -225,7 +225,7 @@ public sealed class MavenDeploymentTests
         }
         // G-level and A-level identities cannot occupy the same repository path.
         Assert.Equal(HttpStatusCode.Conflict, await Status(client, HttpMethod.Put,
-            prefix + "org/example/1.0/example-1.0.pom", privateFeed ? Admin : Writer,
+            prefix + "org/example/1.0/example-1.0.pom", Admin,
             "<project><groupId>org</groupId><artifactId>example</artifactId><version>1.0</version></project>"u8.ToArray()));
     }
 

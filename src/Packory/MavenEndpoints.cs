@@ -353,7 +353,30 @@ public static class MavenEndpoints
             return await PutGroupMetadata(scope, path, bytes, groupDocument,
                 cfg, db, blobs, locks, ctx);
         if (!MavenMetadata.TryParseAtPath(bytes, path, out var document) || document is null)
+        {
+            if (scope == "")
+            {
+                // Preserve namespace denial for malformed cross-namespace XML.
+                // A group-level publisher can still be authorized by its actual
+                // prefix once a valid XML plugin list is available.
+                var candidates = MavenMetadata.PathCandidates(path);
+                var groupPermitted = MavenGroupMetadata.TryParsePath(path, out var groupId) &&
+                    Access.RequireNamespace(ctx, cfg, "maven", groupId + "/probe") is null;
+                if (!groupPermitted && candidates.Count > 0)
+                {
+                    IResult? rejected = null;
+                    var permitted = false;
+                    foreach (var candidate in candidates)
+                    {
+                        rejected = Access.RequireNamespace(ctx, cfg, "maven",
+                            candidate.GroupId + "/" + candidate.ArtifactId);
+                        if (rejected is null) { permitted = true; break; }
+                    }
+                    if (!permitted) return rejected!;
+                }
+            }
             return Results.BadRequest(new { error = "Invalid Maven repository metadata" });
+        }
         var coordinates = document.Coordinates;
         if (scope == "" && Access.RequireNamespace(ctx, cfg, "maven",
             coordinates.GroupId + "/" + coordinates.ArtifactId) is { } namespaceDenied)
@@ -469,7 +492,19 @@ public static class MavenEndpoints
                         doc!.Coordinates.GroupId + "/" + doc.Coordinates.ArtifactId)
                         is { } documentDenied) return documentDenied;
                 }
-                else if (Access.RequireAdmin(ctx, cfg) is { } adminDenied) return adminDenied;
+                else
+                {
+                    IResult? missingMetadataDenied = null;
+                    var permitted = false;
+                    foreach (var candidate in MavenMetadata.PathCandidates(path))
+                    {
+                        missingMetadataDenied = Access.RequireNamespace(ctx, cfg, "maven",
+                            candidate.GroupId + "/" + candidate.ArtifactId);
+                        if (missingMetadataDenied is null) { permitted = true; break; }
+                    }
+                    if (!permitted && Access.RequireAdmin(ctx, cfg) is { } adminDenied)
+                        return missingMetadataDenied ?? adminDenied;
+                }
             }
             return algorithm is not null
                 ? await VerifySidecar(scope, path, algorithm, true, cfg, db, blobs, ctx)
