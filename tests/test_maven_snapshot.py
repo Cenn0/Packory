@@ -349,7 +349,7 @@ class MavenOfflineTests(unittest.TestCase):
                     if mutation == "metadata": connection.execute("UPDATE maven_metadata SET sha256=?", ("0" * 64,))
                     if mutation == "target": connection.execute("DELETE FROM maven_assets")
                     if mutation == "table": connection.execute("DROP TABLE maven_metadata")
-                    if mutation == "future": connection.execute("UPDATE packory_schema_version SET version=12")
+                    if mutation == "future": connection.execute("UPDATE packory_schema_version SET version=13")
                 if mutation == "blob":
                     (root / "backup" / blob.relative_to(root / "source")).write_bytes(b"changed")
                 manifest = offline.manifest_for(root / "source")
