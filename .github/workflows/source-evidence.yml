@@ -53,6 +53,8 @@ jobs:
           }
           (root / 'manifest.json').write_text(json.dumps(document, indent=2) + '\n', encoding='utf-8')
           PY
+      - name: Verify generated source archive digest and narrow qualification claim
+        run: python3 scripts/verify_source_evidence.py --evidence-dir "$RUNNER_TEMP/packory-source-evidence" --expected-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: source-evidence-${{ env.SOURCE_SHA }}-${{ github.run_attempt }}

@@ -52,7 +52,7 @@ class CapabilityConsistencyTests(unittest.TestCase):
         roadmap = contents("docs/roadmap-v5.md")
         self.assertIn("productionRecommended = false", capabilities)
         self.assertIn('releaseQualification = "experimental"', capabilities)
-        self.assertIn("not generally production-qualified", roadmap)
+        self.assertIn("**not** generally production-qualified", roadmap)
         self.assertIn("not a native package protocol", capabilities)
 
 
