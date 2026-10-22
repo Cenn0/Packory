@@ -61,7 +61,7 @@ def check_sqlite(folder: Path):
         if "packory_schema_version" not in tables:
             return  # Unversioned historical offline backups retain their existing profile.
         row = connection.execute("SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-        if not row or type(row[0]) is not int or row[0] not in range(1, 12):
+        if not row or type(row[0]) is not int or row[0] not in range(1, 13):
             raise ValueError("Unsupported Packory metadata schema version")
         if row[0] < 11:
             return
