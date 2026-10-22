@@ -232,3 +232,12 @@ the packument and version-addressed downloads continue to verify original
 checksums. Tag pointers never fall back to a global/upstream npm registry.
 V13 is forward-only; see [schema versioning](schema-versioning.md) and
 [release gates](release-gates.md).
+
+### Private Raw catalog
+
+`GET /feeds/{feedId}/raw/` accepts `prefix`, `limit` (1–100) and an opaque
+`cursor`. Exact feed read/publish grants are required on every page.
+The response has `apiVersion`, `items` and `nextCursor`; each item exposes
+`name`, `version`, `mediaType`, `sha256`, `size`, `createdAt` and `url`.
+401/403 precede catalog access; disabled/wrong-kind feeds return 404, invalid
+queries/cursors 400, and invalid committed metadata 503. See [Raw](raw-registry.md).

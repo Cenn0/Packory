@@ -178,7 +178,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
 | V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
 | V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |
-| V5-27 | Immutable Raw/ranges exist; per-feed accounting, retention and discovery remain |
+| V5-27 | Bounded feed/query-scoped REST keyset discovery added on both providers; quota, retention and MCP/UI discovery remain |
 | V5-30 | Browser BFF and its security/E2E acceptance remain unimplemented |
 | V5-31 | Privileged dashboard depends on V5-30; current catalog UI does not satisfy it |
 | V5-32 | Existing static scan/approval does not verify publisher signatures or ownership |

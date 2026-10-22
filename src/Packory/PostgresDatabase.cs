@@ -566,6 +566,25 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedAssetEntry> RawFeedPage(string feedId, string? after, string prefix, int limit)
+    {
+        if (!FeedDefinition.ValidId(feedId) || limit is < 1 or > 101)
+            throw new ArgumentException("Invalid private Raw page.");
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=@feed AND kind='raw'
+              AND (CAST(@after AS TEXT) IS NULL OR path COLLATE "C" > @after)
+              AND left(name,length(@prefix))=@prefix
+            ORDER BY path COLLATE "C" LIMIT @limit
+            """, null, ("feed", feedId), ("after", (object?)after ?? DBNull.Value),
+            ("prefix", prefix), ("limit", limit));
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<FeedAssetEntry>();
+        while (reader.Read()) rows.Add(ReadFeedAsset(reader));
+        return rows;
+    }
+
     public IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name)
     {
         using var db = Open();

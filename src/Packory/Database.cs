@@ -607,6 +607,29 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedAssetEntry> RawFeedPage(string feedId, string? after, string prefix, int limit)
+    {
+        if (!FeedDefinition.ValidId(feedId) || limit is < 1 or > 101)
+            throw new ArgumentException("Invalid private Raw page.");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=$feed AND kind='raw'
+              AND ($after IS NULL OR path COLLATE BINARY > $after)
+              AND substr(name,1,length($prefix))=$prefix
+            ORDER BY path COLLATE BINARY LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$after", (object?)after ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$prefix", prefix);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<FeedAssetEntry>();
+        while (reader.Read()) rows.Add(ReadFeedAsset(reader));
+        return rows;
+    }
+
     public IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name)
     {
         using var db = Open();

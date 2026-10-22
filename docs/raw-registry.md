@@ -43,3 +43,18 @@ Published metadata records the SHA-256 checksum calculated against the persisted
 Raw is deliberately **not** identified as \`maven\`, \`composer\`, \`go\`, \`terraform\` or \`helm\`. Use OCI for Helm charts. Dedicated adapters require native client and security acceptance before a support claim.
 
 See [V3 roadmap](roadmap.md), [support matrix](support-matrix.md) and [recovery instructions](pg-s3-offline-recovery.md).
+
+## Private Raw discovery (V5-27)
+
+`GET /feeds/{feedId}/raw/?prefix=build-&limit=30&cursor=...` returns a
+feed-local page of names, versions, media types, hashes, sizes, timestamps
+and download URLs. The optional literal name prefix is case-sensitive.
+Limits are 1–100, with database-side bytewise path keyset pagination on both
+SQLite and PostgreSQL. Cursors bind the feed and prefix, never grant access,
+and every page rechecks the active feed and exact current grant. Responses
+use private/no-store caching. A changing catalog is not a historical snapshot.
+
+Only committed metadata is listed; listing does not verify/download blob
+bytes. Corrupt ledger rows fail closed. No storage keys or foreign/global
+records are returned. Private Raw MCP/UI discovery, per-feed quota and
+retention policies remain separate work.

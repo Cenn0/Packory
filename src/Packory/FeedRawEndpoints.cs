@@ -21,6 +21,44 @@ public static class FeedRawEndpoints
 
     public static void Map(WebApplication app)
     {
+        app.MapGet("/feeds/{feedId}/raw/", (
+            string feedId, string? prefix, string? cursor, int? limit,
+            Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "private, no-store";
+            if (Access.RequireFeed(ctx, cfg, feedId) is { } denied) return denied;
+            if (!Active(db, feedId)) return Results.NotFound();
+            prefix ??= "";
+            var count = limit ?? 30;
+            if (count is < 1 or > 100 || prefix.Length > 128 ||
+                prefix.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-' or '_')))
+                return Results.BadRequest(new { error = "Invalid Raw page query" });
+            var scope = "private-raw/" + feedId + "/" + prefix;
+            string? after = null;
+            try
+            {
+                if (McpSkillCursor.Decode(cursor, scope) is { } marker)
+                {
+                    var parts = marker.First.Split('/');
+                    if (parts.Length != 2 || marker.Second != "" || !Valid(parts[0], parts[1]))
+                        return Results.BadRequest(new { error = "Invalid Raw page cursor" });
+                    after = marker.First;
+                }
+            }
+            catch (ModelContextProtocol.McpProtocolException)
+            { return Results.BadRequest(new { error = "Invalid Raw page cursor" }); }
+            var rows = db.RawFeedPage(feedId, after, prefix, count + 1);
+            if (rows.Any(row => !FeedAssetEntry.Valid(row))) return Results.StatusCode(503);
+            var items = rows.Take(count).Select(row => new
+            {
+                row.Name, row.Version, row.MediaType, row.Sha256, row.Size, row.CreatedAt,
+                url = cfg.Base + "/feeds/" + feedId + "/raw/" +
+                    Uri.EscapeDataString(row.Name) + "/" + Uri.EscapeDataString(row.Version)
+            }).ToArray();
+            return Results.Json(new { apiVersion = "v1", items,
+                nextCursor = rows.Count > count ? McpSkillCursor.Encode(scope, rows[count - 1].Path) : null });
+        });
+
         app.MapPut("/feeds/{feedId}/raw/{name}/{version}", async (
             string feedId, string name, string version, Settings cfg,
             IPackageDatabase db, BlobStore blobs, ArtifactLocks locks,
