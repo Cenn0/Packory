@@ -76,6 +76,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('go_modules') IS NOT NULL
                     AND to_regclass('feed_assets') IS NOT NULL
                     AND to_regclass('feed_oci_tags') IS NOT NULL
+                    AND to_regclass('feed_npm_tags') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
