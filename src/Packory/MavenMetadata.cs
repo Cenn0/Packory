@@ -74,7 +74,8 @@ public static class MavenMetadata
     public static bool ValidRecord(MavenMetadataEntry? entry)
     {
         if (entry is null || entry.Scope != "" && !FeedDefinition.ValidId(entry.Scope) ||
-            !TryParsePath(entry.Path, out var coordinates) || coordinates is null ||
+            (!TryParsePath(entry.Path, out _) &&
+                !MavenGroupMetadata.TryParsePath(entry.Path, out _)) ||
             entry.Size is <= 0 or > MaxBytes || !ArtifactDigests.ValidSha256(entry.Sha256) ||
             !DateTimeOffset.TryParse(entry.UpdatedAt, out _) ||
             entry.ContentBase64.Length > ((MaxBytes + 2L) / 3L) * 4L) return false;
@@ -84,7 +85,8 @@ public static class MavenMetadata
             return bytes.LongLength == entry.Size &&
                 Convert.ToBase64String(bytes) == entry.ContentBase64 &&
                 Convert.ToHexStringLower(SHA256.HashData(bytes)) == entry.Sha256 &&
-                TryParseAtPath(bytes, entry.Path, out _);
+                (TryParseAtPath(bytes, entry.Path, out _) ||
+                    MavenGroupMetadata.TryParseAtPath(bytes, entry.Path, out _));
         }
         catch (FormatException) { return false; }
     }
@@ -267,6 +269,8 @@ public static class MavenMetadata
         if (!ValidRecord(entry) || entry.Scope != "" &&
             db.Feed(entry.Scope) is not { Kind: "maven", Mode: "hosted", Visibility: "private" })
             return false;
+        if (MavenGroupMetadata.TryDocument(entry, out _))
+            return MavenGroupMetadata.TryReferencedPaths(entry, db, out paths);
         TryParseAtPath(Convert.FromBase64String(entry.ContentBase64), entry.Path, out var document);
         var coordinates = document!.Coordinates;
         var references = new HashSet<string>(StringComparer.Ordinal);

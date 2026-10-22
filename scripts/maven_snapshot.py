@@ -154,7 +154,6 @@ class _BoundedXml(ET.TreeBuilder):
 
 
 def parse_metadata(path, raw):
-    candidates = metadata_path_candidates(path)
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_BYTES:
         raise ValueError("Maven metadata length exceeds limits")
     try:
@@ -193,6 +192,39 @@ def parse_metadata(path, raw):
     if (any(name not in ("modelVersion", "{http://www.w3.org/2001/XMLSchema-instance}schemaLocation") for name in root.attrib) or
             root.attrib.get("modelVersion", "1.1.0") not in ("1.0.0", "1.1.0")):
         raise ValueError("Unsupported Maven metadata model")
+    if any(child.tag == namespace + "plugins" for child in root):
+        # The group-level layout can collide with an ordinary artifact name.
+        if (not isinstance(path, str) or len(path) > 1024 or
+                not path.endswith("/maven-metadata.xml")):
+            raise ValueError("Invalid Maven plugin metadata path")
+        parts = path[:-len("/maven-metadata.xml")].split("/")
+        if (not 1 <= len(parts) <= 18 or any(not valid_segment(x) or "." in x for x in parts)):
+            raise ValueError("Invalid Maven plugin group")
+        group = ".".join(parts)
+        if len(group) > 255:
+            raise ValueError("Invalid Maven plugin group length")
+        top = children(root, {"groupId", "plugins"})
+        if leaf(top, "groupId", False) not in (None, group) or "plugins" not in top:
+            raise ValueError("Maven plugin group identity differs from path")
+        container = children(top["plugins"][0], {"plugin"}, {"plugin"})
+        entries = container.get("plugin", [])
+        if not 0 < len(entries) <= MAX_VERSIONS:
+            raise ValueError("Invalid Maven plugin mapping count")
+        prefixes, artifacts, seen = set(), set(), []
+        for node in entries:
+            fields = children(node, {"name", "prefix", "artifactId"})
+            prefix, artifact = leaf(fields, "prefix"), leaf(fields, "artifactId")
+            name = leaf(fields, "name", False) or ""
+            if (not valid_segment(prefix) or not valid_segment(artifact) or
+                    len(name) > 256 or any(ord(ch) < 32 for ch in name) or
+                    prefix in prefixes or artifact in artifacts):
+                raise ValueError("Duplicate or invalid Maven plugin mapping")
+            prefixes.add(prefix)
+            artifacts.add(artifact)
+            seen.append({"prefix": prefix, "artifact_id": artifact})
+        return {"group_id": group, "artifact_id": None, "version": None,
+                "versions": [], "files": [], "plugins": seen}
+    candidates = metadata_path_candidates(path)
     top = children(root, {"groupId", "artifactId", "version", "versioning"})
     identity = leaf(top, "groupId"), leaf(top, "artifactId"), leaf(top, "version", False)
     if identity not in candidates:
@@ -320,7 +352,21 @@ def validate_inventory(metadata_rows, global_assets, feed_assets, verify_blob, f
                    (("kind", "maven"), ("mode", "hosted"), ("visibility", "private"))):
                 raise ValueError("Maven metadata refers to a missing or incompatible feed")
         metadata[identity] = parsed
-    for (scope, _), parsed in metadata.items():
+    published_poms = {(scope, row["group_id"], row["artifact_id"]) for
+                      (scope, path), row in assets.items()
+                      if path.endswith(".pom") and row["media_type"] == "application/xml"
+                      and not row["version"].endswith("-SNAPSHOT")}
+    inventory = {(scope, row["group_id"], row["artifact_id"]) for
+                 (scope, path), row in assets.items()}
+    for (scope, path), parsed in metadata.items():
+        if "plugins" in parsed:
+            parts = path[:-len("/maven-metadata.xml")].split("/")
+            if len(parts) >= 2 and (scope, ".".join(parts[:-1]), parts[-1]) in inventory:
+                raise ValueError("Maven plugin and artifact metadata paths collide")
+            for plugin in parsed["plugins"]:
+                if (scope, parsed["group_id"], plugin["artifact_id"]) not in published_poms:
+                    raise ValueError("Maven plugin mapping lacks a same-scope release POM")
+            continue
         root = parsed["group_id"].replace(".", "/") + "/" + parsed["artifact_id"]
         references = set(parsed["files"])
         for path in parsed["files"]:

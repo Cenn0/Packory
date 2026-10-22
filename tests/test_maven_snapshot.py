@@ -119,6 +119,29 @@ class MavenMetadataValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.parse_metadata(path, artifact_versions("1.0.0"))
 
+    def test_group_plugin_metadata_requires_same_scope_pom(self):
+        path = "org/example/maven-metadata.xml"
+        xml = (b"<metadata><groupId>org.example</groupId><plugins>"
+               b"<plugin><prefix>hello</prefix><artifactId>hello-maven-plugin</artifactId></plugin>"
+               b"</plugins></metadata>")
+        parsed = mod.parse_metadata(path, xml)
+        self.assertEqual("hello", parsed["plugins"][0]["prefix"])
+        with self.assertRaises(ValueError):
+            mod.parse_metadata(path, xml.replace(b"org.example", b"org.other"))
+        with self.assertRaises(ValueError):
+            mod.parse_metadata(path, xml.replace(b"</plugins>", b"<plugin><prefix>hello</prefix>"
+                               b"<artifactId>duplicate-plugin</artifactId></plugin></plugins>"))
+        pom_path = "org/example/hello-maven-plugin/1.0/hello-maven-plugin-1.0.pom"
+        pom = b"<project/>"
+        metadata = metadata_record("team-alpha", path, xml)
+        asset = prior.asset("team-beta", "maven", "org.example:hello-maven-plugin",
+                            "1.0", pom_path, "application/xml", pom)
+        with self.assertRaises(ValueError):
+            mod.validate_inventory([metadata], [], [asset], lambda *args: None,
+                                   [feed("team-alpha"), feed("team-beta")])
+        own = dict(asset, feed_id="team-alpha")
+        mod.validate_inventory([metadata], [], [own], lambda *args: None, [feed("team-alpha")])
+
     def test_timestamped_snapshot_paths_and_primary_pom_are_canonical(self):
         path = BASE + "2.0-SNAPSHOT/demo-2.0-20261022.000000-1-sources.jar"
         self.assertEqual("sources", mod.parse_asset_path(path)["classifier"])
@@ -225,7 +248,7 @@ class MavenSnapshotTests(unittest.TestCase):
                 if mutation == "old-format": fixture.manifest["schema"] = 3
                 if mutation == "no-table": del fixture.manifest["postgres"]["table_fingerprints"]["maven_metadata"]
                 if mutation == "no-sidecar": del fixture.manifest["maven_references"]
-                if mutation == "future-schema": fixture.manifest["postgres"]["database_schema_version"] = 12
+                if mutation == "future-schema": fixture.manifest["postgres"]["database_schema_version"] = 13
                 fixture.save()
                 with self.assertRaises(snapshot.SnapshotError):
                     snapshot.verify(fixture.root)
@@ -326,7 +349,7 @@ class MavenOfflineTests(unittest.TestCase):
                     if mutation == "metadata": connection.execute("UPDATE maven_metadata SET sha256=?", ("0" * 64,))
                     if mutation == "target": connection.execute("DELETE FROM maven_assets")
                     if mutation == "table": connection.execute("DROP TABLE maven_metadata")
-                    if mutation == "future": connection.execute("UPDATE packory_schema_version SET version=12")
+                    if mutation == "future": connection.execute("UPDATE packory_schema_version SET version=13")
                 if mutation == "blob":
                     (root / "backup" / blob.relative_to(root / "source")).write_bytes(b"changed")
                 manifest = offline.manifest_for(root / "source")

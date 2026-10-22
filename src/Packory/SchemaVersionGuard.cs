@@ -4,13 +4,14 @@ using Npgsql;
 namespace Packory;
 
 /// <summary>
-/// Explicit forward-only database versions. V11 adds atomically stored Maven
-/// metadata while retaining immutable global/private artifact rows and keys.
+/// Explicit forward-only database versions. V11 introduced mutable Maven
+/// metadata; V12 permits G-level plugin mappings in the same durable ledger.
+/// Immutable global/private artifact rows and keys remain unchanged.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 11;
+    public const int Current = 12;
 
     private static int RequireKnown(object? value)
     {

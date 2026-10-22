@@ -164,8 +164,14 @@ Migration/CAS/audit/recovery tests run on SQLite and actual PostgreSQL. SQLite
 offline restore and PostgreSQL/Moto snapshot format4 preserve exact mutable
 metadata, retained immutable generations and feed grants.
 
-**E2 remains partial.** Proxy behavior, atomic visibility of a whole deployment,
-Maven group/plugin-prefix metadata, parent-inherited GAV, broader Gradle variants
-and real-provider restore are not supplied by this slice.
+**E2 progress (22 October):** The implementation branch adds parent-inherited
+POM group/version validation and G-level Maven plugin-prefix metadata, with
+bounded XML parsing, immutable referenced POMs, feed isolation, CAS, checksum
+sidecars and fail-closed path collision detection. Schema V12 recognizes the
+new metadata document kind. Full Maven native-client and PostgreSQL/S3
+recovery acceptance remain prerequisites to marking this slice complete.
+
+**E2 remains partial.** Maven Central proxy, atomic whole-deployment visibility,
+broader Gradle variants and real-provider restore are still outstanding.
 The complete routes, limits, test commands and primary protocol sources are in
 [Maven operations and acceptance](maven.md).
