@@ -5,13 +5,13 @@ namespace Packory;
 
 /// <summary>
 /// Explicit forward-only database versions. V11 introduced mutable Maven
-/// metadata; V12 permits G-level plugin mappings in the same durable ledger.
+/// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers.
 /// Immutable global/private artifact rows and keys remain unchanged.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 12;
+    public const int Current = 13;
 
     private static int RequireKnown(object? value)
     {
@@ -224,6 +224,19 @@ public static class SchemaVersionGuard
         );
         """;
 
+    // Mutable npm dist-tags are separate pointers. Immutable published tarballs
+    // and publication-time manifests remain unchanged even when tags move.
+    private const string FeedNpmTagSchema = """
+        CREATE TABLE IF NOT EXISTS feed_npm_tags (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL, tag TEXT NOT NULL,
+            version TEXT NOT NULL,
+            deleted INTEGER NOT NULL CHECK(deleted IN (0,1)),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,name,tag)
+        );
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -387,6 +400,13 @@ public static class SchemaVersionGuard
             metadata.CommandText = MavenMetadataSchema;
             metadata.ExecuteNonQuery();
         }
+        if (version < 13)
+        {
+            using var npmTags = connection.CreateCommand();
+            npmTags.Transaction = tx;
+            npmTags.CommandText = FeedNpmTagSchema;
+            npmTags.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -518,6 +538,11 @@ public static class SchemaVersionGuard
         {
             using var metadata = new NpgsqlCommand(MavenMetadataSchema, connection, tx);
             metadata.ExecuteNonQuery();
+        }
+        if (version < 13)
+        {
+            using var npmTags = new NpgsqlCommand(FeedNpmTagSchema, connection, tx);
+            npmTags.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
