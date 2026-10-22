@@ -38,6 +38,7 @@ MAVEN_TABLES = ("maven_assets",)
 GO_TABLES = ("go_modules",)
 FEED_ASSET_TABLES = ("feed_assets",)
 FEED_OCI_TABLES = ("feed_oci_tags",)
+FEED_NPM_TAG_TABLES = ("feed_npm_tags",)
 MAVEN_METADATA_TABLES = ("maven_metadata",)
 # Authoritative security and reviewed MCP metadata are independent of core package schema.
 # The v7 application initializes these tables, so an absent table must abort a new backup.
@@ -46,7 +47,7 @@ SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
     *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
-    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
+    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -55,6 +56,7 @@ MAX_PACKAGE_METADATA = 4 * 1024 * 1024
 ASSET_COLUMNS = ("feed_id", "kind", "path", "name", "version", "media_type",
                  "sha256", "size", "created_at")
 OCI_TAG_COLUMNS = ("feed_id", "name", "tag", "digest", "updated_at")
+NPM_TAG_COLUMNS = ("feed_id", "name", "tag", "version", "deleted", "updated_at")
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
                     r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
                     r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
@@ -131,7 +133,7 @@ def database_schema_version(connection):
         return 0
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in range(1, 13):
+    if not row or type(row[0]) is not int or row[0] not in range(1, 14):
         raise SnapshotError("Unknown Packory database schema version")
     return row[0]
 
@@ -154,6 +156,7 @@ def metadata_tables(connection):
             (GO_TABLES if version >= 7 else ()) +
             (FEED_ASSET_TABLES if version >= 8 else ()) +
             (FEED_OCI_TABLES if version >= 10 else ()) +
+            (FEED_NPM_TAG_TABLES if version >= 13 else ()) +
             (MAVEN_METADATA_TABLES if version >= 11 else ()) +
             (SECURITY_REGISTRY_TABLES if version >= 7 else ()))
 
@@ -163,8 +166,12 @@ def feed_references(connection):
     def rows(table, columns, order):
         query = "SELECT " + ",".join(columns) + " FROM " + table + " ORDER BY " + order
         return [dict(zip(columns, row)) for row in connection.execute(query)]
-    return {"assets": rows("feed_assets", ASSET_COLUMNS, 'feed_id COLLATE "C",kind COLLATE "C",path COLLATE "C"'),
-            "oci_tags": rows("feed_oci_tags", OCI_TAG_COLUMNS, 'feed_id COLLATE "C",name COLLATE "C",tag COLLATE "C"')}
+    references = {"assets": rows("feed_assets", ASSET_COLUMNS, 'feed_id COLLATE "C",kind COLLATE "C",path COLLATE "C"'),
+                  "oci_tags": rows("feed_oci_tags", OCI_TAG_COLUMNS, 'feed_id COLLATE "C",name COLLATE "C",tag COLLATE "C"')}
+    if database_schema_version(connection) >= 13:
+        references["npm_tags"] = rows("feed_npm_tags", NPM_TAG_COLUMNS,
+                                      'feed_id COLLATE "C",name COLLATE "C",tag COLLATE "C"')
+    return references
 
 
 def maven_references(connection):
@@ -586,12 +593,17 @@ def verify_feed_bundle(file, asset):
 
 def verify_feed_references(manifest, folder):
     references = manifest.get("feed_references")
-    if not isinstance(references, dict) or set(references) != {"assets", "oci_tags"}:
+    counts = manifest["postgres"]["table_counts"]
+    has_npm_tags = manifest["postgres"].get("database_schema_version", 0) >= 13
+    keys = {"assets", "oci_tags", "npm_tags"} if has_npm_tags else {"assets", "oci_tags"}
+    if not isinstance(references, dict) or set(references) != keys:
         raise SnapshotError("Missing private feed reference inventory")
     assets, tags = references["assets"], references["oci_tags"]
-    counts = manifest["postgres"]["table_counts"]
-    if (not isinstance(assets, list) or not isinstance(tags, list) or len(assets) != counts["feed_assets"] or
-            len(tags) != counts["feed_oci_tags"]):
+    npm_tags = references.get("npm_tags", [])
+    if (not isinstance(assets, list) or not isinstance(tags, list) or
+            not isinstance(npm_tags, list) or
+            len(assets) != counts["feed_assets"] or len(tags) != counts["feed_oci_tags"] or
+            (has_npm_tags and len(npm_tags) != counts["feed_npm_tags"])):
         raise SnapshotError("Private feed reference inventory disagrees with metadata counts")
     current = {entry["key"]: entry for entry in manifest["objects"] if entry["is_latest"]}
     ledger, files = {}, {}
@@ -604,6 +616,30 @@ def verify_feed_references(manifest, folder):
         ledger[identity], files[identity] = asset, folder / stored["path"]
         if asset["kind"] in ("go", "npm", "cargo", "pypi"):
             verify_feed_bundle(files[identity], asset)
+
+    # Versioned mutable npm pointers must resolve only to committed assets
+    # in their own feed; tombstones intentionally contain no version.
+    npm_assets = {(asset["feed_id"], asset["name"], asset["version"])
+                  for asset in assets if asset["kind"] == "npm"}
+    seen_npm_tags = set()
+    for pointer in npm_tags:
+        if not isinstance(pointer, dict) or set(pointer) != set(NPM_TAG_COLUMNS):
+            raise SnapshotError("Invalid npm dist-tag snapshot pointer")
+        identity = (pointer["feed_id"], pointer["name"], pointer["tag"])
+        if (identity in seen_npm_tags or
+                not isinstance(pointer["feed_id"], str) or
+                not isinstance(pointer["name"], str) or
+                not isinstance(pointer["tag"], str) or
+                re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,63}", pointer["tag"]) is None or
+                type(pointer["deleted"]) is not int or pointer["deleted"] not in (0, 1) or
+                not isinstance(pointer["version"], str) or
+                not isinstance(pointer["updated_at"], str)):
+            raise SnapshotError("Invalid npm dist-tag snapshot identity")
+        seen_npm_tags.add(identity)
+        if (pointer["deleted"] == 1 and pointer["version"] != "" or
+                pointer["deleted"] == 0 and
+                (pointer["feed_id"], pointer["name"], pointer["version"]) not in npm_assets):
+            raise SnapshotError("npm dist-tag refers to missing/cross-feed revision")
 
     def descriptor(value):
         if (not isinstance(value, dict) or "urls" in value or not isinstance(value.get("digest"), str) or
@@ -722,7 +758,7 @@ def verify(folder):
             raise SnapshotError("V11 requires the Maven metadata snapshot format")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in range(13):
+            if type(db_version) is not int or db_version not in range(14):
                 raise SnapshotError("Unknown Packory database schema version")
             if db_version >= 10 and manifest["schema"] < 3:
                 raise SnapshotError("V10 requires the complete snapshot format")
@@ -751,6 +787,8 @@ def verify(folder):
                 required.update(FEED_OCI_TABLES)
             if db_version >= 11:
                 required.update(MAVEN_METADATA_TABLES)
+            if db_version >= 13:
+                required.update(FEED_NPM_TAG_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or

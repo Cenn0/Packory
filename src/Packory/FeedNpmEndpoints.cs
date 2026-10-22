@@ -51,7 +51,7 @@ public static partial class FeedNpmEndpoints
         db.Feed(feedId) is
         { Kind: "npm", Mode: "hosted", Visibility: "private", Enabled: true };
 
-    private static string? DecodePath(string? value)
+    internal static string? DecodePath(string? value)
     {
         if (string.IsNullOrEmpty(value) || value.Length > 1024) return null;
         var decoded = Uri.UnescapeDataString(value);
@@ -66,6 +66,7 @@ public static partial class FeedNpmEndpoints
 
     public static void Map(WebApplication app)
     {
+        FeedNpmTagEndpoints.Map(app);
         app.MapPut("/feeds/{feedId}/npm/{**resource}", async (
             string feedId, string? resource, Settings cfg, IPackageDatabase db,
             BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
@@ -222,6 +223,7 @@ public static partial class FeedNpmEndpoints
                     foreach (var tag in package.Metadata.GetProperty("tags").EnumerateObject())
                         tags[tag.Name] = tag.Value.GetString();
                 }
+                FeedNpmTagEndpoints.ApplyPointers(tags, feedId, packageName, db);
                 if (requestedVersion is not null)
                 {
                     var selected = ValidVersion(requestedVersion)
@@ -242,7 +244,7 @@ public static partial class FeedNpmEndpoints
     private static string? Text(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
-    private static bool ValidTag(string tag) => tag.Length is >= 1 and <= 64 &&
+    public static bool ValidTag(string tag) => tag.Length is >= 1 and <= 64 &&
         char.IsAsciiLetter(tag[0]) && tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
     // A private hosted profile must not turn a normal install into a direct
@@ -287,7 +289,7 @@ public static partial class FeedNpmEndpoints
                 Convert.ToHexStringLower(SHA1.HashData(tarball)), StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void ValidateStoredMetadata(JsonElement metadata, byte[] tarball, string name, string version)
+    internal static void ValidateStoredMetadata(JsonElement metadata, byte[] tarball, string name, string version)
     {
         if (!UniqueProperties(metadata) || metadata.ValueKind != JsonValueKind.Object ||
             !metadata.TryGetProperty("manifest", out var manifest) ||

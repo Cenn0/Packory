@@ -16,7 +16,7 @@ public static class RegistryCapabilities
         new("nuget", "NuGet V3", true, true, true, true, "experimental",
             "Private hosted feeds include scoped search and paginated registration; no symbols, unlisting or broad client matrix"),
         new("npm", "npm registry", true, true, true, true, "experimental",
-            "Private hosted feeds; publication-time tags only; no private proxy, mutable dist-tag API or unpublish"),
+            "Private hosted feeds with mutable scoped dist-tags; no private proxy, unpublish or broader native-client qualification"),
         new("cargo", "Cargo sparse registry", true, false, true, true, "experimental",
             "Private hosted sparse feeds; no private yank or crates.io proxy; bounded client matrix"),
         new("pypi", "PyPI Simple API", true, false, true, true, "experimental",

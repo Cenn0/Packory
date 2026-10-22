@@ -216,3 +216,19 @@ Packory provides a versioned, bounded **remote/package** MCP server.json catalog
 The supported Registry v0.1 read contract provides `GET /v0.1/servers`, `GET /v0.1/servers/{serverName}/versions` and `GET /v0.1/servers/{serverName}/versions/{version}` (exact or `latest`). Lists use official `servers`/`metadata` envelopes and opaque `nextCursor`; per-entry Packory review information lives in `_meta["io.github.cenn0.packory/registry"]`. Search is literal and name-only, limits are 1–100/default 30. Encode a complete server name as one path segment. Unsupported synchronization/deleted-record filters are explicitly rejected.
 
 Packory `GET /api/v1/mcp/servers?q=...&limit=25&cursor=...` adds name/title search for the dashboard; explicit offsets remain for legacy clients. `GET /api/v1/mcp/server?name=...&version=...` returns an exact descriptor. MCP tools `search_mcp_servers(query, limit=20, cursor?, version?)` and `get_mcp_server(name, version)` share the published catalog. Every route exposes only approved-for-discovery records; publisher ownership and connection safety remain unverified. Complete supported fields, lifecycle, envelope/digest semantics and remaining Registry work are in [MCP registry catalog](mcp-registry-catalog.md).
+
+
+### Private npm dist-tag management (V13 preview)
+
+For an active hosted private npm feed, GET
+`/feeds/{feedId}/npm/-/package/{encodedPackageName}/dist-tags`
+returns effective tag pointers. PUT
+`/feeds/{feedId}/npm/-/package/{encodedPackageName}/dist-tags/{tag}`
+accepts a JSON string naming an existing immutable version. DELETE
+`/feeds/{feedId}/npm/-/package/{encodedPackageName}/dist-tags/{tag}`
+writes an audited tombstone. GET requires an exact read grant; PUT and DELETE
+require the exact feed publish grant. Historical package bundles remain unchanged;
+the packument and version-addressed downloads continue to verify original
+checksums. Tag pointers never fall back to a global/upstream npm registry.
+V13 is forward-only; see [schema versioning](schema-versioning.md) and
+[release gates](release-gates.md).
