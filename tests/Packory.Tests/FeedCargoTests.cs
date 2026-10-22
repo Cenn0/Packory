@@ -175,6 +175,77 @@ public sealed class FeedCargoTests
     }
 
     [Fact]
+    public async Task PrivateYankIsNativeFeedScopedDurableAndDoesNotDeleteCrateBytes()
+    {
+        using var host = new FeedEcosystemHost();
+        using var client = host.CreateClient();
+        await FeedEcosystemHost.Create(client, "cargo-yank-alpha", "cargo");
+        await FeedEcosystemHost.Create(client, "cargo-yank-beta", "cargo");
+        var alphaWrite = await FeedEcosystemHost.Grant(client, "cargo-yank-alpha", true);
+        var alphaRead = await FeedEcosystemHost.Grant(client, "cargo-yank-alpha", false);
+        var betaWrite = await FeedEcosystemHost.Grant(client, "cargo-yank-beta", true);
+        var betaRead = await FeedEcosystemHost.Grant(client, "cargo-yank-beta", false);
+        var bytesA = Crate("pub fn answer() -> u32 { 41 }");
+        var bytesB = Crate("pub fn answer() -> u32 { 42 }");
+        var alpha = "/feeds/cargo-yank-alpha/cargo";
+        var beta = "/feeds/cargo-yank-beta/cargo";
+        foreach (var (path, token, bytes) in new[] {
+            (alpha, alphaWrite.Token, bytesA), (beta, betaWrite.Token, bytesB) })
+            Assert.Equal(HttpStatusCode.OK, await FeedEcosystemHost.Status(
+                client, HttpMethod.Put, path + "/api/v1/crates/new", token, Publish(bytes)));
+
+        var index = "/index/" + CargoEndpoints.IndexPath(Name);
+        var versionPath = "/api/v1/crates/" + Name + "/" + Version;
+        async Task<(bool Yanked, string? ETag)> State(string feed, string credential)
+        {
+            using var response = await client.SendAsync(FeedEcosystemHost.Request(
+                HttpMethod.Get, feed + index, credential));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var data = JsonDocument.Parse((await response.Content.ReadAsStringAsync()).Trim());
+            return (data.RootElement.GetProperty("yanked").GetBoolean(),
+                response.Headers.ETag?.Tag);
+        }
+
+        var beforeA = await State(alpha, alphaRead.Token);
+        Assert.False(beforeA.Yanked);
+        Assert.False((await State(beta, betaRead.Token)).Yanked);
+        var yank = alpha + versionPath + "/yank";
+        Assert.Equal(HttpStatusCode.Unauthorized, await FeedEcosystemHost.Status(
+            client, HttpMethod.Delete, yank));
+        Assert.Equal(HttpStatusCode.Forbidden, await FeedEcosystemHost.Status(
+            client, HttpMethod.Delete, yank, alphaRead.Token));
+        Assert.Equal(HttpStatusCode.Forbidden, await FeedEcosystemHost.Status(
+            client, HttpMethod.Delete, yank, betaWrite.Token));
+        Assert.Equal(HttpStatusCode.NotFound, await FeedEcosystemHost.Status(
+            client, HttpMethod.Delete, alpha + "/api/v1/crates/" + Name + "/9.9.9/yank", alphaWrite.Token));
+        Assert.Equal(HttpStatusCode.OK, await FeedEcosystemHost.Status(
+            client, HttpMethod.Delete, yank, alphaWrite.Token));
+
+        var afterA = await State(alpha, alphaRead.Token);
+        Assert.True(afterA.Yanked);
+        Assert.NotEqual(beforeA.ETag, afterA.ETag);
+        Assert.False((await State(beta, betaRead.Token)).Yanked);
+        foreach (var (path, token, bytes) in new[] {
+            (alpha, alphaRead.Token, bytesA), (beta, betaRead.Token, bytesB) })
+        {
+            using var download = await client.SendAsync(FeedEcosystemHost.Request(
+                HttpMethod.Get, path + versionPath + "/download", token));
+            Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+            Assert.Equal(bytes, await download.Content.ReadAsByteArrayAsync());
+        }
+
+        var settings = host.Services.GetRequiredService<Settings>();
+        var reopened = new Database(settings);
+        reopened.Initialize();
+        Assert.True(reopened.FeedCargoYanked("cargo-yank-alpha", Name, Version));
+        Assert.Null(reopened.FeedCargoYanked("cargo-yank-beta", Name, Version));
+        Assert.Equal(HttpStatusCode.OK, await FeedEcosystemHost.Status(
+            client, HttpMethod.Put, alpha + versionPath + "/unyank", alphaWrite.Token));
+        Assert.False((await State(alpha, alphaRead.Token)).Yanked);
+        Assert.False(reopened.FeedCargoYanked("cargo-yank-alpha", Name, Version));
+    }
+
+    [Fact]
     public async Task CorruptionAndInvalidArchivesNeverBecomeServable()
     {
         using var host = new FeedEcosystemHost();
