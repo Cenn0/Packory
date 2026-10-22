@@ -128,7 +128,7 @@ jobs:
               "$image@sha256:"*) ;;
               *) echo "Digest read-back failed for published SHA image." >&2; exit 1 ;;
             esac
-            echo "- Registry-authenticated SHA image read-back: `$image_digest`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Registry-authenticated SHA image read-back: $image_digest" >> "$GITHUB_STEP_SUMMARY"
           done
 
           # Check again before moving the mutable main tags. These two image
@@ -150,9 +150,9 @@ jobs:
           trap 'rm -rf "$anonymous_config"' EXIT
           for image in "$PACKORY_IMAGE" "$SCANNER_IMAGE"; do
             if DOCKER_CONFIG="$anonymous_config" docker manifest inspect "$image:sha-$SOURCE_SHA" >/dev/null 2>&1; then
-              echo "- Anonymous manifest access verified: `$image:sha-$SOURCE_SHA`" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Anonymous manifest access verified: $image:sha-$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "- Anonymous manifest access NOT verified for `$image`; review package visibility." >> "$GITHUB_STEP_SUMMARY"
+              echo "- Anonymous manifest access NOT verified for $image; review package visibility." >> "$GITHUB_STEP_SUMMARY"
             fi
           done
           echo 'These development images are NOT independently approved production releases.' >> "$GITHUB_STEP_SUMMARY"
