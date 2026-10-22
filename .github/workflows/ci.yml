@@ -46,6 +46,7 @@ jobs:
           package-manager-cache: false
       - name: Validate offline backup and restore tooling
         run: |
+          python3 -m unittest discover -s tests -p test_client_environment.py -v
           python3 -m unittest discover -s tests -p test_qualification_gate.py -v
           python3 -m unittest discover -s tests -p test_offline_backup.py -v
           python3 -m unittest discover -s tests -p test_maven_snapshot.py -v
@@ -78,6 +79,16 @@ jobs:
         run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-maven-deploy.sh scripts/smoke-go.sh scripts/smoke-feed-nuget.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh scripts/smoke-feed-npm.sh scripts/smoke-feed-ecosystems.sh scripts/smoke-feed-oci.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
+      - name: Record allowlisted client and runner versions
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/client_environment.py --sha "$SOURCE_SHA" --output "$RUNNER_TEMP/client-environment.json"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: client-environment-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/client-environment.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Exercise real private multi-feed NuGet publish and restore
         run: bash scripts/smoke-feed-nuget.sh
       - name: Exercise real hosted Cargo and pip clients

@@ -38,6 +38,15 @@ independent provider runs for an arbitrary untested branch.
 
 ## Evidence index
 
+The main integration job additionally uploads a seven-day
+`client-environment-<SHA>-<attempt>` inventory. It records an allowlisted
+OS/distribution/architecture and parsed versions for the known CLI commands.
+Missing, failed, timed-out or unrecognized commands are explicitly unavailable.
+No raw stdout/stderr, hostnames, paths, account data or credential values are
+exported. It is labelled **versions-only**, not an operation/provider pass.
+Tools provisioned inside a harness's temporary directory may not be on PATH;
+their pinned versions and operation outcomes still require the harness record.
+
 Each successful job uploads a seven-day `ci-qualification-<SHA>-<attempt>`
 artifact with schema `packory.ci-qualification/1`. It contains only source
 SHA, event, fixed workflow filenames, run/attempt/job IDs and canonical public
