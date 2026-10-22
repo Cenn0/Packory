@@ -74,7 +74,7 @@ public static class FeedNpmTagEndpoints
             if (db.GetFeedAsset(feedId, "npm", FeedNpmEndpoints.PackagePath(name, requested!)) is null)
                 return Results.NotFound();
             return db.SetFeedNpmTag(feedId, name, tag, requested!, deleted: false, Access.Actor(ctx))
-                ? Results.Created() : Results.NotFound();
+                ? Results.StatusCode(StatusCodes.Status201Created) : Results.NotFound();
         }).RequireRateLimiting("publish");
     }
 
@@ -94,6 +94,13 @@ public static class FeedNpmTagEndpoints
             foreach (var tag in revision.Metadata.GetProperty("tags").EnumerateObject())
                 tags[tag.Name] = tag.Value.GetString();
         }
+        ApplyPointers(tags, feedId, name, db);
+        return tags;
+    }
+
+    internal static void ApplyPointers(JsonObject tags, string feedId,
+        string name, IPackageDatabase db)
+    {
         foreach (var pointer in db.FeedNpmTags(feedId, name))
         {
             if (!FeedNpmEndpoints.ValidTag(pointer.Tag) ||
@@ -109,6 +116,5 @@ public static class FeedNpmTagEndpoints
                 tags[pointer.Tag] = pointer.Version;
             }
         }
-        return tags;
     }
 }
