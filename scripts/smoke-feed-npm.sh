@@ -141,10 +141,26 @@ fi
 grep -Eq 'E409|EPUBLISHCONFLICT|previously published' "$WORK/duplicate.log"
 
 # Prove committed bundles and private metadata remain usable after restart.
+curl --noproxy 127.0.0.1 --fail -sS -X PUT \
+  -H "Authorization: Bearer $A_WRITE" -H 'Content-Type: application/json' \
+  --data-binary '{"message":"Use the next release"}' \
+  "$BASE/feeds/npm-alpha/npm/-/deprecations/1.0.0/%40packory-private%2Fdemo" >/dev/null
 kill "$PID"
 wait "$PID" || true
 PID=""
 start
+npm view @packory-private/demo@1.0.0 deprecated --json \
+  --registry="$BASE/feeds/npm-alpha/npm/" --userconfig="$WORK/alpha-read.npmrc" \
+  --globalconfig="$WORK/empty.npmrc" --cache="$WORK/deprecation-cache" \
+  --fetch-retries=0 --loglevel error >"$WORK/deprecation.json"
+python3 - "$WORK/deprecation.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1])) == "Use the next release"
+PY
+curl --noproxy 127.0.0.1 --fail -sS -X PUT \
+  -H "Authorization: Bearer $A_WRITE" -H 'Content-Type: application/json' \
+  --data-binary '{"message":""}' \
+  "$BASE/feeds/npm-alpha/npm/-/deprecations/1.0.0/%40packory-private%2Fdemo" >/dev/null
 for flavor in alpha beta; do
   (
     cd "$WORK/$flavor/consumer"

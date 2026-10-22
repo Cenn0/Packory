@@ -13,7 +13,8 @@ Packory is a **self-hosted registry hub in active development**. Current hosted 
 | Tested native clients and deployment profiles | [Support matrix](support-matrix.md) |
 | Production blockers and real-provider recovery | [Release gates](release-gates.md) |
 | Deployment, TLS, tokens and backups | [Operations](operations.md) |
-| Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
+| **Current priorities, gates and execution order (22 October 2026)** | **[Roadmap V5](roadmap-v5.md)** |
+| Historical V3 engineering plan | [Roadmap V3](roadmap.md) |
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
 | Experimental-to-supported implementation ledger and PR sequence | [Experimental graduation](experimental-graduation.md) |
 | Delivered MCP functions, remaining Registry/protocol work, quality and optional gateway | [MCP delivery roadmap](mcp-roadmap.md) |

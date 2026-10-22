@@ -73,13 +73,18 @@ public static class FeedPyPiEndpoints
                         db, blobs, cfg.MaxArtifactBytes, ctx.RequestAborted);
                     if (package is null || !ValidMetadata(package.Metadata, entry, package.Payload)) return Results.StatusCode(503);
                     var filename = package.Metadata.GetProperty("filename").GetString()!;
+                    var core = WheelMetadata(package.Payload, filename, normalized, entry.Version, cfg.MaxArtifactBytes);
+                    if (filename.EndsWith(".whl", StringComparison.Ordinal) && core is null) return Results.StatusCode(503);
+                    object coreHash = core is null ? false : new { sha256 = Convert.ToHexStringLower(SHA256.HashData(core)) };
                     files.Add(new Dictionary<string, object?>
                     {
                         ["filename"] = filename,
                         ["url"] = FileUrl(cfg, feedId, normalized, filename),
                         ["hashes"] = new { sha256 = package.Metadata.GetProperty("sha256").GetString() },
                         ["size"] = package.Payload.LongLength,
-                        ["requires-python"] = package.Metadata.GetProperty("requiresPython").GetString()
+                        ["requires-python"] = package.Metadata.GetProperty("requiresPython").GetString(),
+                        ["core-metadata"] = coreHash,
+                        ["dist-info-metadata"] = coreHash
                     });
                 }
             }
@@ -94,8 +99,13 @@ public static class FeedPyPiEndpoints
             {
                 var hash = JsonSerializer.SerializeToElement(file["hashes"]).GetProperty("sha256").GetString();
                 var requirement = file["requires-python"] as string;
+                var metadata = JsonSerializer.SerializeToElement(file["core-metadata"]);
+                var metadataHash = metadata.ValueKind == JsonValueKind.Object
+                    ? metadata.GetProperty("sha256").GetString() : null;
                 return "<a href=\"" + WebUtility.HtmlEncode((string)file["url"]!) + "#sha256=" + hash + "\"" +
                     (requirement is null ? "" : " data-requires-python=\"" + WebUtility.HtmlEncode(requirement) + "\"") +
+                    (metadataHash is null ? "" : " data-core-metadata=\"sha256=" + metadataHash +
+                        "\" data-dist-info-metadata=\"sha256=" + metadataHash + "\"") +
                     ">" + WebUtility.HtmlEncode((string)file["filename"]!) + "</a>\n";
             });
             return Results.Text(Page(string.Join("", links)), "application/vnd.pypi.simple.v1+html");
@@ -107,6 +117,8 @@ public static class FeedPyPiEndpoints
         {
             if (Access.RequireFeed(ctx, cfg, feedId) is { } denied) return denied;
             if (!Active(db, feedId)) return Results.NotFound();
+            var sidecar = filename.EndsWith(".whl.metadata", StringComparison.Ordinal);
+            if (sidecar) filename = filename[..^9];
             if (PyPiEndpoints.Normalize(name) != name || !PyPiEndpoints.IsFilename(filename)) return Results.NotFound();
             var path = AssetPath(name, filename);
             var entry = db.GetFeedAsset(feedId, "pypi", path);
@@ -118,10 +130,14 @@ public static class FeedPyPiEndpoints
                 if (package is null || !ValidMetadata(package.Metadata, entry, package.Payload)) return Results.StatusCode(503);
                 ctx.Response.Headers.CacheControl = "private, no-store";
                 ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
-                var etag = "\"" + package.Metadata.GetProperty("sha256").GetString() + "\"";
+                var content = sidecar
+                    ? WheelMetadata(package.Payload, filename, name, entry.Version, cfg.MaxArtifactBytes)
+                    : package.Payload;
+                if (content is null) return Results.StatusCode(503);
+                var etag = "\"" + Convert.ToHexStringLower(SHA256.HashData(content)) + "\"";
                 ctx.Response.Headers.ETag = etag;
                 if (ctx.Request.Headers.IfNoneMatch.ToString() == etag) return Results.StatusCode(304);
-                return Results.Bytes(package.Payload, "application/octet-stream", enableRangeProcessing: true);
+                return Results.Bytes(content, "application/octet-stream", enableRangeProcessing: !sidecar);
             }
             catch (InvalidDataException) { return Results.StatusCode(503); }
         });
@@ -270,6 +286,15 @@ public static class FeedPyPiEndpoints
     private static bool RootMatches(string root, string name, string version) =>
         root.EndsWith("-" + version, StringComparison.Ordinal) &&
         PyPiEndpoints.Normalize(root[..^(version.Length + 1)]) == name;
+
+    // PEP 658/714: expose the exact immutable wheel METADATA bytes. Source
+    // distribution metadata can be dynamic, so it is deliberately not advertised.
+    private static byte[]? WheelMetadata(byte[] bytes, string filename, string name, string version, long limit)
+    {
+        if (!filename.EndsWith(".whl", StringComparison.Ordinal)) return null;
+        var core = InspectDistribution(bytes, filename, name, version, limit);
+        return core is null ? null : new UTF8Encoding(false, true).GetBytes(core);
+    }
 
     private static string ReadCore(Stream input, Encoding encoding)
     {

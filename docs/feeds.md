@@ -201,7 +201,8 @@ Configure a native alternate registry with the sparse URL
 
 Index metadata and unchanged `.crate` bytes share one immutable bundle.
 Strict SemVer is bounded; build metadata is ignored for uniqueness.
-Explicit foreign dependency registries are rejected. Private yank/unyank,
+Explicit foreign dependency registries are rejected. V14 provides an experimental
+feed-local yank/unyank profile with transactional audit and immutable crate bytes;
 crates.io replacement/proxy, search and broad Cargo-version compatibility
 remain outside this profile.
 
@@ -323,3 +324,24 @@ permission management. These remain in [MS2/MS4/MS5](roadmap.md) and
 [E0 acceptance](e0-acceptance.md) is the command/file/evidence map for this
 change. Real-provider restore, release operations and multiple active writers
 retain their separate [release gates](release-gates.md).
+
+## Private npm deprecation management (V5-21, V15)
+
+`PUT /feeds/{feedId}/npm/-/deprecations/{version}/{encodedName}` accepts
+exactly `{"message":"Use the next release"}` under the exact feed publish
+grant. Use an empty message to clear a warning. Messages are bounded to
+2048 UTF-16 code units and reject control characters. The active feed and
+exact committed npm revision are checked in the same metadata transaction
+as the annotation/audit update. Immutable original bundles and tarballs
+are never rewritten or removed. Native packument/version reads apply the
+overlay, including native `npm view ... deprecated` and install warnings.
+
+This is an explicit Packory management endpoint; it does not implement the
+full-packument `npm deprecate` write protocol. Unpublish/delete remains
+disabled so pinned/lockfile consumers can still retrieve published bytes.
+The mutable empty-string tombstone survives recovery and suppresses an
+original published warning. Audit stores action/coordinate, not message
+contents. Schema V15 is forward-only: downgrade requires restoring a
+verified V14 backup with its matching data, not changing the version marker.
+SQLite offline and PostgreSQL/S3 snapshots include and validate the new
+`feed_npm_deprecations` ledger against exact feed-local immutable revisions.

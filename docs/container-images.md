@@ -2,9 +2,13 @@
 
 Packory publishes **development** container images to GitHub Container Registry
 (GHCR) after the complete `CI` GitHub Actions workflow succeeds for a push to
-`main`. A merged pull request produces such a push. A failed/canceled CI run
-does **not** publish an image. A superseded commit is skipped, so the mutable
-`main` image tracks the most recent *successfully validated* main commit
+`main`. `Complete qualification` additionally requires all eight independent
+provider/interoperability/source workflows at that exact commit; see
+[CI qualification](ci-qualification.md). The publisher rechecks their results
+before building. A merged pull request produces such a push. A failed/canceled CI run
+does **not** publish an image. A superseded CI commit is skipped **before**
+the workflow reads its build files, so the mutable `main` image tracks
+the most recent *successfully validated* main commit
 rather than an older workflow that happened to finish later.
 
 ## Image names and tags
@@ -79,7 +83,11 @@ label links each image to this public source repository. If a package already
 exists with restrictive GHCR Actions permissions, grant this repository write
 access to that package. Verify each package's visibility separately: a public
 Git repository does **not** guarantee anonymous pulls from an existing
-private GHCR package.
+private GHCR package. The workflow performs authenticated SHA-tag read-back
+with an OCI revision-label check, records full manifest digests, and separately
+reports whether anonymous **manifest access** succeeded. An anonymous
+manifest read is not a complete anonymous image pull, does not verify layer
+downloads, and is not production qualification.
 
 - Images: [Packory](https://github.com/Cenn0/Packory/pkgs/container/packory)
   and [SkillSpector](https://github.com/Cenn0/Packory/pkgs/container/packory-skillspector)

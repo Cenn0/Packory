@@ -21,7 +21,7 @@ SECRET_PATTERNS = {
 EXAMPLE_DOMAINS = frozenset({"example.com", "example.org", "example.net", "example.test", "example.invalid"})
 BLOCKED_FILENAMES = frozenset({".env", ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519"})
 ALLOWED_EXTENSIONS = frozenset({
-    ".cs", ".csproj", ".slnx", ".md", ".txt", ".py", ".js", ".ts", ".tsx",
+    ".cs", ".csproj", ".slnx", ".md", ".txt", ".py", ".js", ".cjs", ".mjs", ".ts", ".tsx",
     ".html", ".css", ".scss", ".json", ".jsonl", ".xml", ".yml", ".yaml",
     ".sh", ".bash", ".toml", ".ini", ".config", ".props", ".targets", ".svg",
 })

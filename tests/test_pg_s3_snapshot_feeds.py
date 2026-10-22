@@ -121,6 +121,64 @@ def image(config, subject=None):
 
 
 class FeedSnapshotTests(unittest.TestCase):
+    def test_v15_deprecations_require_exact_feed_revision_and_bounded_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            item, body = package("alpha-npm", "npm")
+            fixture.add(item, body)
+            fixture.save()
+            manifest = fixture.manifest
+            manifest["postgres"]["database_schema_version"] = 15
+            manifest["postgres"]["table_counts"].update(feed_npm_tags=0, feed_cargo_yanks=0, feed_npm_deprecations=1)
+            manifest["feed_references"].update(npm_tags=[], cargo_yanks=[])
+            pointer = {"feed_id": item["feed_id"], "name": item["name"], "version": item["version"],
+                       "message": "Use the next release", "updated_at": STAMP}
+            for message in ("Use the next release", ""):
+                manifest["feed_references"]["npm_deprecations"] = [pointer | {"message": message}]
+                mod.verify_feed_references(manifest, fixture.root)
+            for change in ({"feed_id": "foreign"}, {"version": "9.9.9"}, {"message": None},
+                           {"message": "x" * 2049}, {"message": "line\ncontrol"}, {"updated_at": ""}):
+                manifest["feed_references"]["npm_deprecations"] = [pointer | change]
+                with self.subTest(change=change), self.assertRaises(mod.SnapshotError):
+                    mod.verify_feed_references(manifest, fixture.root)
+            manifest["feed_references"]["npm_deprecations"] = [pointer, pointer]
+            manifest["postgres"]["table_counts"]["feed_npm_deprecations"] = 2
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify_feed_references(manifest, fixture.root)
+
+    def test_v14_cargo_yank_inventory_is_bound_to_exact_committed_feed_asset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f = Fixture(Path(directory))
+            item, body = package("alpha-cargo", "cargo")
+            f.add(item, body)
+            f.save()
+            manifest = f.manifest
+            manifest["postgres"]["database_schema_version"] = 14
+            manifest["postgres"]["table_counts"]["feed_npm_tags"] = 0
+            manifest["postgres"]["table_counts"]["feed_cargo_yanks"] = 1
+            manifest["feed_references"]["npm_tags"] = []
+            pointer = {
+                "feed_id": item["feed_id"], "name": item["name"],
+                "version": item["version"], "yanked": 1, "updated_at": STAMP,
+            }
+            manifest["feed_references"]["cargo_yanks"] = [pointer]
+            mod.verify_feed_references(manifest, f.root)
+            for change in (
+                {"feed_id": "foreign-feed"},
+                {"version": "9.9.9"},
+                {"yanked": 2},
+                {"yanked": True},
+                {"updated_at": ""},
+            ):
+                with self.subTest(change=change):
+                    manifest["feed_references"]["cargo_yanks"] = [pointer | change]
+                    with self.assertRaises(mod.SnapshotError):
+                        mod.verify_feed_references(manifest, f.root)
+            manifest["feed_references"]["cargo_yanks"] = [pointer, pointer]
+            manifest["postgres"]["table_counts"]["feed_cargo_yanks"] = 2
+            with self.assertRaises(mod.SnapshotError):
+                mod.verify_feed_references(manifest, f.root)
+
     def test_same_name_revision_two_feed_bundles_are_independent(self):
         with tempfile.TemporaryDirectory() as directory:
             f = Fixture(Path(directory))

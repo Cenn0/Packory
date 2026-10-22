@@ -17,4 +17,29 @@ Review a new upstream patch release and its changes, fetch the **commit object b
 
 ## Remaining gates
 
+[Exact-commit CI qualification](ci-qualification.md) now aggregates provider,
+interoperability, source and scanner workflows and exports a minimal public
+evidence index. This prepares V5-01/V5-03 controls; required branch contexts,
+independent approval and production supply-chain evidence remain separate.
+
 Docker build/base images and PostgreSQL service images are not yet digest-pinned; SBOM, image signatures/provenance, dependency/license/SAST coverage and independent supply-chain review remain open in [release gates](release-gates.md). Public repository workflow jobs are generally free under GitHub's public-repository terms, but this cannot be treated as a permanent zero-quota guarantee.
+
+## Exact-source CI artifact (V5 assurance slice)
+
+The dedicated `Source qualification evidence` workflow archives only
+privacy-scanned, tracked files from the exact PR head or successful main SHA.
+The short-lived artifact contains `source.tar.gz` and `manifest.json` with
+its SHA-256, byte count, commit ID and GitHub run/attempt identifiers.
+
+`scripts/verify_source_evidence.py` independently checks the manifest shape,
+source-SHA equality, archive checksum and length, rejects symlinks/duplicate
+JSON keys/unsafe scopes and allows **only** `source-only` evidence with
+`productionRecommended: false`. Its negative fixtures run in normal CI.
+
+Use the artifact only after checking the claimed run ID, workflow identity,
+commit and conclusion through GitHub Actions. A self-reported run identifier
+and SHA-256 checksum **are not cryptographic provenance**. This does not
+establish native client interoperability, an actual provider restore,
+independent review, vulnerability certification or production readiness.
+Operator reports, identities and secrets must never be uploaded here. Consult
+[release gates](release-gates.md) for independent production acceptance.

@@ -440,3 +440,21 @@ Run `bash scripts/smoke-maven-deploy.sh` for pinned Maven/Gradle native acceptan
 and `python3 scripts/smoke-feed-recovery.py` for the all-kind SQLite restore
 smoke. See [Maven operations](maven.md) for routes, credentials and deployment
 limits.
+
+## Runtime observations (V5-15)
+
+The .NET `Packory` Meter exposes `packory.http.requests`,
+`packory.http.duration` (seconds), `packory.http.active` and
+`packory.auth.denials`. Labels contain only registered route templates, a
+fixed HTTP method set and response status class. Request paths, feed/package
+IDs, subjects, IPs, tokens, query strings and exception text are not labels.
+An OpenTelemetry host can subscribe to this Meter; an exporter/collector is
+not bundled or automatically configured.
+
+`GET /api/admin/metrics` requires an administrator and returns private/no-store
+process-local totals: requests, active requests, authorization denials, server
+errors and rate-limited requests. Counters reset on restart, are not an audit
+log or persistent monitoring history, and are not cross-instance totals. The
+observation endpoint's current request may be included in active requests.
+Choose alert thresholds and validate them on the actual deployment; this
+instrumentation does not establish capacity, SLO, RPO/RTO or an incident drill.

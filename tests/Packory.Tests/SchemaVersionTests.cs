@@ -29,6 +29,51 @@ public sealed class SchemaVersionTests
     }
 
     [Fact]
+    public void SqliteV13ToV14IntroducesFeedCargoYanksWithoutChangingStoredVersions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "packory-v14-migration-" +
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var db = new Database(new Settings { DataDirectory = root });
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            var id = "v14-migrated-cargo";
+            var name = "packory-v14-migrated";
+            var version = "1.0.0";
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(id, "cargo",
+                "hosted", "private", "Synthetic prior Cargo", false, at, at), "fixture"));
+            Assert.True(db.TrySetHostedFeedEnabled(id, "cargo", true, "fixture"));
+            var asset = new FeedAssetEntry(id, "cargo",
+                FeedCargoEndpoints.AssetPath(name, version), name, version,
+                "application/vnd.packory.cargo-package+zip", new string('c', 64), 128, at);
+            Assert.True(db.PublishFeedAsset(asset, "fixture"));
+            using (var connection = db.Open())
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = """
+                    DROP TABLE feed_cargo_yanks;
+                    UPDATE packory_schema_version SET version=13 WHERE slot=1;
+                    """;
+                cmd.ExecuteNonQuery();
+            }
+            db.Initialize();
+            Assert.Equal(asset, db.GetFeedAsset(id, "cargo", asset.Path));
+            Assert.Null(db.FeedCargoYanked(id, name, version));
+            Assert.True(db.SetFeedCargoYanked(id, name, version, true, "fixture"));
+            Assert.True(db.FeedCargoYanked(id, name, version));
+            using var verify = db.Open();
+            using var command = verify.CreateCommand();
+            command.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(command.ExecuteScalar()));
+            command.CommandText = "PRAGMA foreign_key_check";
+            using var rows = command.ExecuteReader();
+            Assert.False(rows.Read());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void ExistingVersionOneReplaysMigrationWithoutDeletingHostedArtifacts()
     {
         var root = Path.Combine(Path.GetTempPath(), "packory-feed-upgrade-" + Guid.NewGuid().ToString("N"));
@@ -209,7 +254,7 @@ public sealed class SchemaVersionTests
             Assert.Equal(checksum, db.GetFeedNugetRevision(
                 "old-nuget", "same.package", "1.0.0")?.Sha512);
             Assert.Equal("nuget", db.Feed("old-nuget")?.Kind);
-            Assert.Equal(13, SchemaVersionGuard.Current);
+            Assert.Equal(15, SchemaVersionGuard.Current);
             Assert.True(db.TryCreateDraftFeed(new FeedDefinition("new-raw", "raw",
                 "hosted", "private", "New private Raw", false, now, now), "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("new-raw", "raw", true, "fixture"));

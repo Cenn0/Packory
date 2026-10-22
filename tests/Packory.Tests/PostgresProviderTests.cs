@@ -52,6 +52,55 @@ public sealed class PostgresProviderTests
     }
 
     [Fact]
+    public void PrivateCargoYanksAreTransactionalProviderScopedAndSurviveReopening()
+    {
+        var connection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connection)) return;
+        var settings = new Settings
+        {
+            MetadataProvider = "postgresql",
+            PostgresConnectionString = connection
+        };
+        settings.Validate();
+        IPackageDatabase db = new PostgresDatabase(settings);
+        db.Initialize();
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var name = "packory-yank-" + suffix;
+        var version = "1.0.0";
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        var a = "cargo-yank-a-" + suffix;
+        var b = "cargo-yank-b-" + suffix;
+        foreach (var id in new[] { a, b })
+        {
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(id, "cargo", "hosted",
+                "private", "Synthetic isolated Cargo", false, at, at), "test-admin"));
+            Assert.True(db.TrySetHostedFeedEnabled(id, "cargo", true, "test-admin"));
+            var asset = new FeedAssetEntry(id, "cargo",
+                FeedCargoEndpoints.AssetPath(name, version), name, version,
+                "application/vnd.packory.cargo-package+zip", new string('a', 64), 128, at);
+            Assert.True(db.PublishFeedAsset(asset, "test-publisher"));
+        }
+        Assert.Null(db.FeedCargoYanked(a, name, version));
+        Assert.Null(db.FeedCargoYanked(b, name, version));
+        Assert.True(db.SetFeedCargoYanked(a, name, version, true, "test-publisher"));
+        Assert.True(db.FeedCargoYanked(a, name, version));
+        Assert.Null(db.FeedCargoYanked(b, name, version));
+        Assert.False(db.SetFeedCargoYanked(a, name, "2.0.0", true, "test-publisher"));
+        Assert.False(db.SetFeedCargoYanked(b, "other", version, true, "test-publisher"));
+        Assert.True(db.TrySetHostedFeedEnabled(a, "cargo", false, "test-admin"));
+        Assert.False(db.SetFeedCargoYanked(a, name, version, false, "test-publisher"));
+        Assert.True(db.TrySetHostedFeedEnabled(a, "cargo", true, "test-admin"));
+        var reopened = new PostgresDatabase(settings);
+        reopened.Initialize();
+        Assert.True(reopened.FeedCargoYanked(a, name, version));
+        Assert.True(reopened.SetFeedCargoYanked(a, name, version, false, "test-publisher"));
+        Assert.False(reopened.FeedCargoYanked(a, name, version));
+        Assert.Contains(reopened.AuditEvents(null, 100), item =>
+            item.Kind == "feed-cargo" && item.Name == a + "/" + name &&
+            item.Action == "unyank");
+    }
+
+    [Fact]
     public void PersistsAllRegistryKindsAndTransactionalAudit()
     {
         var connection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");

@@ -53,7 +53,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 | Bereich | Umgesetzter Umfang |
 | --- | --- |
 | **NuGet V3** | Service-Index, Paket-/Versionsdownloads, Read-through-Caching von nuget.org und Veröffentlichung eigener Pakete; experimentelle getrennte private NuGet-Feeds mit eigenen Berechtigungen |
-| **npm** | Globale Metadaten-/Tarball-Caches sowie private Veröffentlichung mit und ohne Scope, Packuments, Tags bei Veröffentlichung und geprüfte Tarballs; native Install-/CI-Abläufe |
+| **npm** | Globale Metadaten-/Tarball-Caches sowie private Veröffentlichung mit und ohne Scope, Packuments, Tags bei Veröffentlichung, veränderliche Dist-Tags und geprüfte Tarballs; native Install-/CI-Abläufe |
 | **OCI (experimentell)** | Globale und private Distribution-v2-Blobs, fortsetzbare Uploads, Manifeste, veränderliche Tags und Referrer; private Repositories unter `/v2/feeds/{id}/` |
 | **Cargo & PyPI (experimentell)** | Globale und private Cargo-Sparse-Registries mit nativem Publish; PyPI Simple HTML/JSON und Twine-Upload unveränderlicher Distributionsdateien |
 | **Helm 3 über OCI (experimentell)** | Native Helm-OCI-Push/Pull/Show/Template-Smoke-Tests mit festgelegter CLI-Version; kein allgemeiner Helm- oder Kubernetes-Konformitätsnachweis |
@@ -70,7 +70,7 @@ Vor einem Netzwerkzugriff oder der Einrichtung eines dauerhaften Datenverzeichni
 
 **Privates Hosted-Profil:** Einen deaktivierten Entwurf anlegen, als Administrator ausdrücklich aktivieren und einen exakten verwalteten Grant `feed:{id}:read` oder `feed:{id}:publish` ausgeben. Die meisten Quellen liegen unter `/feeds/{id}/{protokoll}/`; OCI behält seinen nativen Präfix unter `/v2/feeds/{id}/{repository}/`. Die bisherigen globalen URLs bleiben erhalten; der OCI-Repository-Präfix `feeds/` ist für private Routen reserviert. [Feed-Lebenszyklus, Clientkonfiguration und Grenzen](docs/feeds.md) beschreiben die Details.
 
-Privates npm unterstützt Tags bei der Veröffentlichung, aber keine separate veränderliche Tag-/Unpublish-API. Privates Cargo hat keine Yank-API. Privates PyPI akzeptiert ein begrenztes kanonisches PEP-440-Profil ohne Epoch; der native Nachweis gilt für Wheels, direkte Dependency-URLs werden abgelehnt. Maven unterstützt native Release- und SNAPSHOT-Deploys sowie gewöhnliche Maven-/Gradle-Abhängigkeiten; atomare Veröffentlichung eines vollständigen Dateisatzes und Proxying bleiben offen. Go benötigt für native GOAUTH-Zugangsdaten HTTPS und bietet weder Upstream-Mirror noch Prüfsummendatenbank-Verifikation. Die [Support-Matrix](docs/support-matrix.md) nennt die exakt geprüften Clients und offenen Funktionen.
+Privates npm unterstützt veränderliche, dauerhaft gespeicherte und Feed-begrenzte Dist-Tags; eine auditierte Deprecation-Verwaltungs-API ist verfügbar. Unpublish bleibt deaktiviert; der native Deprecate-Schreibpfad ist weiterhin offen. Privates Cargo bietet eine experimentelle, auditierte und Feed-begrenzte Yank-/Unyank-API (Schema V14); Eigentümerverwaltung und Upstream-Proxy sind weiterhin offen. Privates PyPI akzeptiert ein begrenztes kanonisches PEP-440-Profil ohne Epoch; der native Nachweis gilt für Wheels, direkte Dependency-URLs werden abgelehnt. Maven unterstützt native Release- und SNAPSHOT-Deploys sowie gewöhnliche Maven-/Gradle-Abhängigkeiten; atomare Veröffentlichung eines vollständigen Dateisatzes und Proxying bleiben offen. Go benötigt für native GOAUTH-Zugangsdaten HTTPS und bietet weder Upstream-Mirror noch Prüfsummendatenbank-Verifikation. Die [Support-Matrix](docs/support-matrix.md) nennt die exakt geprüften Clients und offenen Funktionen.
 
 ### Packory als Paketquelle nutzen
 
@@ -117,7 +117,7 @@ flowchart LR
   Out --> Catalog
 ```
 
-Jeder Adapter behält sein natives Protokoll und verwendet gemeinsame Autorisierung, Persistenz und Recovery. Schema V11 erhält das private Artefakt-Ledger und OCI-Tag-Referenzen und ergänzt atomar gespeicherte Maven-Metadaten; npm/Cargo/PyPI speichern Protokollmetadaten und originale Paketbytes zusammen in einem geprüften unveränderlichen Bundle. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Architektur](docs/architecture.md), [Feed-Betrieb](docs/feeds.md) und [S3](docs/s3.md).
+Jeder Adapter behält sein natives Protokoll und verwendet gemeinsame Autorisierung, Persistenz und Recovery. Schema V15 erhält das private Artefakt-Ledger sowie separate OCI-Tags/Maven-Metadaten und ergänzt dauerhafte npm-Tag- und Cargo-Yank-Zeiger; npm/Cargo/PyPI speichern Protokollmetadaten und originale Paketbytes zusammen in einem geprüften unveränderlichen Bundle. Prozesslokale Sperren und Audit-Einträge sind keine Mehrinstanz- oder verteilte ACID-Garantie. Siehe [Architektur](docs/architecture.md), [Feed-Betrieb](docs/feeds.md) und [S3](docs/s3.md).
 
 ## Einschränkungen und Sicherheit
 
@@ -148,6 +148,6 @@ Die privaten Feed-Tests ergänzen zwei Feeds mit gleichen Koordinaten und versch
 
 ## Dokumentation und Mitwirkung
 
-[Dokumentationsindex](docs/README.md) · [MCP-Roadmap](docs/mcp-roadmap.md) · [Skill-Qualität](docs/skill-quality.md) · [Go-Modulregistry](docs/go-proxy.md) · [Maven](docs/maven.md) · [Raw / Generic](docs/raw-registry.md) · [Support-Matrix](docs/support-matrix.md) · [Roadmap V4](docs/roadmap-v4.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
+[Dokumentationsindex](docs/README.md) · [MCP-Roadmap](docs/mcp-roadmap.md) · [Skill-Qualität](docs/skill-quality.md) · [Go-Modulregistry](docs/go-proxy.md) · [Maven](docs/maven.md) · [Raw / Generic](docs/raw-registry.md) · [Support-Matrix](docs/support-matrix.md) · [Roadmap V4](docs/roadmap-v4.md) · [Aktuelle Roadmap V5](docs/roadmap-v5.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
 
 Lizenziert unter [Apache-2.0](LICENSE). Beiträge und öffentliche Fehlermeldungen sind willkommen. Sicherheitslücken über den vertraulichen Meldeweg der Sicherheitsrichtlinie melden.

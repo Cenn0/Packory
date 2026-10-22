@@ -49,6 +49,65 @@ public sealed class FeedPyPiTests
     }
 
     [Fact]
+    public async Task WheelSidecarsHaveExactOriginalBytesHashesAndIndependentAuthorization()
+    {
+        using var host = new FeedEcosystemHost();
+        using var client = host.CreateClient();
+        await FeedEcosystemHost.Create(client, "metadata-alpha", "pypi");
+        await FeedEcosystemHost.Create(client, "metadata-beta", "pypi");
+        var a = await FeedEcosystemHost.Grant(client, "metadata-alpha", true);
+        var b = await FeedEcosystemHost.Grant(client, "metadata-beta", true);
+        var wheel = Wheel("synthetic", dependency: "other (>=1.0)");
+        var prefix = "/feeds/metadata-alpha/pypi";
+        Assert.Equal(HttpStatusCode.OK, await FeedEcosystemHost.Status(client, HttpMethod.Post,
+            prefix + "/legacy/", a.Token, Upload(wheel)));
+        byte[] expected;
+        using (var zip = new ZipArchive(new MemoryStream(wheel)))
+        using (var input = zip.GetEntry("e0_python_demo-1.2.3.dist-info/METADATA")!.Open())
+        using (var output = new MemoryStream())
+        { input.CopyTo(output); expected = output.ToArray(); }
+        var hash = Convert.ToHexStringLower(SHA256.HashData(expected));
+        var url = prefix + "/files/" + Name + "/" + Filename + ".metadata";
+        Assert.Equal(HttpStatusCode.Unauthorized, await FeedEcosystemHost.Status(client, HttpMethod.Get, url));
+        Assert.Equal(HttpStatusCode.Forbidden, await FeedEcosystemHost.Status(client, HttpMethod.Get, url, b.Token));
+        using (var response = await client.SendAsync(FeedEcosystemHost.Request(HttpMethod.Get, url, a.Token)))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(expected, await response.Content.ReadAsByteArrayAsync());
+            Assert.Equal("\"" + hash + "\"", response.Headers.ETag?.Tag);
+            Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+        }
+        using (var request = FeedEcosystemHost.Request(HttpMethod.Get, url, a.Token))
+        {
+            request.Headers.IfNoneMatch.ParseAdd("\"" + hash + "\"");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
+        }
+        using (var response = await client.SendAsync(FeedEcosystemHost.Request(HttpMethod.Head, url, a.Token)))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        }
+        using (var request = FeedEcosystemHost.Request(HttpMethod.Get, prefix + "/simple/" + Name + "/", a.Token))
+        {
+            request.Headers.Accept.ParseAdd("application/vnd.pypi.simple.v1+json");
+            using var response = await client.SendAsync(request);
+            using var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var file = Assert.Single(data.RootElement.GetProperty("files").EnumerateArray());
+            Assert.Equal(hash, file.GetProperty("core-metadata").GetProperty("sha256").GetString());
+            Assert.Equal(file.GetProperty("core-metadata").GetRawText(), file.GetProperty("dist-info-metadata").GetRawText());
+        }
+        using (var response = await client.SendAsync(FeedEcosystemHost.Request(HttpMethod.Get,
+            prefix + "/simple/" + Name + "/", a.Token)))
+            Assert.Contains("data-core-metadata=\"sha256=" + hash + "\"", await response.Content.ReadAsStringAsync());
+        var entry = Assert.Single(host.Services.GetRequiredService<IPackageDatabase>().FeedAssets());
+        await File.WriteAllTextAsync(host.Services.GetRequiredService<BlobStore>().Existing(FeedAssetEntry.BlobKey(entry))!, "corrupt");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, await FeedEcosystemHost.Status(client, HttpMethod.Get, url, a.Token));
+        await FeedEcosystemHost.Status(client, HttpMethod.Post, "/api/v1/admin/feeds/metadata-alpha/deactivate", FeedEcosystemHost.Admin);
+        Assert.Equal(HttpStatusCode.NotFound, await FeedEcosystemHost.Status(client, HttpMethod.Get, url, a.Token));
+    }
+
+    [Fact]
     public async Task NativeSimpleMetadataAndDistributionsStayWithinExactFeed()
     {
         using var host = new FeedEcosystemHost();

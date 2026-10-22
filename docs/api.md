@@ -232,3 +232,28 @@ the packument and version-addressed downloads continue to verify original
 checksums. Tag pointers never fall back to a global/upstream npm registry.
 V13 is forward-only; see [schema versioning](schema-versioning.md) and
 [release gates](release-gates.md).
+
+### Private Raw catalog
+
+`GET /feeds/{feedId}/raw/` accepts `prefix`, `limit` (1–100) and an opaque
+`cursor`. Exact feed read/publish grants are required on every page.
+The response has `apiVersion`, `items` and `nextCursor`; each item exposes
+`name`, `version`, `mediaType`, `sha256`, `size`, `createdAt` and `url`.
+401/403 precede catalog access; disabled/wrong-kind feeds return 404, invalid
+queries/cursors 400, and invalid committed metadata 503. See [Raw](raw-registry.md).
+
+### Runtime observation totals
+
+`GET /api/admin/metrics` is administrator-only, private/no-store. Returns
+`scope: in-process-since-start`, `requests`, `active`, `authorizationDenied`,
+`serverErrors` and `rateLimited`. No identifiers or request payloads are
+returned. The standard .NET `Packory` Meter supplies live counters/histograms.
+
+### npm deprecation management
+
+`PUT /feeds/{feedId}/npm/-/deprecations/{version}/{encodedName}` uses exact
+feed Publish authorization and accepts only a bounded JSON `message` string.
+An empty string clears the warning; unknown revision/disabled feed returns
+404, invalid/duplicate input 400, oversized body 413, and wrong media type
+415. Standard private npm reads expose the effective `deprecated` property.
+This route is Packory-specific; immutable package deletion stays disabled.
