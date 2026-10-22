@@ -209,7 +209,7 @@ public sealed class SchemaVersionTests
             Assert.Equal(checksum, db.GetFeedNugetRevision(
                 "old-nuget", "same.package", "1.0.0")?.Sha512);
             Assert.Equal("nuget", db.Feed("old-nuget")?.Kind);
-            Assert.Equal(13, SchemaVersionGuard.Current);
+            Assert.Equal(14, SchemaVersionGuard.Current);
             Assert.True(db.TryCreateDraftFeed(new FeedDefinition("new-raw", "raw",
                 "hosted", "private", "New private Raw", false, now, now), "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("new-raw", "raw", true, "fixture"));
