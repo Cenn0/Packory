@@ -242,7 +242,7 @@ public static partial class FeedNpmEndpoints
     private static string? Text(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
-    private static bool ValidTag(string tag) => tag.Length is >= 1 and <= 64 &&
+    public static bool ValidTag(string tag) => tag.Length is >= 1 and <= 64 &&
         char.IsAsciiLetter(tag[0]) && tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
     // A private hosted profile must not turn a normal install into a direct
