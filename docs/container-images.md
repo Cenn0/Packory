@@ -9,7 +9,7 @@ rather than an older workflow that happened to finish later.
 
 ## Image names and tags
 
-| Service | Moving development tag | Immutable commit-derived tag |
+| Service | Moving development tag | Commit-specific tag |
 | --- | --- | --- |
 | Registry + dashboard | `ghcr.io/cenn0/packory:main` | `ghcr.io/cenn0/packory:sha-<full-40-character-SHA>` |
 | Offline SkillSpector worker | `ghcr.io/cenn0/packory-skillspector:main` | `ghcr.io/cenn0/packory-skillspector:sha-<full-40-character-SHA>` |
@@ -20,9 +20,11 @@ checks, and that the worker image contains the expected scanner executable.
 It assigns the `org.opencontainers.image.source` and `revision` OCI labels
 and publishes both full-SHA tags before moving `main`.
 
-**Use matching SHA tags for reproducible deployments**; updates of two
+**Use matching SHA tags for repeatable deployments**; updates of two
 separate GHCR images are not atomic. For exact artifact reproducibility, pin
 image **digests** after pulling and recording the published SHA manifests.
+Commit-derived tags can still be overwritten by registry writers; the registry
+does not enforce tag immutability here.
 The `main` tag is mutable and can change on any subsequent successful merge.
 
 ## Deploy prebuilt images

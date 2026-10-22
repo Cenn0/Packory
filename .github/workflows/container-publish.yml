@@ -68,7 +68,7 @@ jobs:
           test "$(docker image inspect --format '{{.Config.User}}' "$PACKORY_IMAGE:build")" != root
           test "$(docker image inspect --format '{{.Config.User}}' "$SCANNER_IMAGE:build")" = "1654:1654"
           docker run --rm --entrypoint python "$SCANNER_IMAGE:build" \
-            -m py_compile /opt/packory/worker.py
+            -c 'from pathlib import Path; compile(Path("/opt/packory/worker.py").read_text(), "/opt/packory/worker.py", "exec")'
           docker run --rm --entrypoint /bin/sh "$SCANNER_IMAGE:build" \
             -c 'command -v skillspector >/dev/null'
           cid="$(docker run -d -p 127.0.0.1:18080:8080 "$PACKORY_IMAGE:build")"
