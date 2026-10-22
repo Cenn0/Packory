@@ -195,6 +195,41 @@ public sealed class PostgresS3RecoveryTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [PostgresFeedFact]
+    public async Task ConcurrentLeaseChecksDoNotMistakeConnectionContentionForLostOwnership()
+    {
+        var cfg = new Settings { MetadataProvider = "postgresql",
+            PostgresConnectionString = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES")! };
+        using var lease = new PostgresSingleWriterLease(cfg);
+        lease.Acquire();
+        Assert.True(lease.IsHeld());
+
+        // Native OCI clients publish blobs concurrently. Exercise the same
+        // ownership check performed before every write request on one lease.
+        using var start = new Barrier(8);
+        var workers = Enumerable.Range(0, 8).Select(_ => Task.Factory.StartNew(() =>
+        {
+            var rejected = 0;
+            for (var iteration = 0; iteration < 64; iteration++)
+            {
+                if (!start.SignalAndWait(TimeSpan.FromSeconds(15)))
+                    throw new TimeoutException("Concurrent lease probes did not reach their barrier.");
+                if (!lease.IsHeld()) rejected++;
+            }
+            return rejected;
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+        var rejections = await Task.WhenAll(workers);
+        Assert.Equal(0, rejections.Sum());
+        Assert.True(lease.IsHeld());
+
+        using var next = new PostgresSingleWriterLease(cfg);
+        Assert.Throws<InvalidOperationException>(() => next.Acquire());
+        lease.Dispose();
+        Assert.False(lease.IsHeld());
+        next.Acquire();
+        Assert.True(next.IsHeld());
+    }
+
     [Fact]
     public void ConcurrentLeaseDisposalIsIdempotentAndCannotDoubleDisposeConnection()
     {
