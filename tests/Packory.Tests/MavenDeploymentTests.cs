@@ -167,6 +167,87 @@ public sealed class MavenDeploymentTests
         Assert.Equal(expected, MavenEndpoints.PomIdentityMatches(Encoding.UTF8.GetBytes(xml), coordinates));
     }
 
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PluginGroupMetadataPreservesPrefixesChecksumsAndScopedReads(bool privateFeed)
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var scope = privateFeed ? "plugin-alpha" : "";
+        if (privateFeed)
+        {
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition(scope, "maven", "hosted",
+                "private", "Synthetic Maven plugin", false, at, at), "synthetic"));
+            Assert.True(db.TrySetHostedFeedEnabled(scope, "maven", true, "synthetic"));
+        }
+        var prefix = privateFeed ? "/feeds/" + scope + "/maven/" : "/maven/";
+        var firstPom = "<project><groupId>org.example</groupId><artifactId>greet-maven-plugin</artifactId><version>1.0</version><packaging>maven-plugin</packaging></project>"u8.ToArray();
+        var pomPath = prefix + "org/example/greet-maven-plugin/1.0/greet-maven-plugin-1.0.pom";
+        Assert.Equal(HttpStatusCode.Created, await Status(client, HttpMethod.Put,
+            pomPath, privateFeed ? Admin : Writer, firstPom));
+        var metadataPath = prefix + "org/example/maven-metadata.xml";
+        var initial = "<metadata><groupId>org.example</groupId><plugins><plugin><name>Greeting plugin</name><prefix>greet</prefix><artifactId>greet-maven-plugin</artifactId></plugin></plugins></metadata>"u8.ToArray();
+        Assert.Equal(HttpStatusCode.Created, await Status(client, HttpMethod.Put,
+            metadataPath, privateFeed ? Admin : Writer, initial));
+        using (var get = await client.SendAsync(Request(HttpMethod.Get,
+            metadataPath, privateFeed ? Admin : Reader)))
+        {
+            Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+            Assert.Equal(initial, await get.Content.ReadAsByteArrayAsync());
+            Assert.Equal("\"" + Convert.ToHexStringLower(SHA256.HashData(initial)) + "\"",
+                get.Headers.ETag?.ToString());
+        }
+        var checksum = Convert.ToHexStringLower(SHA256.HashData(initial));
+        Assert.Equal(HttpStatusCode.NoContent, await Status(client, HttpMethod.Put,
+            metadataPath + ".sha256", privateFeed ? Admin : Writer,
+            Encoding.ASCII.GetBytes(checksum)));
+        using (var sidecar = await client.SendAsync(Request(HttpMethod.Get,
+            metadataPath + ".sha256", privateFeed ? Admin : Reader)))
+            Assert.Equal(checksum, await sidecar.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Conflict, await Status(client, HttpMethod.Put,
+            metadataPath, privateFeed ? Admin : Writer,
+            "<metadata><groupId>org.example</groupId><plugins><plugin><prefix>greet</prefix><artifactId>other-maven-plugin</artifactId></plugin></plugins></metadata>"u8.ToArray()));
+        Assert.Equal(HttpStatusCode.Conflict, await Status(client, HttpMethod.Put,
+            metadataPath, privateFeed ? Admin : Writer,
+            "<metadata><groupId>org.example</groupId><plugins><plugin><prefix>missing</prefix><artifactId>missing-maven-plugin</artifactId></plugin></plugins></metadata>"u8.ToArray()));
+        Assert.True(MavenMetadata.ReferencesValid(db.GetMavenMetadata(scope,
+            "org/example/maven-metadata.xml")!, db));
+        if (privateFeed)
+        {
+            Assert.Equal(HttpStatusCode.NotFound, await Status(client, HttpMethod.Get,
+                "/maven/org/example/maven-metadata.xml", Reader));
+            Assert.Equal(HttpStatusCode.Forbidden, await Status(client, HttpMethod.Get,
+                metadataPath, Reader));
+        }
+        // G-level and A-level identities cannot occupy the same repository path.
+        Assert.Equal(HttpStatusCode.Conflict, await Status(client, HttpMethod.Put,
+            prefix + "org/example/1.0/example-1.0.pom", privateFeed ? Admin : Writer,
+            "<project><groupId>org</groupId><artifactId>example</artifactId><version>1.0</version></project>"u8.ToArray()));
+    }
+
+    [Fact]
+    public void PluginGroupXmlRejectsDuplicatesWrongGroupsAndUnsafeInput()
+    {
+        const string path = "org/example/maven-metadata.xml";
+        const string plugin = "<plugin><prefix>greet</prefix><artifactId>greet-maven-plugin</artifactId></plugin>";
+        var good = Encoding.UTF8.GetBytes("<metadata><groupId>org.example</groupId><plugins>" +
+            plugin + "</plugins></metadata>");
+        Assert.True(MavenGroupMetadata.TryParseAtPath(good, path, out var document));
+        Assert.Equal("greet", Assert.Single(document!.Plugins).Prefix);
+        foreach (var xml in new[] {
+            "<metadata><groupId>org.other</groupId><plugins>" + plugin + "</plugins></metadata>",
+            "<metadata><plugins>" + plugin + plugin + "</plugins></metadata>",
+            "<metadata><plugins><plugin><prefix>../bad</prefix><artifactId>bad</artifactId></plugin></plugins></metadata>",
+            "<!DOCTYPE metadata [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><metadata><plugins>" +
+                plugin + "</plugins></metadata>",
+            "<metadata><plugins>" + plugin + "</plugins><versioning/></metadata>"
+        }) Assert.False(MavenGroupMetadata.TryParseAtPath(Encoding.UTF8.GetBytes(xml), path, out _));
+    }
+
     [Fact]
     public async Task ReleaseMetadataKeepsExactBytesChecksumsAndConditionalUpdates()
     {

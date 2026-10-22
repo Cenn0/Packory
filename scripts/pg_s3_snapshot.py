@@ -717,12 +717,12 @@ def verify(folder):
         if (("feed_oci_tags" in table_counts or pg.get("database_schema_version") == 10) and
                 manifest["schema"] < 3):
             raise SnapshotError("V10 requires the complete snapshot format")
-        if (("maven_metadata" in table_counts or pg.get("database_schema_version") == 11) and
+        if (("maven_metadata" in table_counts or pg.get("database_schema_version", 0) >= 11) and
                 manifest["schema"] < 4):
             raise SnapshotError("V11 requires the Maven metadata snapshot format")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in range(12):
+            if type(db_version) is not int or db_version not in range(13):
                 raise SnapshotError("Unknown Packory database schema version")
             if db_version >= 10 and manifest["schema"] < 3:
                 raise SnapshotError("V10 requires the complete snapshot format")

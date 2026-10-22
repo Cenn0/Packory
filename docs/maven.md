@@ -158,3 +158,19 @@ operations. See the [support matrix](support-matrix.md),
 - [Maven 3.9.11 repository metadata model](https://maven.apache.org/ref/3.9.11/maven-repository-metadata/repository-metadata.html)
 - [Maven deploy plugin usage](https://maven.apache.org/plugins/maven-deploy-plugin/usage.html)
 - [Gradle repository types](https://docs.gradle.org/9.8.2/userguide/supported_repository_types.html)
+
+
+## Maven plugin-prefix metadata (schema V12)
+
+A native Maven plugin can publish group-level metadata at
+`/maven/<group/path>/maven-metadata.xml` or
+`/feeds/<id>/maven/<group/path>/maven-metadata.xml`.
+The XML maps each unique `<prefix>` to a committed plugin `<artifactId>`
+within the same group and scope. Reference integrity requires a corresponding
+immutable release POM; changes may add mappings but cannot silently remove or
+reassign an existing prefix. These metadata bytes and their digest sidecars are
+stored atomically in the scoped Maven metadata ledger. Path collisions with
+ordinary artifact metadata fail closed. An authenticated writer with a
+restricted namespace must be allowed to publish each referenced plugin.
+POM uploads can inherit `groupId` and `version` from their declared
+`<parent>` element; effective coordinate identity must match the URL.

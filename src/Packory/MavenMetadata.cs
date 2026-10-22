@@ -74,7 +74,8 @@ public static class MavenMetadata
     public static bool ValidRecord(MavenMetadataEntry? entry)
     {
         if (entry is null || entry.Scope != "" && !FeedDefinition.ValidId(entry.Scope) ||
-            !TryParsePath(entry.Path, out var coordinates) || coordinates is null ||
+            (!TryParsePath(entry.Path, out _) &&
+                !MavenGroupMetadata.TryParsePath(entry.Path, out _)) ||
             entry.Size is <= 0 or > MaxBytes || !ArtifactDigests.ValidSha256(entry.Sha256) ||
             !DateTimeOffset.TryParse(entry.UpdatedAt, out _) ||
             entry.ContentBase64.Length > ((MaxBytes + 2L) / 3L) * 4L) return false;
