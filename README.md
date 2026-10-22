@@ -12,7 +12,7 @@
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go hosted registry](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
+**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Current Roadmap V5](docs/roadmap-v5.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go hosted registry](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
 
 **A self-hosted distribution hub for developer packages and AI agent skills.**
 
@@ -70,7 +70,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 
 **Private hosted profile:** create a disabled draft, explicitly activate it as an administrator and issue an exact `feed:{id}:read` or `feed:{id}:publish` managed grant. Most roots are `/feeds/{id}/{protocol}/`; OCI preserves its native `/v2/` prefix at `/v2/feeds/{id}/{repository}/`. Legacy roots remain available, with OCI repository prefix `feeds/` reserved for private routing. See [feed lifecycle, client setup and protocol limits](docs/feeds.md).
 
-Private npm supports tags supplied during publication, without a separate mutable tag/unpublish API. Private Cargo has no yank API. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
+Private npm includes a durable scoped mutable dist-tag API; unpublish/deprecation policy and broader client qualification remain open. Private Cargo has no yank API. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
 
 ### Use Packory as a registry
 
@@ -148,6 +148,6 @@ The private-feed harness adds two feeds containing different bytes under identic
 
 ## Documentation and contributions
 
-[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go hosted registry](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go hosted registry](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Current Roadmap V5](docs/roadmap-v5.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
