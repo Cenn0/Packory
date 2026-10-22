@@ -60,9 +60,9 @@ SQLite remains the default **single-instance** profile; PostgreSQL metadata and 
 
 `origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions enter after successful upload. Skills are staged and become discoverable only when the active release policy allows them; MCP artifact pagination applies that approval predicate before the database page limit. Search is not federated across remote registries.
 
-### Private artifact visibility and schema V10
+### Private artifact visibility and schema V11
 
-The current schema is **V10**. `feed_assets` stores immutable native identities as `(feed_id, kind, path)`, along with name/version, media type, SHA-256 and length. It covers Raw, Maven, Go, npm, Cargo, PyPI and OCI. `feed_nuget_versions` retains the existing NuGet SHA-512 identity. `feed_oci_tags` stores feed/repository/tag pointers separately from immutable manifest records. The V10 migration preserves prior private rows and keys; it does not migrate global coordinates into feeds.
+The current schema is **V11**. Its additive `maven_metadata` table stores exact publisher XML and digests under `(scope,path)` with atomic metadata/audit updates. Existing private ledgers remain unchanged. `feed_assets` stores immutable native identities as `(feed_id, kind, path)`, along with name/version, media type, SHA-256 and length. It covers Raw, Maven, Go, npm, Cargo, PyPI and OCI. `feed_nuget_versions` retains the existing NuGet SHA-512 identity. `feed_oci_tags` stores feed/repository/tag pointers separately from immutable manifest records. The V10 migration preserves prior private rows and keys; it does not migrate global coordinates into feeds.
 
 For npm/Cargo/PyPI, one bundle contains a bounded metadata envelope and the original package payload. The envelope binds feed, kind, canonical path, native name/version, payload length and SHA-256. A read first verifies the ledger's digest and length for the complete object, then the envelope identity and payload checksum, and finally the adapter's protocol metadata. Thus a valid-looking manifest cannot make substituted package bytes visible. Go applies the same principle to one immutable `.info`/`.mod`/`.zip` triplet. Maven and Raw retain their file identities; OCI keeps feed/repository-scoped digest objects.
 
@@ -79,7 +79,7 @@ See [Roadmap](roadmap.md) for implementation sequence and [Operations](operation
 
 ## Experimental global Maven adapter (V4 E2 partial)
 
-The global Maven release adapter originated with schema V6. Private Maven uses the feed asset ledger and independent `/feeds/{id}/maven/` routes with POM identity checks, generated feed-local metadata and verified file checksums. Both profiles support bounded native dependency consumption. Standard Maven deploy, SNAPSHOT and upstream proxy remain separate E2 work. See [global Maven](maven.md) and [private Maven](feeds.md#maven).
+The global Maven release adapter originated with schema V6. Private Maven uses the feed asset ledger and independent `/feeds/{id}/maven/` routes with POM identity checks, generated feed-local metadata and verified file checksums. Both profiles now support bounded native Maven release and timestamped SNAPSHOT deployment, exact mutable repository metadata, and ordinary Maven/Gradle transitive dependency consumption. Files remain immutable; metadata updates validate same-scope references and use compare-and-swap. Upstream proxy, atomic publication of a whole multi-file release and wider Gradle variant qualification remain separate E2 work. See [global Maven](maven.md) and [private Maven](feeds.md#maven).
 
 ## Experimental global Raw adapter (V4)
 

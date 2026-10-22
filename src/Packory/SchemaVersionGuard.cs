@@ -4,14 +4,13 @@ using Npgsql;
 namespace Packory;
 
 /// <summary>
-/// Explicit forward-only database versions. V10 completes the immutable private
-/// artifact ledger and adds repository-scoped OCI tags, while retaining all
-/// historical global and private-feed rows and physical blob identities.
+/// Explicit forward-only database versions. V11 adds atomically stored Maven
+/// metadata while retaining immutable global/private artifact rows and keys.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 10;
+    public const int Current = 11;
 
     private static int RequireKnown(object? value)
     {
@@ -207,6 +206,23 @@ public static class SchemaVersionGuard
         );
         """;
 
+    // Metadata is mutable protocol state, not an immutable blob. Keeping the
+    // original bounded XML bytes and digest in one transaction avoids a new
+    // cross-store publication boundary and preserves native sidecar checksums.
+    // Empty scope denotes the legacy global repository; other scopes are exact
+    // private feed IDs. Provider writes additionally verify the active feed.
+    private const string MavenMetadataSchema = """
+        CREATE TABLE IF NOT EXISTS maven_metadata (
+            scope TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content_base64 TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            size BIGINT NOT NULL CHECK(size > 0),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(scope,path)
+        );
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -363,6 +379,13 @@ public static class SchemaVersionGuard
             if (violations.Read())
                 throw new InvalidOperationException("Foreign-key violation after V10 feed migration.");
         }
+        if (version < 11)
+        {
+            using var metadata = connection.CreateCommand();
+            metadata.Transaction = tx;
+            metadata.CommandText = MavenMetadataSchema;
+            metadata.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -489,6 +512,11 @@ public static class SchemaVersionGuard
                     CHECK(size > 0 OR (kind='oci' AND size=0));
                 """ + FeedOciTagSchema, connection, tx);
             schema.ExecuteNonQuery();
+        }
+        if (version < 11)
+        {
+            using var metadata = new NpgsqlCommand(MavenMetadataSchema, connection, tx);
+            metadata.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",

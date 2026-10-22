@@ -1,10 +1,11 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Packory;
 
 /// <summary>
-/// Canonical Maven 2 repository path parser for future E2 hosted/proxy endpoints.
-/// This does not expose routes, fetch upstream data or grant publication permissions.
+/// Canonical Maven repository paths. A timestamped snapshot keeps its base version
+/// in the directory and uses its resolved version only in the filename.
 /// </summary>
 public static class MavenCoordinates
 {
@@ -12,8 +13,34 @@ public static class MavenCoordinates
         @"\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    private static readonly Regex SnapshotSuffix = new(
+        @"\A(?<timestamp>[0-9]{8}\.[0-9]{6})-(?<build>[1-9][0-9]{0,9})(?=[.-])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public sealed record Artifact(string GroupId, string ArtifactId, string Version,
-        string? Classifier, string Extension);
+        string? Classifier, string Extension, string? ResolvedVersion = null);
+
+    public static bool IsSnapshot(string? version) => version is { Length: > 9 } &&
+        ValidSegment(version) && version.EndsWith("-SNAPSHOT", StringComparison.Ordinal);
+
+    public static bool TrySnapshotVersion(string baseVersion, string value,
+        out string timestamp, out int build)
+    {
+        timestamp = "";
+        build = 0;
+        if (!IsSnapshot(baseVersion) || !ValidSegment(value)) return false;
+        var prefix = baseVersion[..^9] + "-";
+        if (!value.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var tail = value[prefix.Length..];
+        if (tail.Length < 17 || tail[15] != '-' ||
+            !DateTime.TryParseExact(tail[..15], "yyyyMMdd.HHmmss",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out _) ||
+            !int.TryParse(tail[16..], NumberStyles.None, CultureInfo.InvariantCulture, out build) ||
+            build < 1 || tail[16..] != build.ToString(CultureInfo.InvariantCulture))
+            return false;
+        timestamp = tail[..15];
+        return true;
+    }
 
     public static bool ValidSegment(string? value) =>
         value is { Length: > 0 and <= 128 } &&
@@ -39,11 +66,21 @@ public static class MavenCoordinates
         var name = parts[^3];
         var version = parts[^2];
         var file = parts[^1];
-        if (!ValidGroup(group) || !ValidSegment(name) || !ValidSegment(version) ||
-            !file.StartsWith(name + "-" + version + ".", StringComparison.Ordinal) &&
-            !file.StartsWith(name + "-" + version + "-", StringComparison.Ordinal))
-            return false;
+        if (!ValidGroup(group) || !ValidSegment(name) || !ValidSegment(version)) return false;
+        string? resolved = null;
         var prefix = name + "-" + version;
+        if (IsSnapshot(version))
+        {
+            var snapshotPrefix = name + "-" + version[..^9] + "-";
+            if (!file.StartsWith(snapshotPrefix, StringComparison.Ordinal)) return false;
+            var match = SnapshotSuffix.Match(file[snapshotPrefix.Length..]);
+            if (!match.Success) return false;
+            resolved = version[..^9] + "-" + match.Value;
+            if (!TrySnapshotVersion(version, resolved, out _, out _)) return false;
+            prefix = name + "-" + resolved;
+        }
+        if (!file.StartsWith(prefix + ".", StringComparison.Ordinal) &&
+            !file.StartsWith(prefix + "-", StringComparison.Ordinal)) return false;
         var suffix = file[prefix.Length..];
         string? classifier = null;
         string extension;
@@ -59,7 +96,7 @@ public static class MavenCoordinates
         else return false;
         if (!ValidSegment(extension) ||
             classifier is not null && !ValidSegment(classifier)) return false;
-        artifact = new Artifact(group, name, version, classifier, extension);
+        artifact = new Artifact(group, name, version, classifier, extension, resolved);
         return true;
     }
 
@@ -67,10 +104,14 @@ public static class MavenCoordinates
     {
         if (!ValidGroup(artifact.GroupId) || !ValidSegment(artifact.ArtifactId) ||
             !ValidSegment(artifact.Version) || !ValidSegment(artifact.Extension) ||
-            artifact.Classifier is not null && !ValidSegment(artifact.Classifier))
+            artifact.Classifier is not null && !ValidSegment(artifact.Classifier) ||
+            IsSnapshot(artifact.Version) && (artifact.ResolvedVersion is null ||
+                !TrySnapshotVersion(artifact.Version, artifact.ResolvedVersion, out _, out _)) ||
+            !IsSnapshot(artifact.Version) && artifact.ResolvedVersion is not null)
             throw new ArgumentException("Invalid Maven coordinates.");
         return artifact.GroupId.Replace('.', '/') + "/" + artifact.ArtifactId +
-            "/" + artifact.Version + "/" + artifact.ArtifactId + "-" + artifact.Version +
+            "/" + artifact.Version + "/" + artifact.ArtifactId + "-" +
+            (artifact.ResolvedVersion ?? artifact.Version) +
             (artifact.Classifier is null ? "" : "-" + artifact.Classifier) + "." + artifact.Extension;
     }
 }

@@ -144,10 +144,38 @@ def main():
                         request("PUT", path, flavor, writer, expected=201)
                         retain(path, flavor, feed, reader)
                     elif kind == "maven":
-                        path = prefix + "/maven/org/example/demo/1.0.0/demo-1.0.0.jar"
+                        maven_root = prefix + "/maven/org/example/demo/"
+                        path = maven_root + "1.0.0/demo-1.0.0.jar"
                         body = archive_zip({"fixture.txt": flavor})
                         request("PUT", path, body, writer, expected=201)
                         retain(path, body, feed, reader)
+                        pom = b'<project><groupId>org.example</groupId><artifactId>demo</artifactId><version>1.0.0</version></project>'
+                        request("PUT", maven_root + "1.0.0/demo-1.0.0.pom", pom, writer, "application/xml", 201)
+                        retain(maven_root + "1.0.0/demo-1.0.0.pom", pom, feed, reader)
+                        for build in (1, 2):
+                            resolved = "2.0-20261022.000000-" + str(build)
+                            for extension in ("pom", "jar"):
+                                artifact_path = maven_root + "2.0-SNAPSHOT/demo-" + resolved + "." + extension
+                                contents = (b'<project><groupId>org.example</groupId><artifactId>demo</artifactId>'
+                                            b'<version>2.0-SNAPSHOT</version></project>') if extension == "pom" else archive_zip({"fixture.txt": flavor + str(build).encode()})
+                                request("PUT", artifact_path, contents, writer, expected=201)
+                                retain(artifact_path, contents, feed, reader)
+                            document = ('<?xml version="1.0" encoding="UTF-8"?>\n<metadata modelVersion="1.1.0">'
+                                '<groupId>org.example</groupId><artifactId>demo</artifactId><version>2.0-SNAPSHOT</version>'
+                                '<versioning><snapshot><timestamp>20261022.000000</timestamp><buildNumber>' + str(build) +
+                                '</buildNumber></snapshot><lastUpdated>20261022000000</lastUpdated><snapshotVersions>' +
+                                ''.join('<snapshotVersion><extension>' + extension + '</extension><value>' + resolved +
+                                    '</value><updated>20261022000000</updated></snapshotVersion>' for extension in ('pom', 'jar')) +
+                                '</snapshotVersions></versioning></metadata>\n').encode()
+                            metadata_path = maven_root + "2.0-SNAPSHOT/maven-metadata.xml"
+                            request("PUT", metadata_path, document, writer, "application/xml", 201 if build == 1 else 204)
+                        retain(metadata_path, document, feed, reader)
+                        retain(metadata_path + ".sha256", hashlib.sha256(document).hexdigest().encode(), feed, reader)
+                        versions = (b'<metadata><groupId>org.example</groupId><artifactId>demo</artifactId><versioning>'
+                                    b'<latest>2.0-SNAPSHOT</latest><release>1.0.0</release><versions><version>1.0.0</version>'
+                                    b'<version>2.0-SNAPSHOT</version></versions><lastUpdated>20261022000000</lastUpdated></versioning></metadata>\n')
+                        request("PUT", maven_root + "maven-metadata.xml", versions, writer, "application/xml", 201)
+                        retain(maven_root + "maven-metadata.xml", versions, feed, reader)
                     elif kind == "nuget":
                         body = archive_zip({"same-package.nuspec": b'<package><metadata><id>same-package</id><version>1.0.0</version><authors>synthetic</authors><description>restore fixture</description></metadata></package>',
                                             "content/fixture.txt": flavor})
@@ -218,7 +246,7 @@ def main():
             else:
                 raise AssertionError("Corrupted snapshot was accepted")
             assert not (work / "must-not-exist").exists()
-            print("E0 offline restore: 16 private feeds across 8 package kinds, exact bytes/grants/tags and corruption rejection passed.")
+            print("Offline restore: 16 private feeds across 8 kinds; Maven V11 exact metadata, two SNAPSHOT generations, bytes/grants/tags and corruption rejection passed.")
         finally:
             stop()
 

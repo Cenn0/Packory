@@ -45,7 +45,9 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Validate offline backup and restore tooling
-        run: python3 -m unittest discover -s tests -p test_offline_backup.py -v
+        run: |
+          python3 -m unittest discover -s tests -p test_offline_backup.py -v
+          python3 -m unittest discover -s tests -p test_maven_snapshot.py -v
       - name: Verify fail-closed signed production release evidence checks (synthetic fixtures)
         run: python3 -m unittest discover -s tests -p test_release_evidence.py -v
       - name: Validate S3 real-provider probe failure detection (synthetic only)
@@ -66,7 +68,7 @@ jobs:
       - name: Verify dashboard ecosystem parity with implemented catalog
         run: python3 -m unittest discover -s tests -p test_dashboard_contract.py -v
       - name: Validate shell smoke scripts
-        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-go.sh scripts/smoke-feed-nuget.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh scripts/smoke-feed-npm.sh scripts/smoke-feed-ecosystems.sh scripts/smoke-feed-oci.sh
+        run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-maven-deploy.sh scripts/smoke-go.sh scripts/smoke-feed-nuget.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh scripts/smoke-feed-npm.sh scripts/smoke-feed-ecosystems.sh scripts/smoke-feed-oci.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
       - name: Exercise real private multi-feed NuGet publish and restore
@@ -99,6 +101,24 @@ jobs:
         run: bash scripts/smoke-oci-helm.sh
       - name: Exercise Docker with anonymous generic reads and forced OCI authenticated ping
         run: PACKORY_SMOKE_ANONYMOUS_READ=true PACKORY_SMOKE_AUTHENTICATED_PING=true bash scripts/smoke-oci-docker.sh
+  maven:
+    name: Native Maven deploy and Gradle dependency acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Build native acceptance host
+        run: dotnet build src/Packory/Packory.csproj --configuration Release -warnaserror
+      - name: Verify native release and SNAPSHOT publishing, isolation and restart
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          bash scripts/smoke-maven-deploy.sh
   dashboard:
     name: MCP dashboard browser regressions
     runs-on: ubuntu-latest

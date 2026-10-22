@@ -1,6 +1,6 @@
 # Packory Roadmap V4 — Native package ecosystem expansion
 
-**Planning baseline:** 19 October 2026; **implementation checkpoint updated:** 21 October 2026. **Status:** E0 hosted package foundation completed and accepted; other milestones retain the states below. This plan is not a claim that all package ecosystems or V3 milestones are complete.
+**Planning baseline:** 19 October 2026; **implementation checkpoint updated:** 22 October 2026. **Status:** E0 hosted package foundation completed and accepted; E2 now includes native Maven deployment, timestamped SNAPSHOTs and ordinary Gradle consumption, with the remaining scope below. This plan is not a claim that all package ecosystems or V3 milestones are complete.
 **Depends on:** [V3 delivery roadmap](roadmap.md), [release gates](release-gates.md), [support matrix](support-matrix.md), real-provider restore qualification and secure feed authorization.
 
 ## Outcome and non-negotiable rules
@@ -23,7 +23,7 @@ Packory should distribute packages through existing native package managers. A R
 | E0 | P0 | Shared feed/control-plane isolation, typed coordinates, validated storage/digests, origin policies, cross-protocol test harness | Two same-name package revisions in separate independently authorized feeds, native clients fail closed on 401/403/404, restore/recovery under faults | **Complete and accepted for hosted packages:** private NuGet/npm/Cargo/PyPI/OCI/Maven/Go/Raw routes, exact grants, typed native identities, schema V10 and immutable storage. All eight local native profiles, selected PostgreSQL/Moto native parity, all-kind private restore and complete local suites pass; all eight published-commit workflows and twelve jobs pass, with immutable evidence in [E0 acceptance](e0-acceptance.md). Proxy/group and private Skills/MCP remain separate milestones |
 | E1.1 | P0 | Raw/Generic hosted binary, immutable version, SHA-256, metadata, streaming and range GET | Auth, namespace, duplicate, tamper, restart, SQLite/PostgreSQL, S3-emulator, offline reference scan | **PR #90 merged**, experimental; no production/provider qualification |
 | E1.2 | P0 | Native Helm 3 through existing OCI transport | Pinned Helm push/pull/show/template against local OCI with private-access negatives | **PR #90 merged**, pinned CLI smoke passed; no universal Helm/Kubernetes conformance |
-| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Partial:** parser #92 and global immutable hosted release transport + V6 metadata/recovery + Maven native consume #93 merged; bounded Maven Central CI retry #95 merged; bounded verified checksum PUTs for already committed immutable release artifacts added. E0 adds private hosted release feeds. Native deploy (including mutable metadata PUT), Gradle conformance, SNAPSHOT, atomic multi-file release and proxy remain open |
+| E2 | P1 | Maven repository layout shared by Maven and ordinary Gradle dependencies: release POM/JAR/classifiers, snapshots, metadata, hosted and proxy | Native Maven deploy/resolve + Gradle resolve, transitive graph, checksum, private namespace, cold/warm/offline/error suite | **Hosted deploy/consumer slice implemented and tested:** native Maven release and unique SNAPSHOT deploy with source classifiers; exact mutable GA/GAV metadata with V11 atomic persistence, same-scope references and CAS; native Maven/Gradle transitive resolve/build across global and two private feeds, fresh caches and restart. SQLite and PostgreSQL/Moto restore preserve exact metadata and immutable generations. **Still open:** atomic multi-file release visibility, Central proxy, plugin-prefix metadata, inherited POM GAV, broader Gradle variants and real-provider qualification. See [Maven acceptance](maven.md) |
 | E3 | P1 | Go Modules GOPROXY, module escaping, immutable .info/.mod/.zip and canonical versions; validated private ingest + public allowlisted mirror | Native go mod download/build with private and mirrored modules, checksum DB rules and retry/case tests | **Hosted slice merged:** [#97](https://github.com/Cenn0/Packory/pull/97) delivers immutable module publishing, GOPROXY reads and V7 recovery; [#102](https://github.com/Cenn0/Packory/pull/102) adds a canonical `h1:` archive-content hash verified against native Go `go.sum`. The pinned-commit CI passed. Private hosted feed IAM and native Go authentication were added in E0/#109. Mirror, public checksum-database trust, full archive compatibility and provider/DR gates remain open |
 | E4 | P1 | RubyGems publish/read-through and Bundler Compact Index | gem push/install and bundle install with transitive deps, negative index/redirect tests | **Not implemented** |
 | E5 | P1 | Composer 2 metadata API and immutable distribution archives; hosted ingest and proxy | composer install/update from hosted and mirrored packages without remote credential exfiltration | **Not implemented** |
@@ -94,7 +94,7 @@ For each adapter, collect versioned evidence for:
 
 ## Previous checkpoint: PR #90
 
-[PR #90](https://github.com/Cenn0/Packory/pull/90) is merged after green CI; E1 Raw and bounded Helm OCI are experimental. [PR #92](https://github.com/Cenn0/Packory/pull/92) merged the Maven path parser and safety tests. E2 Maven global release transport followed in PR #93. At that checkpoint, private feed isolation had not yet been added; the E0 hosted implementation below supplies it. Native deploy, proxy and SNAPSHOT remain E2 work.
+[PR #90](https://github.com/Cenn0/Packory/pull/90) is merged after green CI; E1 Raw and bounded Helm OCI are experimental. [PR #92](https://github.com/Cenn0/Packory/pull/92) merged the Maven path parser and safety tests. E2 Maven global release transport followed in PR #93. At that checkpoint, private feed isolation had not yet been added; the E0 hosted implementation below supplies it. Native deploy and unique SNAPSHOTs followed in the 22 October E2 slice below; proxy remains open.
 
 ### E0 hosted foundation — 21 October 2026
 
@@ -137,10 +137,35 @@ This bounded hosted foundation does not complete MS2 or the wider project.
 Proxy/group feed semantics, per-feed quotas/retention, full declarative
 control-plane operations, CAS migration and browser permissions remain in
 MS2/MS4. Private Skills and feed-aware MCP discovery remain MS5/MCP-P5.
-Native `mvn deploy`/SNAPSHOT/Gradle/proxy remain E2; Go mirror and public
-checksum trust remain E3. Private npm has publication tags without mutable
+The E0 checkpoint did not include native deploy/SNAPSHOT/Gradle; these follow in the 22 October E2 delivery below. Maven proxy and Go mirror/public checksum trust remain open. Private npm has publication tags without mutable
 dist-tag/unpublish APIs, Cargo has no private yank, and PyPI's canonical
 version/archive profile does not qualify arbitrary source builds. These
 boundaries are detailed in [feed operations](feeds.md) and the
 [support matrix](support-matrix.md). E11 retains deployment/provider recovery
 and release qualification.
+
+
+## E2 hosted Maven deployment and Gradle consumption — 22 October 2026
+
+The native hosted slice now implements global and private release/SNAPSHOT
+publishing, source classifiers, exact publisher XML metadata, SHA-512/SHA-256/
+SHA-1/MD5 sidecars and schema V11. Timestamped snapshot files stay immutable;
+metadata updates preserve earlier inventory and use atomic database/audit
+transactions with compare-and-swap. No private request falls back to a global
+feed or upstream. Metadata identity ambiguity and concurrent first-file
+collisions fail closed; legacy artifact IDs ending in `-SNAPSHOT` remain valid.
+
+Reproducible acceptance uses Maven 3.9.11, deploy plugin 3.1.4, Gradle 9.8.2
+and Java 17. The new native CI job deploys releases and two SNAPSHOT generations
+to the global repository and two private feeds, verifies original POM/JAR/source
+bytes and checksums, resolves/builds a transitive graph from fresh caches, tests
+authorization failures and repeats reads after a real application restart.
+Migration/CAS/audit/recovery tests run on SQLite and actual PostgreSQL. SQLite
+offline restore and PostgreSQL/Moto snapshot format4 preserve exact mutable
+metadata, retained immutable generations and feed grants.
+
+**E2 remains partial.** Proxy behavior, atomic visibility of a whole deployment,
+Maven group/plugin-prefix metadata, parent-inherited GAV, broader Gradle variants
+and real-provider restore are not supplied by this slice.
+The complete routes, limits, test commands and primary protocol sources are in
+[Maven operations and acceptance](maven.md).

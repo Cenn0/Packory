@@ -72,6 +72,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_nuget_versions') IS NOT NULL
                     AND to_regclass('raw_artifacts') IS NOT NULL
                     AND to_regclass('maven_assets') IS NOT NULL
+                    AND to_regclass('maven_metadata') IS NOT NULL
                     AND to_regclass('go_modules') IS NOT NULL
                     AND to_regclass('feed_assets') IS NOT NULL
                     AND to_regclass('feed_oci_tags') IS NOT NULL
@@ -300,6 +301,66 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         catalog.ExecuteNonQuery();
         Audit(db, tx, "publish", "maven",
             asset.GroupId + ":" + asset.ArtifactId, asset.Version, actor);
+        tx.Commit();
+        return true;
+    }
+
+    public MavenMetadataEntry? GetMavenMetadata(string scope, string path)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT scope,path,content_base64,sha256,size,updated_at
+            FROM maven_metadata WHERE scope=@scope AND path=@path
+            """, null, ("scope", scope), ("path", path));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new MavenMetadataEntry(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetInt64(4), reader.GetString(5)) : null;
+    }
+
+    public IReadOnlyList<MavenMetadataEntry> MavenMetadata()
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT scope,path,content_base64,sha256,size,updated_at
+            FROM maven_metadata ORDER BY scope,path
+            """);
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<MavenMetadataEntry>();
+        while (reader.Read())
+            rows.Add(new MavenMetadataEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)));
+        return rows;
+    }
+
+    public bool PutMavenMetadata(MavenMetadataEntry entry, string actor, string? expectedSha256)
+    {
+        if (!Packory.MavenMetadata.ValidRecord(entry) ||
+            expectedSha256 is not null && !ArtifactDigests.ValidSha256(expectedSha256))
+            throw new ArgumentException("Invalid Maven metadata revision.", nameof(entry));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        const string activeScope = """
+            (@scope='' OR EXISTS(SELECT 1 FROM feeds WHERE id=@scope
+                AND kind='maven' AND mode='hosted' AND visibility='private' AND enabled=1))
+            """;
+        var sql = expectedSha256 is null
+            ? """
+                INSERT INTO maven_metadata(scope,path,content_base64,sha256,size,updated_at)
+                SELECT @scope,@path,@content,@sha,@size,@at WHERE
+                """ + activeScope + " ON CONFLICT(scope,path) DO NOTHING"
+            : """
+                UPDATE maven_metadata SET content_base64=@content,sha256=@sha,size=@size,updated_at=@at
+                WHERE scope=@scope AND path=@path AND sha256=@expected AND
+                """ + activeScope;
+        using var put = Command(db, sql, tx,
+            ("scope", entry.Scope), ("path", entry.Path), ("content", entry.ContentBase64),
+            ("sha", entry.Sha256), ("size", entry.Size), ("at", entry.UpdatedAt));
+        if (expectedSha256 is not null) put.Parameters.AddWithValue("expected", expectedSha256);
+        if (put.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, "metadata-update", "maven",
+            (entry.Scope.Length == 0 ? "global" : "feeds/" + entry.Scope) + "/" + entry.Path,
+            entry.Sha256, actor);
         tx.Commit();
         return true;
     }

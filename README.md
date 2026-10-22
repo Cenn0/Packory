@@ -54,7 +54,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 | **npm** | Legacy metadata/tarball caching plus private hosted scoped/unscoped publish, packuments, publication tags and verified tarballs; native install/ci |
 | **OCI (experimental)** | Legacy and private hosted Distribution v2 blobs, durable chunk uploads, manifests, mutable tags and referrers; private repositories use `/v2/feeds/{id}/` |
 | **Cargo & PyPI (experimental)** | Legacy and private hosted Cargo sparse registries/native publish; PyPI Simple HTML/JSON and Twine upload with immutable distribution files |
-| **Maven (experimental)** | Global and private immutable release files, POM identity checks, checksums and generated version metadata; native dependency consumption, no native deploy, SNAPSHOT or proxy |
+| **Maven (experimental)** | Global and private native Maven deploy, immutable release/timestamped SNAPSHOT files, exact metadata and checksums; Maven/Gradle transitive consumption; no upstream proxy |
 | **Go modules (hosted experimental)** | Global and private authenticated import/native GOPROXY reads; immutable module triplets and canonical `h1:` content hashes; no upstream mirror or external checksum-database trust |
 | **Raw / Generic (experimental)** | Global and private immutable HTTP upload/download with SHA-256 metadata and ranged reads; generic bytes, without a package-manager protocol |
 | **Agent Skills** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download under the enforcing policy; revocation and rescan |
@@ -67,7 +67,7 @@ See [operations](docs/operations.md) before enabling network access or choosing 
 
 **Private hosted profile:** create a disabled draft, explicitly activate it as an administrator and issue an exact `feed:{id}:read` or `feed:{id}:publish` managed grant. Most roots are `/feeds/{id}/{protocol}/`; OCI preserves its native `/v2/` prefix at `/v2/feeds/{id}/{repository}/`. Legacy roots remain available, with OCI repository prefix `feeds/` reserved for private routing. See [feed lifecycle, client setup and protocol limits](docs/feeds.md).
 
-Private npm supports tags supplied during publication, without a separate mutable tag/unpublish API. Private Cargo has no yank API. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports immutable release uploads and consumption, without `mvn deploy` or SNAPSHOT. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
+Private npm supports tags supplied during publication, without a separate mutable tag/unpublish API. Private Cargo has no yank API. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
 
 ### Use Packory as a registry
 
@@ -114,7 +114,7 @@ flowchart LR
   Result --> Catalog
 ```
 
-Each adapter keeps its own native protocol while sharing authorization, persistence and recovery. Schema V10 includes the private artifact ledger and OCI tag references; npm/Cargo/PyPI commit protocol metadata and original package bytes in one verified immutable bundle. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
+Each adapter keeps its own native protocol while sharing authorization, persistence and recovery. Schema V11 retains the private artifact ledger and OCI tag references and adds atomic Maven metadata; npm/Cargo/PyPI commit protocol metadata and original package bytes in one verified immutable bundle. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
 
 ## Limitations and security
 

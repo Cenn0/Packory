@@ -1,49 +1,160 @@
-# Maven release artifacts — V4 experimental hosted transport
+# Maven and Gradle — experimental hosted repository
 
-**Scope:** bounded **global** Maven 2 repository layout for immutable release files and independently validated artifact checksum PUTs. Not full Maven/Gradle registry parity, not a native Maven deployment repository and not production-qualified.
+**E2 delivery profile, 22 October 2026:** native Maven release and unique
+timestamped SNAPSHOT deployment, repository metadata publication and ordinary
+Maven/Gradle dependency consumption. The global repository and independently
+authorized private feeds use the same protocol implementation. E2 remains
+partial: proxying, atomic publication of an entire multi-file release, plugin
+prefix metadata and wider client/variant qualification are separate work.
 
-The adapter exposes an HTTP Maven repository URL for **native Maven artifact consumption**. The CI smoke retries **only recognizable transient Maven Central plugin bootstrap transfer faults** (up to three attempts); artifact download, digest verification and consumer build failures are never treated as a successful retry. See [PR #95](https://github.com/Cenn0/Packory/pull/95). It does **not** claim native Maven deploy lifecycle, SNAPSHOT publication, mutable metadata PUT, Gradle module metadata conformance, upstream proxy, private per-feed isolation or multi-node writers.
+## Repository layout and immutable files
 
-## URLs and coordinates
+| Operation | Global repository path (prefix private paths with `/feeds/{id}`) |
+| --- | --- |
+| Release POM | `/maven/com/example/library/1.0.0/library-1.0.0.pom` |
+| Release JAR | `/maven/com/example/library/1.0.0/library-1.0.0.jar` |
+| Sources classifier | `/maven/com/example/library/1.0.0/library-1.0.0-sources.jar` |
+| Timestamped SNAPSHOT | `/maven/com/example/library/1.1.0-SNAPSHOT/library-1.1.0-20261022.100000-1.jar` |
+| Version inventory | `/maven/com/example/library/maven-metadata.xml` |
+| SNAPSHOT pointers | `/maven/com/example/library/1.1.0-SNAPSHOT/maven-metadata.xml` |
 
-- Repository: https://packory.example.invalid/maven/
-- POM: /maven/com/example/library/1.0.0/library-1.0.0.pom
-- JAR: /maven/com/example/library/1.0.0/library-1.0.0.jar
-- Sources: /maven/com/example/library/1.0.0/library-1.0.0-sources.jar
-- Checksums: add .sha256, .sha1 or .md5 to the individual artifact URL; GET is derived from immutable artifact bytes, and matching artifact checksum PUTs receive 204 without changing stored content
-- Versions: /maven/com/example/library/maven-metadata.xml (and checksum variants)
-- PUT is a **Packory-specific file upload**, not standard Maven deploy. Requires write/admin credential and optional Maven namespace grant of the form maven:com.example/library.
+Files and both metadata levels support authenticated `GET`, `HEAD` and `PUT`.
+Append `.sha512`, `.sha256`, `.sha1` or `.md5` for checksum sidecars.
+Extensions are bounded to `pom`, `jar`, `war`, `aar`, `zip`, `tar.gz` and
+`module`; accepting a `.module` file does not qualify every Gradle metadata variant.
 
-The layout validator rejects traversal, encoded separators, noncanonical group segments, oversized paths, empty segments and SNAPSHOT revisions. Extensions are limited to pom, jar, war, aar, zip, tar.gz and module.
+The directory keeps the base version `1.1.0-SNAPSHOT`; the timestamp/build number
+identifies immutable files within it. New deployments create new files and
+advance metadata pointers. Previously published files remain addressable and
+cannot be overwritten, including by identical repeat `PUT`s. Nonunique mutable
+`library-1.1.0-SNAPSHOT.jar` paths are rejected. Invalid calendar timestamps,
+noncanonical build numbers, traversal, encoded separators and oversized paths
+are rejected before storage access.
 
-## Publishing
+POMs must contain explicit matching `groupId`, `artifactId` and `version` fields.
+For a timestamped SNAPSHOT filename the POM version is the base `-SNAPSHOT`
+version. Parent-inherited GAV, Maven plugin/group metadata and arbitrary POM
+interpolation are outside this profile. XML parsing is bounded; DTDs and external
+entities are prohibited.
 
-Upload each file through an authenticated HTTP PUT to its canonical repository path. The request must include a positive Content-Length; unsupported unknown-length uploads receive HTTP 411. An existing path cannot be overwritten. POM uploads must be bounded XML containing explicit matching groupId, artifactId and version fields; DTD/external entity resolution is prohibited. Parent-inherited project GAV and advanced deployment metadata are not supported in this slice.
+## Native publishing and consuming
 
-~~~bash
-curl --fail-with-body --request PUT \
-  -H "Authorization: Bearer $PACKORY_WRITE_TOKEN" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @library-1.0.0.pom \
-  https://packory.example.invalid/maven/com/example/library/1.0.0/library-1.0.0.pom
-~~~
+Use the private repository URL
+`https://packory.example.invalid/feeds/team-maven/maven/` for an active private
+Maven feed. A Maven `<server>` ID must match the repository ID used by
+`distributionManagement` or `altDeploymentRepository`. Supply a revocable
+`feed:team-maven:publish` grant as the HTTP Basic password; use an exact read
+grant for consuming. Store credentials in runtime-generated settings outside
+the repository. HTTPS is required outside isolated loopback tests.
 
-A checksum PUT is allowed only **after** its release artifact has been committed. The supplied body must contain exactly the matching ASCII hexadecimal digest (optionally one LF/CRLF), with a bounded Content-Length. Correct checksums return 204 (including idempotent retries); a mismatch returns 409, an absent artifact returns 404, malformed input returns 400/413, and corrupted stored bytes return 503. These checks compare to the verified immutable SHA-256-backed artifact ledger before acknowledging the upload. They are not new authoritative metadata and do not mutate package revisions. The same publication-namespace permission as the underlying artifact is required. **PUT to `maven-metadata.xml` or any of its checksum URLs remains unsupported**; acknowledging immutable checksum sidecars does not make `mvn deploy` compatible.
+```bash
+mvn --settings "$PACKORY_MAVEN_SETTINGS" clean deploy \
+  -DaltDeploymentRepository=packory::https://packory.example.invalid/feeds/team-maven/maven/
+```
 
-Never commit credentials or generated settings files with live tokens. Use TLS outside isolated loopback tests.
+Global publishing uses the existing write/admin policy and optional namespace
+grant `maven:com.example/library`. Global reads follow the global read policy.
+Private requests require the exact feed grant, enabled Maven kind and hosted
+mode before any metadata or artifact lookup. There is no anonymous, global,
+cross-feed or public-upstream fallback.
 
-## Native consumption
+For Maven dependency resolution, configure an explicit repository or an
+appropriate mirror. A private-only build must not silently retain public
+fallback repositories. The native test bootstraps its pinned build plugins
+separately, then applies `mirrorOf=*` to Packory for all synthetic project
+artifacts with fresh caches. Gradle declares exactly one authenticated Packory
+repository and verifies compilation/execution of a transitive dependency graph.
 
-For com.example:library:1.0.0, add Packory as an explicitly configured Maven repository. The native smoke test uses a synthetic release, fresh client cache, and an isolated Maven mirror to verify that the bytes actually came from Packory. Maven version metadata is derived from published POMs; it does not implement all Maven release/latest/snapshot discovery semantics. Legacy SHA-1/MD5 checksum responses exist for client compatibility only. **Publication-time authoritative integrity is SHA-256.**
+## Mutable metadata contract
 
-## Persistence and security
+Schema V11 stores the publisher's original metadata bytes, canonical base64,
+SHA-256, length and update time atomically in SQLite or PostgreSQL. Metadata is
+keyed by exact `(scope, path)`; the empty scope is global and a nonempty scope
+is a private feed ID. Checksum GETs and acknowledgements use those exact bytes,
+including their original whitespace and XML declaration.
 
-- SQLite/PostgreSQL schema V6 stores immutable Maven asset paths, checksums, size, MIME and creation time; per-file catalog plus audit are committed in a DB transaction.
-- Bytes are separately committed to filesystem/S3. Durable intents, startup reconciliation, offline integrity inspection and schema-aware PostgreSQL/S3 fingerprints cover Maven files.
-- No cross-store ACID transaction. A release has separate POM and binary writes; partial releases must not be treated as atomic or production-qualified.
-- Global read policy applies. Feed-scoped managed credentials are not allowed to read global Maven assets when authentication is required.
-- No arbitrary upstream URLs, implicit public fallback, remote code execution, automatic malware scanning or signature verification.
+Publication checks both the document identity and all referenced same-scope
+committed POM/SNAPSHOT files. SNAPSHOT metadata must identify an existing current
+POM and unique extension/classifier entries; current and retained older classifier
+files must exist. Referenced local and authoritative S3 bytes are checked against
+their immutable ledger before accepting new metadata. Missing references fail
+with `409`; damaged committed content fails with `503`.
 
-**Open:** native Maven deploy (including server-controlled mutable repository metadata lifecycle), native Gradle conformance, atomic multi-file releases, snapshot versions, private feed isolation, upstream proxy, real S3 recovery/provider tests and full client/security acceptance. Track these in [V4 roadmap](roadmap-v4.md), [issue #91](https://github.com/Cenn0/Packory/issues/91) and [release gates](release-gates.md).
+Metadata updates cannot remove previously advertised versions or classifiers,
+rewind timestamps/builds or replace a database revision that changed concurrently.
+Native clients receive `409` for conflicting updates and must fetch/retry using
+the current state. Clients that send `If-Match` can bind an update to an exact
+ETag; a stale condition returns `412`. `If-None-Match: *` requires a new document.
+Metadata and its audit event commit together. A failed audit/database transaction
+does not leave a partially updated document. Directly uploaded legacy releases
+still receive a generated version listing until a publisher supplies metadata;
+the first stored document must preserve that existing version inventory.
+Artifact IDs ending in `-SNAPSHOT` remain valid. If a metadata URL would represent
+both an artifact inventory and another artifact's SNAPSHOT pointers, conflicting
+metadata requests and new artifact publications return `409`.
 
-Official references: [Maven layout](https://maven.apache.org/repository/layout.html), [metadata](https://maven.apache.org/repositories/metadata.html), [deploy plugin](https://maven.apache.org/plugins/maven-deploy-plugin/usage.html).
+All PUTs require positive `Content-Length` and configured size bounds.
+Metadata is capped by `PACKORY_MAX_METADATA_BYTES` and a hard 16 MiB limit;
+each document/reference expansion is limited to 4096 entries. Checksum bodies
+allow only matching ASCII hex plus an optional trailing LF/CRLF, at most 130
+bytes. Correct sidecars return `204`; wrong digests return `409`, missing targets
+`404`, malformed input `400` and excessive bodies `413`. Sidecars do not create
+independent mutable objects. SHA-1/MD5 are compatibility responses; publication
+integrity remains SHA-256, without implying signatures or publisher provenance.
+
+## Persistence, recovery and migration
+
+Release and timestamped SNAPSHOT files keep their existing physical global or
+feed-local keys. Each immutable file follows intent → object → ledger/audit →
+completed intent. Metadata bytes live entirely in the database, avoiding an
+additional database/S3 consistency boundary. Each file is visible after its own
+commit; **the complete POM/JAR/classifier set is not one atomic deployment**.
+
+V10 → V11 is an additive, transactional metadata-table migration. It preserves
+all prior artifact rows, bytes, feed grants and OCI tag references. Startup and
+readiness checks reject malformed metadata and missing same-repository
+references. Before upgrading, stop writers and take a verified consistent
+backup. Rollback requires the matching pre-upgrade backup and old application;
+never lower the schema marker on a V11 database.
+
+Offline SQLite backup/restore validates exact metadata and referenced assets.
+The PostgreSQL/S3 snapshot format is V4 for schema V11 and adds a
+`maven_references` inventory inside the manifest; restore compares it to the
+restored database and object inventory. Previously created snapshots for V4/V10
+database profiles remain accepted in their supported older formats. Tests use
+PostgreSQL and the Moto S3 emulator; they do not establish
+qualification of a real S3 provider.
+
+## Reproducible acceptance
+
+`bash scripts/smoke-maven-deploy.sh` runs pinned Maven **3.9.11**, deploy plugin
+**3.1.4**, Gradle **9.8.2** and Java **17**. Tool distributions are checked against
+pinned upstream checksums. The test exercises:
+
+- Native `mvn clean deploy` for a release and two successive timestamped
+  SNAPSHOTs in the global repository and two isolated private feeds.
+- POM/JAR/source classifiers, exact original bytes and SHA-1/SHA-256/SHA-512.
+- Fresh-cache Maven transitive resolution and Gradle compilation/execution,
+  including classifier retrieval and distinct bytes under identical coordinates.
+- Authorization failures, isolation, retained prior SNAPSHOT bytes and real
+  application restart with unchanged metadata/checksums.
+
+`MavenDeploymentTests`, `MavenMetadataProviderTests`, existing Maven/feed tests
+and the parser suite cover malformed XML, invalid paths, namespace permissions,
+missing/corrupt references, CAS conflicts, migration and transaction failures.
+`test_maven_snapshot.py`, `test_pg_s3_restore_e2e.py` and
+`scripts/smoke-feed-recovery.py` cover corrupt inventories and actual isolated
+restore. Published CI remains the evidence for the exact merged commit.
+
+This is a tested bounded Packory profile, not Apache/Gradle certification or
+complete protocol conformance. Remaining E2 work includes Central proxying,
+multi-file atomic visibility, advanced Gradle variants and broader deployment
+operations. See the [support matrix](support-matrix.md),
+[V4 roadmap](roadmap-v4.md) and [issue #91](https://github.com/Cenn0/Packory/issues/91).
+
+## Primary specifications
+
+- [Apache Maven repository layout](https://maven.apache.org/repository/layout.html)
+- [Maven 3.9.11 repository metadata model](https://maven.apache.org/ref/3.9.11/maven-repository-metadata/repository-metadata.html)
+- [Maven deploy plugin usage](https://maven.apache.org/plugins/maven-deploy-plugin/usage.html)
+- [Gradle repository types](https://docs.gradle.org/9.8.2/userguide/supported_repository_types.html)

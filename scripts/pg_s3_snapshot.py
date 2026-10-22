@@ -12,6 +12,7 @@ import argparse
 import base64
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ import tempfile
 import zipfile
 from urllib.parse import urlsplit
 
-SCHEMA = 3
+SCHEMA = 4
 LOCK = 0x5041434B4F525931  # PostgresSingleWriterLease.LockId
 CORE_TABLES = ("packages", "npm_versions", "npm_tags", "cargo_versions", "pypi_files",
                "skills", "oci_blobs", "oci_manifests", "oci_tags", "oci_referrers",
@@ -37,6 +38,7 @@ MAVEN_TABLES = ("maven_assets",)
 GO_TABLES = ("go_modules",)
 FEED_ASSET_TABLES = ("feed_assets",)
 FEED_OCI_TABLES = ("feed_oci_tags",)
+MAVEN_METADATA_TABLES = ("maven_metadata",)
 # Authoritative security and reviewed MCP metadata are independent of core package schema.
 # The v7 application initializes these tables, so an absent table must abort a new backup.
 SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
@@ -44,7 +46,7 @@ SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
     *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
-    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *SECURITY_REGISTRY_TABLES))
+    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -64,6 +66,11 @@ OCI_MEDIA = frozenset(("application/vnd.oci.image.manifest.v1+json",
                        "application/vnd.docker.distribution.manifest.v2+json",
                        "application/vnd.docker.distribution.manifest.list.v2+json",
                        "application/vnd.oci.artifact.manifest.v1+json"))
+
+_maven_spec = importlib.util.spec_from_file_location(
+    "packory_maven_snapshot", Path(__file__).with_name("maven_snapshot.py"))
+maven = importlib.util.module_from_spec(_maven_spec)
+_maven_spec.loader.exec_module(maven)
 
 
 class SnapshotError(RuntimeError):
@@ -124,7 +131,7 @@ def database_schema_version(connection):
         return 0
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in range(1, 11):
+    if not row or type(row[0]) is not int or row[0] not in range(1, 12):
         raise SnapshotError("Unknown Packory database schema version")
     return row[0]
 
@@ -147,6 +154,7 @@ def metadata_tables(connection):
             (GO_TABLES if version >= 7 else ()) +
             (FEED_ASSET_TABLES if version >= 8 else ()) +
             (FEED_OCI_TABLES if version >= 10 else ()) +
+            (MAVEN_METADATA_TABLES if version >= 11 else ()) +
             (SECURITY_REGISTRY_TABLES if version >= 7 else ()))
 
 
@@ -157,6 +165,16 @@ def feed_references(connection):
         return [dict(zip(columns, row)) for row in connection.execute(query)]
     return {"assets": rows("feed_assets", ASSET_COLUMNS, 'feed_id COLLATE "C",kind COLLATE "C",path COLLATE "C"'),
             "oci_tags": rows("feed_oci_tags", OCI_TAG_COLUMNS, 'feed_id COLLATE "C",name COLLATE "C",tag COLLATE "C"')}
+
+
+def maven_references(connection):
+    """Retain exact mutable metadata bytes plus global immutable file identities."""
+    def rows(table, columns, order):
+        query = "SELECT " + ",".join(columns) + " FROM " + table + " ORDER BY " + order
+        return [dict(zip(columns, row)) for row in connection.execute(query)]
+    return {"metadata": rows("maven_metadata", maven.METADATA_COLUMNS, 'scope COLLATE "C",path COLLATE "C"'),
+            "global_assets": rows("maven_assets", maven.ASSET_COLUMNS, 'path COLLATE "C"'),
+            "feeds": rows("feeds", maven.FEED_COLUMNS, 'id COLLATE "C"')}
 
 
 def counts(connection):
@@ -453,21 +471,12 @@ def feed_asset_key(asset):
                  ".." not in version and path == name + "/" + version and valid_media(media))
         key = prefix + path + "/payload.blob"
     elif kind == "maven":
-        parts = path.split("/")
-        if (4 <= len(parts) <= 20 and len(path) <= 1024 and
-                all(re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", part) and ".." not in part for part in parts) and
-                all("." not in part for part in parts[:-3])):
-            group, artifact = ".".join(parts[:-3]), parts[-3]
-            stem = artifact + "-" + version
-            suffix = parts[-1][len(stem):] if parts[-1].startswith(stem) else ""
-            extension = suffix[1:] if suffix.startswith(".") else suffix.partition(".")[2] if suffix.startswith("-") else ""
-            classifier = suffix[1:].partition(".")[0] if suffix.startswith("-") else None
-            media_types = {"pom": "application/xml", "module": "application/json", "jar": "application/java-archive",
-                           "war": "application/java-archive", "aar": "application/java-archive",
-                           "zip": "application/zip", "tar.gz": "application/gzip"}
-            valid = (len(group) <= 255 and name == group + ":" + artifact and version == parts[-2] and
-                     not version.upper().endswith("-SNAPSHOT") and media_types.get(extension) == media and
-                     (classifier is None or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", classifier) is not None))
+        try:
+            coordinate = maven.parse_asset_path(path)
+            valid = (name == coordinate["group_id"] + ":" + coordinate["artifact_id"] and
+                     version == coordinate["version"] and media == coordinate["media_type"])
+        except ValueError:
+            valid = False
         key = prefix + path
     elif kind == "go":
         valid = (valid_go(name, version) and path == escaped_go(name) + "/@v/" + escaped_go(version) + ".zip" and
@@ -659,6 +668,29 @@ def verify_feed_references(manifest, folder):
         seen_tags.add(identity)
 
 
+def verify_maven_references(manifest):
+    references = manifest.get("maven_references")
+    if not isinstance(references, dict) or set(references) != {"metadata", "global_assets", "feeds"}:
+        raise SnapshotError("Missing Maven metadata reference inventory")
+    records, assets, feeds = references["metadata"], references["global_assets"], references["feeds"]
+    counts = manifest["postgres"]["table_counts"]
+    if (not isinstance(records, list) or not isinstance(assets, list) or not isinstance(feeds, list) or
+            len(records) != counts["maven_metadata"] or len(assets) != counts["maven_assets"] or len(feeds) != counts["feeds"]):
+        raise SnapshotError("Maven reference inventory disagrees with metadata counts")
+    current = {entry["key"]: entry for entry in manifest["objects"] if entry["is_latest"]}
+
+    def verify_blob(scope, path, sha256, size):
+        key = manifest["source"]["prefix"] + ("feeds/" + scope + "/" if scope else "") + "maven/" + path
+        stored = current.get(key)
+        if stored is None or stored["sha256"] != sha256 or stored["size"] != size:
+            raise SnapshotError("Maven metadata references missing or changed immutable bytes")
+
+    try:
+        maven.validate_inventory(records, assets, manifest["feed_references"]["assets"], verify_blob, feeds)
+    except (ValueError, KeyError, TypeError, UnicodeError) as error:
+        raise SnapshotError("Maven metadata bytes, coordinates or same-scope references are invalid") from error
+
+
 def verify(folder):
     folder = Path(folder)
     try:
@@ -672,7 +704,7 @@ def verify(folder):
             raise SnapshotError("Snapshot manifest too large")
         manifest = json.loads(payload, object_pairs_hook=unique_json, parse_constant=invalid_json_constant)
         if (not isinstance(manifest, dict) or type(manifest.get("schema")) is not int or
-                manifest["schema"] not in (1, 2, SCHEMA) or manifest.get("profile") != "postgresql-s3-offline"):
+                manifest["schema"] not in (1, 2, 3, SCHEMA) or manifest.get("profile") != "postgresql-s3-offline"):
             raise SnapshotError("Unknown snapshot format")
         pg = manifest["postgres"]
         if (not isinstance(pg, dict) or pg.get("path") != "metadata.dump" or
@@ -683,14 +715,19 @@ def verify(folder):
                 any(not nonnegative_integer(count) for count in table_counts.values())):
             raise SnapshotError("Invalid PostgreSQL row counts")
         if (("feed_oci_tags" in table_counts or pg.get("database_schema_version") == 10) and
-                manifest["schema"] != SCHEMA):
+                manifest["schema"] < 3):
             raise SnapshotError("V10 requires the complete snapshot format")
+        if (("maven_metadata" in table_counts or pg.get("database_schema_version") == 11) and
+                manifest["schema"] < 4):
+            raise SnapshotError("V11 requires the Maven metadata snapshot format")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in range(11):
+            if type(db_version) is not int or db_version not in range(12):
                 raise SnapshotError("Unknown Packory database schema version")
-            if db_version >= 10 and manifest["schema"] != SCHEMA:
+            if db_version >= 10 and manifest["schema"] < 3:
                 raise SnapshotError("V10 requires the complete snapshot format")
+            if db_version >= 11 and manifest["schema"] < 4:
+                raise SnapshotError("V11 requires the Maven metadata snapshot format")
             required = set(CORE_TABLES)
             if db_version >= 1:
                 required.add("packory_schema_version")
@@ -706,12 +743,14 @@ def verify(folder):
                 required.update(MAVEN_TABLES)
             if db_version >= 7:
                 required.update(GO_TABLES)
-                if manifest["schema"] == SCHEMA:
+                if manifest["schema"] >= 3:
                     required.update(SECURITY_REGISTRY_TABLES)
             if db_version >= 8:
                 required.update(FEED_ASSET_TABLES)
             if db_version >= 10:
                 required.update(FEED_OCI_TABLES)
+            if db_version >= 11:
+                required.update(MAVEN_METADATA_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or
@@ -733,6 +772,8 @@ def verify(folder):
                 raise SnapshotError("S3 object version checksum mismatch")
         if manifest["schema"] >= 2 and pg["database_schema_version"] >= 10:
             verify_feed_references(manifest, folder)
+        if manifest["schema"] >= 4 and pg["database_schema_version"] >= 11:
+            verify_maven_references(manifest)
         return manifest
     except (KeyError, TypeError, ValueError, OSError, UnicodeError, RecursionError,
             zipfile.BadZipFile, NotImplementedError) as error:
@@ -750,6 +791,7 @@ def backup(directory, s3, bucket, prefix, max_bytes):
         tables = metadata_tables(pg)
         initial = metadata_fingerprints(pg, tables)
         private_references = feed_references(pg) if db_version >= 10 else None
+        mutable_maven = maven_references(pg) if db_version >= 11 else None
         original_inventory = inventory(s3, bucket, prefix)
         original_signature = inventory_signature(*original_inventory, prefix)
         database = os.environ["PGDATABASE"]
@@ -780,6 +822,8 @@ def backup(directory, s3, bucket, prefix, max_bytes):
             }
             if private_references is not None:
                 manifest["feed_references"] = private_references
+            if mutable_maven is not None:
+                manifest["maven_references"] = mutable_maven
             (staged / "manifest.json").write_text(
                 json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             verify(staged)
@@ -846,9 +890,11 @@ def restore(directory, s3, target_bucket):
                 any(not item["IsLatest"] for item in final_versions)):
             raise SnapshotError("Restore destination inventory changed before PostgreSQL restore")
         pg_command("restore", Path(directory) / "metadata.dump")
-        if database_schema_version(pg) >= 10 and (
-                manifest["schema"] != SCHEMA or manifest["postgres"].get("database_schema_version") != 10):
-            raise SnapshotError("Restored V10 database requires complete V10 snapshot evidence")
+        restored_version = database_schema_version(pg)
+        if restored_version >= 10 and (
+                manifest["schema"] < (4 if restored_version >= 11 else 3) or
+                manifest["postgres"].get("database_schema_version") != restored_version):
+            raise SnapshotError("Restored database requires its complete schema-versioned snapshot evidence")
         expected, actual = manifest["postgres"]["table_counts"], counts(pg)
         if {name: actual.get(name) for name in expected} != expected:
             raise SnapshotError("Restored PostgreSQL row counts disagree with snapshot")
@@ -857,6 +903,8 @@ def restore(directory, s3, target_bucket):
                 raise SnapshotError("Restored PostgreSQL row values disagree with snapshot")
             if manifest["postgres"]["database_schema_version"] >= 10 and feed_references(pg) != manifest["feed_references"]:
                 raise SnapshotError("Restored private feed references disagree with verified artifact inventory")
+            if manifest["postgres"]["database_schema_version"] >= 11 and maven_references(pg) != manifest["maven_references"]:
+                raise SnapshotError("Restored Maven metadata references disagree with verified inventory")
         return restored
 
 

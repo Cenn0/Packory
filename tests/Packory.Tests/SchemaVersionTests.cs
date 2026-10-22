@@ -209,7 +209,7 @@ public sealed class SchemaVersionTests
             Assert.Equal(checksum, db.GetFeedNugetRevision(
                 "old-nuget", "same.package", "1.0.0")?.Sha512);
             Assert.Equal("nuget", db.Feed("old-nuget")?.Kind);
-            Assert.Equal(10, SchemaVersionGuard.Current);
+            Assert.Equal(11, SchemaVersionGuard.Current);
             Assert.True(db.TryCreateDraftFeed(new FeedDefinition("new-raw", "raw",
                 "hosted", "private", "New private Raw", false, now, now), "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("new-raw", "raw", true, "fixture"));
@@ -413,7 +413,7 @@ public sealed class SchemaVersionTests
             using var connection = db.Open();
             using var query = connection.CreateCommand();
             query.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
-            Assert.Equal(10, Convert.ToInt32(query.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(query.ExecuteScalar()));
             query.CommandText = "PRAGMA foreign_key_check";
             using (var rows = query.ExecuteReader()) Assert.False(rows.Read());
             query.CommandText = "PRAGMA foreign_key_list(feed_assets)";
@@ -503,7 +503,7 @@ public sealed class SchemaVersionTests
             using var check = new NpgsqlConnection(isolated.ConnectionString);
             check.Open();
             using var cmd = new NpgsqlCommand("SELECT version FROM packory_schema_version WHERE slot=1", check);
-            Assert.Equal(10, Convert.ToInt32(cmd.ExecuteScalar()));
+            Assert.Equal(SchemaVersionGuard.Current, Convert.ToInt32(cmd.ExecuteScalar()));
             cmd.CommandText = "UPDATE feed_assets SET size=0 WHERE kind='raw'";
             Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.Throws<PostgresException>(() => cmd.ExecuteNonQuery()).SqlState);
             cmd.CommandText = "DELETE FROM feeds WHERE id='v10-oci'";
