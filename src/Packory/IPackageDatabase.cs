@@ -26,6 +26,8 @@ public interface IPackageDatabase
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
     IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null);
+    IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name);
+    bool SetFeedNpmTag(string feedId, string name, string tag, string version, bool deleted, string actor);
     string? GetFeedOciTag(string feedId, string name, string tag);
     IReadOnlyList<string> FeedOciTags(string feedId, string name);
     void SetFeedOciTag(string feedId, string name, string tag, string digest, string actor);
