@@ -454,11 +454,12 @@ public static class MavenEndpoints
                 // Sidecars have no XML body from which to identify the target.
                 // Authorize against the *stored* identity, never the ambiguous path.
                 var stored = db.GetMavenMetadata(scope, path);
-                if (MavenGroupMetadata.TryDocument(stored, out var group))
+                if (MavenGroupMetadata.TryDocument(stored, out var pluginDocument))
                 {
-                    foreach (var plugin in group!.Plugins)
+                    foreach (var plugin in pluginDocument!.Plugins)
                         if (Access.RequireNamespace(ctx, cfg, "maven",
-                            group.GroupId + "/" + plugin.ArtifactId) is { } denied) return denied;
+                            pluginDocument.GroupId + "/" + plugin.ArtifactId)
+                            is { } pluginDenied) return pluginDenied;
                 }
                 else if (stored is not null && MavenMetadata.ValidRecord(stored) &&
                     MavenMetadata.TryParseAtPath(Convert.FromBase64String(stored.ContentBase64),
@@ -466,9 +467,9 @@ public static class MavenEndpoints
                 {
                     if (Access.RequireNamespace(ctx, cfg, "maven",
                         doc!.Coordinates.GroupId + "/" + doc.Coordinates.ArtifactId)
-                        is { } denied) return denied;
+                        is { } documentDenied) return documentDenied;
                 }
-                else if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+                else if (Access.RequireAdmin(ctx, cfg) is { } adminDenied) return adminDenied;
             }
             return algorithm is not null
                 ? await VerifySidecar(scope, path, algorithm, true, cfg, db, blobs, ctx)
