@@ -1,6 +1,6 @@
 # Database schema versioning and immutable feed ledgers
 
-The current metadata schema is **V10**, recorded by a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. Upgrades are transactional and forward only. The sections below describe the historical increments; the V10 section defines the current shared private-feed storage contract. Existing artifact bytes and keys are preserved through migration.
+The current metadata schema is **V13**, recorded by a singleton `packory_schema_version` marker in both SQLite and PostgreSQL. Upgrades are transactional and forward only. The sections below describe the historical increments; V10 defines the shared private-feed storage contract; V11/V12 add Maven metadata and V13 adds mutable npm dist-tag pointers. Existing artifact bytes and keys are preserved through migration.
 
 On upgrade from V1 or an unmarked historical installation, six deterministic `default-*` feeds are seeded (`nuget`, `npm`, `cargo`, `pypi`, `oci`, `skill`) with `mode=legacy` and `visibility=runtime`. These descriptors retain their historical global routes and catalog. Separate, explicitly activated private hosted feeds provide independent artifact identities and exact feed permissions for NuGet, npm, Cargo, PyPI, OCI, Raw, Maven and Go. A legacy descriptor does not itself confer isolation. Private Agent Skills feeds remain outside this delivered profile; their existing approval gates are retained.
 
@@ -205,3 +205,27 @@ failures before restore writes, and a restored database disagreeing with its
 artifact inventory. The optional PostgreSQL/S3 emulator drill adds actual
 `pg_dump`/`pg_restore` and versioned object API coverage; external-provider
 qualification remains a separate release gate.
+
+
+## V13: private npm dist-tag pointers
+
+V13 introduces `feed_npm_tags(feed_id,name,tag,version,deleted,updated_at)`.
+Its composite key isolates the mutable tag namespace to one private hosted
+npm feed and package. `version` targets an already committed immutable npm
+revision of that same feed. Deletion writes a tombstone (`deleted=1`,
+`version=''`) to suppress the historical publication-time tag without deleting
+the original package bytes. Reassignments and removals are audited in the
+same SQLite/PostgreSQL transaction as the tag pointer.
+
+Native `/-/package/{name}/dist-tags` GET/PUT/DELETE endpoints require exact
+feed grants; mutations use publisher permission. The packument applies the
+mutable pointer overlay after validating the underlying immutable bundles.
+No private tag leaks into another feed or the global npm registry. The
+underlying tarballs cannot be overwritten by tag changes.
+
+Forward upgrade requires a stopped-writer, verified full backup.
+PostgreSQL/S3 snapshot format 4 additionally fingerprints the table, checks
+tag targets against same-feed committed npm assets and verifies the isolated
+restore. SQLite offline backup validates tag targets before accepting the
+snapshot. Older executables reject the new marker; rollback requires an
+isolated restore of the pre-upgrade metadata and blobs, not a marker edit.
