@@ -44,6 +44,9 @@ export PACKORY_PUBLIC_BASE_URL=http://localhost:8080
 dotnet run --project src/Packory --urls http://localhost:8080
 ```
 
+To run the prebuilt, automatically published development containers without
+local builds, see [GHCR images and deployment](docs/container-images.md).
+
 See [operations](docs/operations.md) before enabling network access or choosing a permanent data directory.
 
 ## Implemented capabilities

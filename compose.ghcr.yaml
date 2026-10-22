@@ -1,0 +1,49 @@
+# Prebuilt development images from GHCR (no local image builds).
+# Use the same immutable PACKORY_IMAGE_TAG for both services when pinning.
+services:
+  packory:
+    image: ghcr.io/cenn0/packory:${PACKORY_IMAGE_TAG:-main}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PACKORY_DATA_DIRECTORY: /data
+      PACKORY_SKILL_SECURITY_ENFORCED: "true"
+      PACKORY_MCP_ENABLED: "true"
+      PACKORY_PUBLIC_BASE_URL: ${PACKORY_PUBLIC_BASE_URL:-http://localhost:8080}
+      PACKORY_ANONYMOUS_READ: ${PACKORY_ANONYMOUS_READ:-true}
+      PACKORY_ADMIN_TOKEN: ${PACKORY_ADMIN_TOKEN:-}
+      PACKORY_READ_TOKEN: ${PACKORY_READ_TOKEN:-}
+      PACKORY_WRITE_TOKEN: ${PACKORY_WRITE_TOKEN:-}
+    volumes:
+      - packory-data:/data
+      - skill-scans-in:/data/skill-scans/in
+      - skill-scans-out:/data/skill-scans/out
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  skillspector:
+    image: ghcr.io/cenn0/packory-skillspector:${PACKORY_IMAGE_TAG:-main}
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    user: "1654:1654"
+    volumes:
+      - skill-scans-in:/work/in:ro
+      - skill-scans-out:/work/out
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+
+volumes:
+  packory-data:
+  skill-scans-in:
+  skill-scans-out:

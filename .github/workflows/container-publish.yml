@@ -1,0 +1,121 @@
+name: Publish main container images
+
+# Publish only commits whose complete main-branch CI run succeeded.
+# Production releases remain subject to the independent gates in release.yml.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packory-main-container-publication
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'Cenn0/Packory' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      PACKORY_IMAGE: ghcr.io/cenn0/packory
+      SCANNER_IMAGE: ghcr.io/cenn0/packory-skillspector
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Verify source is the commit that passed CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          docker compose -f compose.ghcr.yaml config --quiet
+
+      - name: Build Packory and offline SkillSpector images
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_label="org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+          docker build --pull \
+            --label "$source_label" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.description=Packory main-branch development build" \
+            -t "$PACKORY_IMAGE:build" .
+          docker build --pull \
+            --label "$source_label" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.description=Packory offline SkillSpector worker development build" \
+            -t "$SCANNER_IMAGE:build" workers/skillspector
+
+      - name: Smoke-test images before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$PACKORY_IMAGE:build")" != root
+          test "$(docker image inspect --format '{{.Config.User}}' "$SCANNER_IMAGE:build")" = "1654:1654"
+          docker run --rm --entrypoint python "$SCANNER_IMAGE:build" \
+            -m py_compile /opt/packory/worker.py
+          docker run --rm --entrypoint /bin/sh "$SCANNER_IMAGE:build" \
+            -c 'command -v skillspector >/dev/null'
+          cid="$(docker run -d -p 127.0.0.1:18080:8080 "$PACKORY_IMAGE:build")"
+          trap 'docker logs "$cid" >&2 || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          healthy=false
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error --max-time 2 \
+              http://127.0.0.1:18080/health/live >/dev/null 2>&1; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          test "$healthy" = true
+          curl --fail --silent --show-error --max-time 5 \
+            http://127.0.0.1:18080/health/ready >/dev/null
+
+      - name: Publish SHA and main tags to GitHub Container Registry
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A delayed workflow_run must never overwrite the current main image.
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$current_main"
+          if [[ "$current_main" != "$SOURCE_SHA" ]]; then
+            echo "Superseded by a newer main commit; skipping image publication." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for image in "$PACKORY_IMAGE" "$SCANNER_IMAGE"; do
+            docker tag "$image:build" "$image:sha-$SOURCE_SHA"
+            docker push "$image:sha-$SOURCE_SHA"
+          done
+
+          # Check again before moving the mutable main tags. These two image
+          # names cannot be updated atomically; deploy matching SHA tags.
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$current_main"
+          if [[ "$current_main" != "$SOURCE_SHA" ]]; then
+            echo "A newer main commit arrived; leaving mutable tags unchanged." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for image in "$PACKORY_IMAGE" "$SCANNER_IMAGE"; do
+            docker tag "$image:build" "$image:main"
+            docker push "$image:main"
+            echo "- Published \`$image:main\` and \`$image:sha-$SOURCE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo 'These development images are NOT independently approved production releases.' >> "$GITHUB_STEP_SUMMARY"

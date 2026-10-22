@@ -149,5 +149,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate prebuilt-image Compose deployment
+        run: docker compose -f compose.ghcr.yaml config --quiet
       - name: Build self-hosted image
         run: docker build -t packory:ci .

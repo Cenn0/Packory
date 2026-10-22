@@ -23,6 +23,8 @@ Packory bündelt native Registry-Schnittstellen, einen indexierten Artefaktkatal
 
 **Private Hosted-Feeds nach E0 sind für NuGet, npm, Cargo, PyPI, OCI, Maven, Go und Raw implementiert.** Jeder aktive Feed besitzt eigene native Routen, exakte Lese-/Publikationsrechte und unveränderliche Artefaktidentitäten. Private Anfragen greifen niemals auf globale Pakete oder Upstreams zurück. Alle acht lokalen nativen Profile, ausgewählte native PostgreSQL-/Moto-Profile, die private Offline-Wiederherstellung und die vollständigen lokalen Tests sind erfolgreich geprüft. Alle acht GitHub-Workflows sind auf dem Implementierungscommit erfolgreich; die vollständigen Nachweise stehen in [E0-Abnahme](docs/e0-acceptance.md). Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche bleiben eigene Aufgaben.
 
+> Vorgebaute Entwicklungs-Container aus GitHub Container Registry: [Images und Bereitstellung](docs/container-images.md).
+
 ## Schnellstart
 
 Voraussetzung: Docker Compose. Für die lokale Erprobung:
