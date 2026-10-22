@@ -5,7 +5,8 @@ namespace Packory;
 
 /// <summary>
 /// Explicit forward-only database versions. V11 introduced mutable Maven
-/// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers;\n/// V14 adds feed-local Cargo yank pointers.
+/// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers;
+/// V14 adds feed-local Cargo yank pointers.
 /// Immutable global/private artifact rows and keys remain unchanged.
 /// </summary>
 public static class SchemaVersionGuard
