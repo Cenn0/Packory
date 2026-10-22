@@ -67,7 +67,7 @@ Verify end-to-end using an **isolated** NuGet.Config to ensure the SDK does not 
 
 Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Network access from Packory to nuget.org is still required for uncached packages. For HTTPS remove the insecure opt-in.
 
-**Important:** the experimental does not expose a fully featured NuGet server API: symbols, vulnerability resources, unlisting, repository signatures, and advanced metadata/registration behaviors are not included. NuGet client compatibility is tested incrementally and should be treated as **basic** until the live smoke workflow succeeds.
+**Important:** the experimental does not expose a fully featured NuGet server API: symbols, vulnerability resources, unlisting, repository signatures, and advanced NuGet protocol behaviors are not included. NuGet client compatibility is tested incrementally and should be treated as **basic** until the live smoke workflow succeeds.
 
 ## npm
 

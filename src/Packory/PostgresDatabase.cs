@@ -816,6 +816,21 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return items;
     }
 
+    public IReadOnlyList<FeedNugetRevision> FeedNugetRevisions(string feedId)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions WHERE feed_id=@feed ORDER BY name,version
+            """, null, ("feed", feedId));
+        using var reader = cmd.ExecuteReader();
+        var items = new List<FeedNugetRevision>();
+        while (reader.Read()) items.Add(new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)));
+        return items;
+    }
+
     public bool PublishFeedNuget(string feedId, string name, string version,
         string description, string sha512, long size, string actor)
     {

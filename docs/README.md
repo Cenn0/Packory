@@ -15,8 +15,9 @@ Packory is a **self-hosted registry hub in active development**. Current hosted 
 | Deployment, TLS, tokens and backups | [Operations](operations.md) |
 | Evidence-based priorities and acceptance | [Roadmap V3](roadmap.md) |
 | Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
+| Experimental-to-supported implementation ledger and PR sequence | [Experimental graduation](experimental-graduation.md) |
 | Delivered MCP functions, remaining Registry/protocol work, quality and optional gateway | [MCP delivery roadmap](mcp-roadmap.md) |
-| Experimental Maven release files and unsupported native deploy | [Maven](maven.md) |
+| Native Maven/Gradle hosted deployment and remaining limits | [Maven](maven.md) |
 | Go hosted GOPROXY, module importer and native client test profile | [Go hosted registry](go-proxy.md) |
 | Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
 | Current V4/MS5 progress, MCP continuation and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |
