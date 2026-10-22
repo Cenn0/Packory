@@ -131,7 +131,7 @@ def database_schema_version(connection):
         return 0
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in range(1, 12):
+    if not row or type(row[0]) is not int or row[0] not in range(1, 13):
         raise SnapshotError("Unknown Packory database schema version")
     return row[0]
 
