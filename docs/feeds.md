@@ -201,7 +201,8 @@ Configure a native alternate registry with the sparse URL
 
 Index metadata and unchanged `.crate` bytes share one immutable bundle.
 Strict SemVer is bounded; build metadata is ignored for uniqueness.
-Explicit foreign dependency registries are rejected. Private yank/unyank,
+Explicit foreign dependency registries are rejected. V14 provides an experimental
+feed-local yank/unyank profile with transactional audit and immutable crate bytes;
 crates.io replacement/proxy, search and broad Cargo-version compatibility
 remain outside this profile.
 
