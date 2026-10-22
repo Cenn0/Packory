@@ -20,7 +20,7 @@ public static class RegistryCapabilities
         new("cargo", "Cargo sparse registry", true, false, true, true, "experimental",
             "Private hosted sparse feeds with scoped yank/unyank; no crates.io proxy, owner management or broad client matrix"),
         new("pypi", "PyPI Simple API", true, false, true, true, "experimental",
-            "Private hosted Simple API and Twine uploads; canonical bounded PEP 440 profile; no upstream proxy"),
+            "Private hosted Simple API and Twine uploads; canonical bounded PEP 440 profile and verified wheel metadata sidecars; no upstream proxy"),
         new("oci", "OCI Distribution v2", true, false, true, true, "experimental",
             "Private feeds use reserved feeds/{feedId} repository prefix; pinned Helm client; no Bearer token service"),
         new("maven", "Maven 2 repository layout", true, false, true, true, "experimental",

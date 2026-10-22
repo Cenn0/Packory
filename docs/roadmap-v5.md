@@ -174,7 +174,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
 | V5-21 | Durable scoped npm tag API retained; broader client/concurrency/provenance/deprecation work remains |
 | V5-22 | Private V14 Cargo yank/unyank integrated; allowlisted mirror, broader clients and graduation evidence remain |
-| V5-23 | PyPI bounded profile; remaining version/distribution/sidecar/yank/proxy qualification unchanged |
+| V5-23 | Private wheel PEP 658/714 sidecars implemented with exact-byte and authorization tests; broader versions/distributions/yank/proxy remain |
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
 | V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
 | V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |

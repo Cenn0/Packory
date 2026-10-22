@@ -53,7 +53,7 @@ operations outside localhost.
 
 Multiple wheel/sdist filenames may belong to one version. Filename checks are
 currently deliberately restrictive; full PEP 427/625 archive metadata validation,
-Requires-Python markers, metadata sidecars, yanked semantics, provenance and
+Requires-Python markers, yanked semantics, provenance and
 signature validation are not implemented.
 
 ## Evidence and limits
@@ -111,3 +111,20 @@ multiple active writers or full client/OS/provider matrix is implied.
 Official protocol references:
 - https://doc.rust-lang.org/cargo/commands/cargo-yank.html
 - https://doc.rust-lang.org/cargo/reference/registry-web-api.html
+
+## Private wheel metadata sidecars (V5-23)
+
+Private hosted wheels expose PEP 658/714 `core-metadata` and legacy
+`dist-info-metadata` hashes in Simple JSON and both corresponding HTML
+attributes. Append `.metadata` to the wheel download URL to retrieve the
+exact original UTF-8 METADATA bytes, with SHA-256 ETag and conditional GET.
+Each GET/HEAD requires the current exact feed grant and an active feed; the
+complete immutable bundle is verified before deriving the sidecar. No extra
+metadata blob or schema migration is needed. Source-distribution sidecars
+are not advertised because their final build metadata may be dynamic.
+
+API regressions cover original-byte/hash parity, HTML/JSON alias agreement,
+HEAD/304, foreign/no credentials, disabled feeds and corrupted bundles. The
+existing dual-feed native pip/Twine harness also exercises the advertised
+wheel profile in CI. This does not qualify a trusted PyPI proxy or all PEP
+440/source-build cases. Specification: https://packaging.python.org/en/latest/specifications/simple-repository-api/.
