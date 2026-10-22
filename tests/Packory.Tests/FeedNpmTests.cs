@@ -316,4 +316,90 @@ public sealed class FeedNpmTests
         using var response = await client.SendAsync(request);
         Assert.Equal(bytes, await response.Content.ReadAsByteArrayAsync());
     }
+
+    [Fact]
+    public async Task PrivateDistTagsCanMoveAndDeleteWithoutChangingImmutableVersions()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var alpha = await Create(client, "npm-tags-alpha");
+        var beta = await Create(client, "npm-tags-beta");
+        Assert.Equal(HttpStatusCode.Created, await Publish(client, "npm-tags-alpha",
+            alpha.Write, Document(Archive())));
+        Assert.Equal(HttpStatusCode.Created, await Publish(client, "npm-tags-alpha",
+            alpha.Write, Document(Archive(version: "2.0.0"), version: "2.0.0", tag: "next")));
+        Assert.Equal(HttpStatusCode.Created, await Publish(client, "npm-tags-beta",
+            beta.Write, Document(Archive(flavor: "beta"))));
+
+        var path = "/feeds/npm-tags-alpha/npm/-/package/" +
+            Uri.EscapeDataString(Name) + "/dist-tags";
+        using (var r = Request(HttpMethod.Put, path + "/latest", beta.Write))
+        {
+            r.Content = JsonContent.Create("2.0.0");
+            using var response = await client.SendAsync(r);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        using (var r = Request(HttpMethod.Put, path + "/latest", alpha.Read))
+        {
+            r.Content = JsonContent.Create("2.0.0");
+            using var response = await client.SendAsync(r);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        using (var r = Request(HttpMethod.Put, path + "/latest", alpha.Write))
+        {
+            r.Content = JsonContent.Create("8.0.0");
+            using var response = await client.SendAsync(r);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        using (var r = Request(HttpMethod.Put, path + "/latest", alpha.Write))
+        {
+            r.Content = JsonContent.Create("2.0.0");
+            using var response = await client.SendAsync(r);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+        using (var r = Request(HttpMethod.Get, path, alpha.Read))
+        using (var response = await client.SendAsync(r))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var tags = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("2.0.0", tags.GetProperty("latest").GetString());
+            Assert.Equal("2.0.0", tags.GetProperty("next").GetString());
+        }
+        using (var r = Request(HttpMethod.Get, Url("npm-tags-alpha"), alpha.Read))
+        using (var response = await client.SendAsync(r))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var packument = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("2.0.0", packument.GetProperty("dist-tags").GetProperty("latest").GetString());
+            Assert.Equal(2, packument.GetProperty("versions").EnumerateObject().Count());
+        }
+        Assert.Equal(HttpStatusCode.OK,
+            await Status(client, HttpMethod.Get, Url("npm-tags-alpha") + "/latest", alpha.Read));
+        Assert.Equal(HttpStatusCode.Forbidden,
+            await Status(client, HttpMethod.Get, path, beta.Read));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            await Status(client, HttpMethod.Get, path, null));
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            await Status(client, HttpMethod.Delete, path + "/latest", alpha.Write));
+        using (var r = Request(HttpMethod.Get, Url("npm-tags-alpha"), alpha.Read))
+        using (var response = await client.SendAsync(r))
+        {
+            var packument = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(packument.GetProperty("dist-tags").TryGetProperty("latest", out _));
+            Assert.Equal(2, packument.GetProperty("versions").EnumerateObject().Count());
+        }
+        Assert.Equal(HttpStatusCode.NotFound,
+            await Status(client, HttpMethod.Get, Url("npm-tags-alpha") + "/latest", alpha.Read));
+        Assert.Equal(HttpStatusCode.OK,
+            await Status(client, HttpMethod.Get, Url("npm-tags-alpha") + "/1.0.0", alpha.Read));
+
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var pointer = Assert.Single(db.FeedNpmTags("npm-tags-alpha", Name));
+        Assert.Equal("latest", pointer.Tag);
+        Assert.True(pointer.Deleted);
+        Assert.Empty(db.FeedNpmTags("npm-tags-beta", Name));
+        Assert.Equal(2, db.AuditEvents(null, 100).Count(e =>
+            e.Kind == "feed-npm" && (e.Action == "tag-set" || e.Action == "tag-delete")));
+    }
 }
