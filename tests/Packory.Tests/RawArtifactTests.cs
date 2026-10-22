@@ -185,7 +185,7 @@ public sealed class RawArtifactTests
         {
             var db = new Database(new Settings { DataDirectory = root });
             db.Initialize();
-            Assert.Equal(10, SchemaVersionGuard.Current);
+            Assert.Equal(11, SchemaVersionGuard.Current);
             Assert.True(db.PublishRaw("example", "1.0.0", "application/octet-stream",
                 new string('a', 64), 2, "synthetic"));
             db.Initialize();

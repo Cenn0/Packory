@@ -25,6 +25,11 @@ fixture_spec = importlib.util.spec_from_file_location(
 fixtures = importlib.util.module_from_spec(fixture_spec)
 fixture_spec.loader.exec_module(fixtures)
 
+maven_spec = importlib.util.spec_from_file_location(
+    "pg_s3_maven_fixture", Path(__file__).with_name("test_maven_snapshot.py"))
+maven_fixtures = importlib.util.module_from_spec(maven_spec)
+maven_spec.loader.exec_module(maven_fixtures)
+
 
 def tar_members(members):
     output = io.BytesIO()
@@ -79,6 +84,34 @@ def private_objects():
     return objects, tags
 
 
+def maven_objects():
+    """Two immutable generations and current exact metadata in all three scopes."""
+    public, private, metadata = [], [], []
+    for scope in ("", "alpha-feed-maven", "beta-feed-maven"):
+        for version, resolved in (("1.0.0", "1.0.0"),
+                                  ("2.0-SNAPSHOT", "2.0-20261022.000000-1"),
+                                  ("2.0-SNAPSHOT", "2.0-20261022.000000-2")):
+            if scope and version == "1.0.0":
+                continue  # Existing private_objects() release POM remains authoritative.
+            for extension in (("pom",) if version == "1.0.0" else ("pom", "jar")):
+                path = maven_fixtures.BASE + version + "/demo-" + resolved + "." + extension
+                body = ("<project><groupId>org.example</groupId><artifactId>demo</artifactId><version>" +
+                        version + "</version><description>synthetic " + scope + "</description></project>").encode()
+                if extension == "jar":
+                    body = fixtures.bundle([("fixture.txt", (scope + " " + resolved).encode())])
+                row = maven_fixtures.global_asset(path, body)
+                if scope:
+                    private.append((fixtures.asset(scope, "maven", "org.example:demo", version,
+                        path, row["media_type"], body), body))
+                else:
+                    public.append((row, body))
+        metadata.append(maven_fixtures.metadata_record(scope,
+            maven_fixtures.BASE + "2.0-SNAPSHOT/maven-metadata.xml", maven_fixtures.snapshot_versions(2)))
+        metadata.append(maven_fixtures.metadata_record(scope,
+            maven_fixtures.BASE + "maven-metadata.xml", maven_fixtures.artifact_versions("1.0.0", "2.0-SNAPSHOT")))
+    return public, private, metadata
+
+
 @unittest.skipUnless(
     os.getenv("PACKORY_TEST_S3") and os.getenv("PACKORY_TEST_POSTGRES"),
     "requires disposable PostgreSQL service and local S3 emulator")
@@ -88,6 +121,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
 
     def test_v10_private_bundles_and_oci_graph_restore_with_exact_feed_references(self):
         self.coordinated_restore(10)
+
+    def test_v11_maven_snapshots_restore_exact_metadata_and_same_scope_references(self):
+        self.coordinated_restore(11)
 
     def coordinated_restore(self, version):
         import boto3
@@ -108,7 +144,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
             config=Config(s3={"addressing_style": "path"}))
         previous_database = os.environ["PGDATABASE"]
         databases_created, buckets_created = [], []
-        feed_objects, feed_tags = private_objects() if version == 10 else ([], [])
+        feed_objects, feed_tags = private_objects() if version >= 10 else ([], [])
+        public_maven, private_maven, maven_metadata = maven_objects() if version >= 11 else ([], [], [])
+        feed_objects.extend(private_maven)
 
         try:
             with psycopg.connect("dbname=" + previous_database, autocommit=True) as admin:
@@ -118,9 +156,11 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
 
             with psycopg.connect("dbname=" + source_db, autocommit=True) as source:
                 tables = (*mod.CORE_TABLES, *mod.FEED_TABLES, *mod.DIGEST_TABLES, *mod.ISOLATED_FEED_TABLES,
-                          *((*mod.RAW_TABLES, *mod.MAVEN_TABLES, *mod.GO_TABLES, *mod.SECURITY_REGISTRY_TABLES) if version == 10 else ()))
+                          *((*mod.RAW_TABLES, *mod.MAVEN_TABLES, *mod.GO_TABLES, *mod.SECURITY_REGISTRY_TABLES) if version >= 10 else ()),
+                          *(mod.MAVEN_METADATA_TABLES if version >= 11 else ()))
                 for name in tables:
-                    if version == 10 and name == "feeds":
+                    if ((version >= 10 and name == "feeds") or
+                            (version >= 11 and name in ("maven_assets", "maven_metadata"))):
                         continue
                     source.execute(
                         "CREATE TABLE " + name + " (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
@@ -131,7 +171,7 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                     "CREATE TABLE packory_schema_version (slot INTEGER PRIMARY KEY, version INTEGER)")
                 source.execute(
                     "INSERT INTO packory_schema_version (slot,version) VALUES (1,%s)", (version,))
-                if version == 10:
+                if version >= 10:
                     source.execute("""CREATE TABLE feeds (
                         id TEXT PRIMARY KEY, kind TEXT NOT NULL, mode TEXT NOT NULL,
                         visibility TEXT NOT NULL, display_name TEXT NOT NULL, enabled INTEGER NOT NULL,
@@ -156,11 +196,26 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                     for item in feed_tags:
                         source.execute("INSERT INTO feed_oci_tags (" + ",".join(mod.OCI_TAG_COLUMNS) + ") VALUES (" + ",".join(["%s"] * len(mod.OCI_TAG_COLUMNS)) + ")",
                                        tuple(item[name] for name in mod.OCI_TAG_COLUMNS))
+                if version >= 11:
+                    source.execute("""CREATE TABLE maven_assets (
+                        path TEXT PRIMARY KEY, group_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
+                        version TEXT NOT NULL, sha256 TEXT NOT NULL, size BIGINT NOT NULL,
+                        media_type TEXT NOT NULL, created_at TEXT NOT NULL)""")
+                    source.execute("""CREATE TABLE maven_metadata (
+                        scope TEXT NOT NULL,path TEXT NOT NULL,content_base64 TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,size BIGINT NOT NULL,updated_at TEXT NOT NULL,
+                        PRIMARY KEY(scope,path))""")
+                    for item, _ in public_maven:
+                        source.execute("INSERT INTO maven_assets (" + ",".join(mod.maven.ASSET_COLUMNS) + ") VALUES (" + ",".join(["%s"] * len(mod.maven.ASSET_COLUMNS)) + ")",
+                                       tuple(item[name] for name in mod.maven.ASSET_COLUMNS))
+                    for item in maven_metadata:
+                        source.execute("INSERT INTO maven_metadata (" + ",".join(mod.maven.METADATA_COLUMNS) + ") VALUES (" + ",".join(["%s"] * len(mod.maven.METADATA_COLUMNS)) + ")",
+                                       tuple(item[name] for name in mod.maven.METADATA_COLUMNS))
                 before = mod.metadata_fingerprints(source)
                 self.assertEqual(
                     set(before),
-                    set((*tables, "packory_schema_version", *((*mod.FEED_ASSET_TABLES, *mod.FEED_OCI_TABLES) if version == 10 else ()))))
-                self.assertEqual(14 if version == 10 else 1, before["feeds"]["count"])
+                    set((*tables, "packory_schema_version", *((*mod.FEED_ASSET_TABLES, *mod.FEED_OCI_TABLES) if version >= 10 else ()))))
+                self.assertEqual(14 if version >= 10 else 1, before["feeds"]["count"])
 
             for bucket in (source_bucket, target_bucket):
                 s3.create_bucket(Bucket=bucket)
@@ -179,6 +234,8 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
             s3.delete_object(Bucket=source_bucket, Key=removed_key)
             for item, body in feed_objects:
                 s3.put_object(Bucket=source_bucket, Key=prefix + mod.feed_asset_key(item), Body=body)
+            for item, body in public_maven:
+                s3.put_object(Bucket=source_bucket, Key=prefix + "maven/" + item["path"], Body=body)
 
             with tempfile.TemporaryDirectory(prefix="packory-pgs3-ci-") as folder:
                 archive = Path(folder) / "snapshot"
@@ -186,26 +243,30 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                 saved = mod.backup(
                     archive, s3, source_bucket, prefix, max_bytes=1024 * 1024)
                 self.assertEqual(mod.SCHEMA, saved["schema"])
-                self.assertEqual(4 + len(feed_objects), len(saved["objects"]))
+                self.assertEqual(4 + len(feed_objects) + len(public_maven), len(saved["objects"]))
                 self.assertEqual(1, len(saved["delete_markers"]))
                 self.assertEqual(before, saved["postgres"]["table_fingerprints"])
                 self.assertEqual(version, saved["postgres"]["database_schema_version"])
                 self.assertEqual(saved, mod.verify(archive))
 
                 os.environ["PGDATABASE"] = target_db
-                self.assertEqual(2 + len(feed_objects), mod.restore(archive, s3, target_bucket))
+                self.assertEqual(2 + len(feed_objects) + len(public_maven), mod.restore(archive, s3, target_bucket))
                 with psycopg.connect("dbname=" + target_db, autocommit=True) as restored:
                     self.assertEqual(before, mod.metadata_fingerprints(restored))
-                    if version == 10:
+                    if version >= 10:
                         self.assertEqual(saved["feed_references"], mod.feed_references(restored))
-                        self.assertEqual(16, len(saved["feed_references"]["assets"]))
+                        self.assertEqual(len(feed_objects), len(saved["feed_references"]["assets"]))
                         self.assertEqual(2, len(saved["feed_references"]["oci_tags"]))
+                    if version >= 11:
+                        self.assertEqual(saved["maven_references"], mod.maven_references(restored))
+                        restored_metadata = mod.maven_references(restored)["metadata"]
+                        self.assertEqual(sorted(maven_metadata, key=lambda row: (row["scope"], row["path"])), restored_metadata)
                     # Detect a post-restore modification which preserves row count.
-                    if version == 10:
+                    if version >= 10:
                         restored.execute("UPDATE feeds SET display_name='Changed synthetic fixture' WHERE id='alpha-feed-npm'")
                     else:
                         restored.execute("UPDATE feeds SET payload=%s WHERE id=%s", ("tampered", "feeds-one"))
-                    self.assertEqual(14 if version == 10 else 1, mod.counts(restored)["feeds"])
+                    self.assertEqual(14 if version >= 10 else 1, mod.counts(restored)["feeds"])
                     self.assertNotEqual(before, mod.metadata_fingerprints(restored))
 
                 self.assertEqual(
@@ -218,7 +279,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                     s3.get_object(Bucket=target_bucket, Key=removed_key)
                 for item, body in feed_objects:
                     self.assertEqual(body, s3.get_object(Bucket=target_bucket, Key=prefix + mod.feed_asset_key(item))["Body"].read())
-                if version == 10:
+                for item, body in public_maven:
+                    self.assertEqual(body, s3.get_object(Bucket=target_bucket, Key=prefix + "maven/" + item["path"])["Body"].read())
+                if version >= 10:
                     # Replacing one current package bundle with its namesake
                     # from a different feed must abort a new coordinated backup.
                     first = next((item, body) for item, body in feed_objects if item["feed_id"] == "alpha-feed-npm")

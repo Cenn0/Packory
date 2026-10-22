@@ -16,6 +16,10 @@ public interface IPackageDatabase
     IReadOnlyList<MavenAssetEntry> MavenAssets();
     IReadOnlyList<string> MavenVersions(string groupId, string artifactId);
     bool PublishMavenAsset(MavenAssetEntry asset, string actor);
+    MavenMetadataEntry? GetMavenMetadata(string scope, string path);
+    IReadOnlyList<MavenMetadataEntry> MavenMetadata();
+    // Null expected digest creates only; an existing digest replaces exactly that revision.
+    bool PutMavenMetadata(MavenMetadataEntry entry, string actor, string? expectedSha256);
     IReadOnlyList<RawArtifactEntry> RawArtifacts();
     bool PublishRaw(string name, string version, string mediaType,
         string sha256, long size, string actor);

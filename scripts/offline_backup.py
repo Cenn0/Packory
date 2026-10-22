@@ -6,6 +6,7 @@ External PostgreSQL and S3 installations require provider-specific backups.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -14,6 +15,11 @@ import sqlite3
 import tempfile
 
 SCHEMA = 1
+
+_maven_spec = importlib.util.spec_from_file_location(
+    "packory_maven_snapshot", Path(__file__).with_name("maven_snapshot.py"))
+maven = importlib.util.module_from_spec(_maven_spec)
+_maven_spec.loader.exec_module(maven)
 
 def safe_name(name: str) -> bool:
     path = PurePosixPath(name)
@@ -51,6 +57,33 @@ def check_sqlite(folder: Path):
     with sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True) as connection:
         if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("SQLite integrity check failed")
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "packory_schema_version" not in tables:
+            return  # Unversioned historical offline backups retain their existing profile.
+        row = connection.execute("SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
+        if not row or type(row[0]) is not int or row[0] not in range(1, 12):
+            raise ValueError("Unsupported Packory metadata schema version")
+        if row[0] < 11:
+            return
+        if not {"maven_metadata", "maven_assets", "feed_assets", "feeds"} <= tables:
+            raise ValueError("V11 Maven metadata or artifact ledger is missing")
+
+        def rows(table, columns):
+            return [dict(zip(columns, item)) for item in connection.execute(
+                "SELECT " + ",".join(columns) + " FROM " + table)]
+
+        def verify_blob(scope, path, sha256, size):
+            key = ("feeds/" + scope + "/" if scope else "") + "maven/" + path
+            blob = folder / "blobs" / key
+            if (not blob.is_file() or blob.is_symlink() or blob.stat().st_size != size or
+                    digest(blob) != sha256):
+                raise ValueError("Maven snapshot references missing or changed immutable bytes")
+
+        private_columns = ("feed_id", "kind", "path", "name", "version", "media_type", "sha256", "size", "created_at")
+        maven.validate_inventory(rows("maven_metadata", maven.METADATA_COLUMNS),
+                                 rows("maven_assets", maven.ASSET_COLUMNS),
+                                 rows("feed_assets", private_columns), verify_blob,
+                                 rows("feeds", maven.FEED_COLUMNS))
 
 def manifest_for(folder: Path) -> dict:
     entries = []

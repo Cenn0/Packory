@@ -6,10 +6,9 @@ using System.Xml.Linq;
 namespace Packory;
 
 /// <summary>
-/// Experimental global hosted Maven release artifact transport.
-/// A native Maven deploy operation ALSO writes mutable repository metadata/checksums;
-/// that write protocol is deliberately NOT advertised as supported here.
-/// No upstream proxy, SNAPSHOT publication or per-feed isolation.
+/// Hosted Maven release and timestamped snapshot files with native metadata PUT.
+/// Global and private adapters share wire behavior, while their authorization and
+/// catalog identities stay independent. There is no upstream proxy.
 /// </summary>
 public static class MavenEndpoints
 {
@@ -35,7 +34,8 @@ public static class MavenEndpoints
         artifact = null;
         return MavenCoordinates.TryParseArtifactPath(path, out artifact) &&
             artifact is not null && Extensions.Contains(artifact.Extension) &&
-            !artifact.Version.EndsWith("-SNAPSHOT", StringComparison.OrdinalIgnoreCase) &&
+            (!artifact.Version.EndsWith("-SNAPSHOT", StringComparison.OrdinalIgnoreCase) ||
+                MavenCoordinates.IsSnapshot(artifact.Version)) &&
             string.Equals(MavenCoordinates.RepositoryPath(artifact), path, StringComparison.Ordinal);
     }
 
@@ -49,8 +49,8 @@ public static class MavenEndpoints
         DateTimeOffset.TryParse(asset.CreatedAt, out _);
 
     // Maven POMs are XML. Parsing is bounded and DTD/external entity resolution is prohibited.
-    // This initial release slice requires explicit GAV coordinates; parent-inherited G/V
-    // and mutable version metadata require separate Maven interoperability acceptance.
+    // Explicit GAV coordinates are required; parent-inherited G/V is a separate profile.
+    // A timestamped filename still carries the base SNAPSHOT version inside its POM.
     public static bool PomIdentityMatches(ReadOnlyMemory<byte> bytes,
         MavenCoordinates.Artifact coordinates)
     {
@@ -86,45 +86,54 @@ public static class MavenEndpoints
         catch (ArgumentException) { return false; }
     }
 
-    private static bool TryMetadataCoordinates(string? path, out string groupId,
-        out string artifactId, out string? checksum)
+    private sealed record StoredAsset(string Sha256, long Size, string MediaType, bool Valid);
+
+    private static StoredAsset? Asset(IPackageDatabase db, string scope, string path)
     {
-        groupId = artifactId = "";
-        checksum = null;
-        if (path is null || path.Length > 1024 || path.Contains('%') ||
-            path.Contains('\\') || path.StartsWith('/') || path.Any(char.IsControl))
-            return false;
-        var basePath = path;
-        foreach (var suffix in new[] { ".sha256", ".sha1", ".md5" })
+        if (scope == "")
         {
-            if (!basePath.EndsWith(suffix, StringComparison.Ordinal)) continue;
-            checksum = suffix;
-            basePath = basePath[..^suffix.Length];
-            break;
+            var asset = db.GetMavenAsset(path);
+            return asset is null ? null : new StoredAsset(asset.Sha256, asset.Size,
+                asset.MediaType, ValidRecord(asset));
         }
-        if (!basePath.EndsWith("/maven-metadata.xml", StringComparison.Ordinal))
-            return false;
-        var parts = basePath.Split('/');
-        if (parts.Length is < 3 or > 20 ||
-            parts[..^2].Any(x => !MavenCoordinates.ValidSegment(x) || x.Contains('.')) ||
-            !MavenCoordinates.ValidSegment(parts[^2]))
-            return false;
-        groupId = string.Join('.', parts[..^2]);
-        artifactId = parts[^2];
-        return MavenCoordinates.ValidGroup(groupId);
+        var feedAsset = db.GetFeedAsset(scope, "maven", path);
+        return feedAsset is null ? null : new StoredAsset(feedAsset.Sha256,
+            feedAsset.Size, feedAsset.MediaType, FeedAssetEntry.Valid(feedAsset));
     }
 
-    private static string MetadataXml(string groupId, string artifactId,
-        IReadOnlyList<string> versions)
+    private static string StorageKey(string scope, string path) =>
+        scope == "" ? Key(path) : "feeds/" + scope + "/maven/" + path;
+
+    private static string LayoutLockPath(string metadataPath)
     {
-        return new XDocument(new XElement("metadata",
-            new XElement("groupId", groupId),
-            new XElement("artifactId", artifactId),
-            new XElement("versioning",
-                new XElement("versions",
-                    versions.Select(version => new XElement("version", version)))))
-            ).ToString(SaveOptions.DisableFormatting);
+        var directory = metadataPath[..^"/maven-metadata.xml".Length];
+        var parts = directory.Split('/');
+        // Ambiguous GA/GAV paths share the first -SNAPSHOT directory. Lock
+        // that prefix to prevent two first publications racing the collision check.
+        var ambiguous = Array.FindIndex(parts, MavenCoordinates.IsSnapshot);
+        return ambiguous >= 0 ? string.Join('/', parts[..(ambiguous + 1)]) : directory;
     }
+
+    private static (string Path, string? Algorithm) SplitChecksum(string path)
+    {
+        foreach (var algorithm in new[] { "sha512", "sha256", "sha1", "md5" })
+        {
+            var suffix = "." + algorithm;
+            if (path.EndsWith(suffix, StringComparison.Ordinal))
+                return (path[..^suffix.Length], algorithm);
+        }
+        return (path, null);
+    }
+
+    private static string Digest(byte[] bytes, string algorithm) =>
+        Convert.ToHexStringLower(algorithm switch
+        {
+            "sha512" => SHA512.HashData(bytes),
+            "sha256" => SHA256.HashData(bytes),
+            "sha1" => SHA1.HashData(bytes),
+            "md5" => MD5.HashData(bytes),
+            _ => throw new ArgumentException("Invalid Maven checksum algorithm")
+        });
 
     private static async Task<string> ChecksumAsync(string path, string algorithm,
         CancellationToken ct)
@@ -133,211 +142,316 @@ public static class MavenEndpoints
             FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var bytes = algorithm switch
         {
+            "sha512" => await SHA512.HashDataAsync(stream, ct),
             "sha256" => await SHA256.HashDataAsync(stream, ct),
             "sha1" => await SHA1.HashDataAsync(stream, ct),
             "md5" => await MD5.HashDataAsync(stream, ct),
-            _ => throw new ArgumentException("Invalid requested checksum")
+            _ => throw new ArgumentException("Invalid Maven checksum algorithm")
         };
         return Convert.ToHexStringLower(bytes);
     }
 
-    // Maven deploy clients also PUT optional checksum sidecars for release
-    // artifacts. Accept them only as a validation of already committed,
-    // immutable bytes. Sidecars are never trusted as authoritative digests
-    // and never stored separately from the artifact.
-    private static bool TryArtifactChecksumPath(string path, out string assetPath,
-        out string algorithm, out MavenCoordinates.Artifact? coordinates)
+    private static async Task<string?> VerifiedFile(string scope, string path,
+        StoredAsset asset, Settings cfg, BlobStore blobs, CancellationToken ct)
     {
-        assetPath = algorithm = "";
-        coordinates = null;
-        foreach (var suffix in new[] { ".sha256", ".sha1", ".md5" })
-        {
-            if (!path.EndsWith(suffix, StringComparison.Ordinal)) continue;
-            var candidate = path[..^suffix.Length];
-            if (!ValidAssetPath(candidate, out coordinates)) return false;
-            assetPath = candidate;
-            algorithm = suffix[1..];
-            return true;
-        }
-        return false;
+        if (!asset.Valid || asset.Size > cfg.MaxArtifactBytes) return null;
+        var key = StorageKey(scope, path);
+        if (!await ArtifactDigests.MatchesRemoteAsync(blobs, key, "sha256",
+            Convert.FromHexString(asset.Sha256), asset.Size, cfg.MaxArtifactBytes, ct)) return null;
+        var local = blobs.Existing(key);
+        return local is not null && await ArtifactDigests.MatchesSha256Async(
+            local, asset.Sha256, asset.Size, ct) ? local : null;
     }
 
-    private static async Task<IResult> VerifyArtifactChecksumPut(
-        string assetPath, string algorithm, MavenCoordinates.Artifact coordinate,
+    private static IReadOnlyList<string> ListedVersions(IPackageDatabase db, string scope,
+        MavenMetadata.Coordinates coordinates)
+    {
+        var versions = scope == "" ? db.MavenVersions(coordinates.GroupId, coordinates.ArtifactId) :
+            db.FeedMavenVersions(scope, coordinates.GroupId, coordinates.ArtifactId);
+        return versions.Where(x => !MavenCoordinates.IsSnapshot(x) ||
+            db.GetMavenMetadata(scope, MavenMetadata.PathFor(coordinates.GroupId,
+                coordinates.ArtifactId, x)) is { } metadata &&
+            MavenMetadata.ValidRecord(metadata) &&
+            MavenMetadata.TryParseAtPath(Convert.FromBase64String(metadata.ContentBase64),
+                metadata.Path, out var document) && document!.Coordinates ==
+                new MavenMetadata.Coordinates(coordinates.GroupId, coordinates.ArtifactId, x) &&
+            MavenMetadata.ReferencesValid(metadata, db)).ToArray();
+    }
+
+    internal static async Task<IResult> Read(string scope, string requestedPath,
         Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx)
     {
-        if (Access.RequireNamespace(ctx, cfg, "maven",
-            coordinate.GroupId + "/" + coordinate.ArtifactId) is { } namespaceDenied)
-            return namespaceDenied;
+        ctx.Response.Headers.CacheControl = "private, no-store";
+        ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        var (path, algorithm) = SplitChecksum(requestedPath);
+        if (MavenMetadata.TryParsePath(path, out var coordinates) && coordinates is not null)
+        {
+            var stored = db.GetMavenMetadata(scope, path);
+            byte[] bytes;
+            if (stored is not null)
+            {
+                if (!MavenMetadata.ValidRecord(stored) || stored.Size > cfg.MaxMetadataBytes ||
+                    !MavenMetadata.ReferencesValid(stored, db))
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                bytes = Convert.FromBase64String(stored.ContentBase64);
+                MavenMetadata.TryParseAtPath(bytes, path, out var document);
+                coordinates = document!.Coordinates;
+            }
+            else
+            {
+                coordinates = MavenMetadata.PathCandidates(path).FirstOrDefault(x =>
+                    x.Version is null && MavenMetadata.HasInventory(db, scope, x));
+                if (coordinates is null) return Results.NotFound();
+                // The legacy generated listing survives upgrades, but unpublished
+                // snapshot directories are not advertised as resolvable versions.
+                var versions = ListedVersions(db, scope, coordinates);
+                if (versions.Count == 0) return Results.NotFound();
+                if (versions.Count > MavenMetadata.MaxEntries)
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                bytes = MavenMetadata.GeneratedVersions(coordinates, versions);
+                if (bytes.Length > cfg.MaxMetadataBytes)
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+            if (MavenMetadata.PathConflicts(db, scope, path, coordinates))
+                return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+            if (algorithm is not null) return Results.Text(Digest(bytes, algorithm), "text/plain");
+            ctx.Response.Headers.ETag = "\"" + Digest(bytes, "sha256") + "\"";
+            if (ctx.Request.Headers.IfNoneMatch.ToString() == ctx.Response.Headers.ETag.ToString())
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            return Results.Bytes(bytes, "application/xml");
+        }
+        if (!ValidAssetPath(path, out _))
+            return Results.BadRequest(new { error = "Invalid Maven artifact path" });
+        var asset = Asset(db, scope, path);
+        if (asset is null) return Results.NotFound();
+        var local = await VerifiedFile(scope, path, asset, cfg, blobs, ctx.RequestAborted);
+        if (local is null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        if (algorithm is not null)
+            return Results.Text(algorithm == "sha256" ? asset.Sha256 :
+                await ChecksumAsync(local, algorithm, ctx.RequestAborted), "text/plain");
+        ctx.Response.Headers.ETag = "\"" + asset.Sha256 + "\"";
+        if (ctx.Request.Headers.IfNoneMatch.ToString() == ctx.Response.Headers.ETag.ToString())
+            return Results.StatusCode(StatusCodes.Status304NotModified);
+        return Results.File(local, asset.MediaType, enableRangeProcessing: true);
+    }
 
+    private static IResult? UploadLength(HttpContext ctx, long maximum)
+    {
         if (ctx.Request.ContentLength is null)
             return Results.StatusCode(StatusCodes.Status411LengthRequired);
         if (ctx.Request.ContentLength <= 0)
-            return Results.BadRequest(new { error = "Empty Maven checksum" });
-        if (ctx.Request.ContentLength > 130)
-            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            return Results.BadRequest(new { error = "Empty Maven upload" });
+        return ctx.Request.ContentLength > maximum
+            ? Results.StatusCode(StatusCodes.Status413PayloadTooLarge) : null;
+    }
 
-        byte[] body;
-        try { body = await BlobStore.ReadBoundedAsync(ctx.Request.Body, 130, ctx.RequestAborted); }
+    private static async Task<IResult> VerifySidecar(string scope, string path,
+        string algorithm, bool metadata, Settings cfg, IPackageDatabase db,
+        BlobStore blobs, HttpContext ctx)
+    {
+        if (UploadLength(ctx, 130) is { } denied) return denied;
+        byte[] bytes;
+        try { bytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body, 130, ctx.RequestAborted); }
         catch (PayloadTooLargeException)
         { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+        var supplied = Encoding.ASCII.GetString(bytes);
+        if (supplied.EndsWith("\r\n", StringComparison.Ordinal)) supplied = supplied[..^2];
+        else if (supplied.EndsWith("\n", StringComparison.Ordinal)) supplied = supplied[..^1];
+        var length = algorithm switch { "sha512" => 128, "sha256" => 64, "sha1" => 40, _ => 32 };
+        if (supplied.Length != length || !supplied.All(Uri.IsHexDigit))
+            return Results.BadRequest(new { error = "Invalid Maven checksum" });
+        string expected;
+        if (metadata)
+        {
+            var entry = db.GetMavenMetadata(scope, path);
+            if (entry is null) return Results.NotFound();
+            if (!MavenMetadata.ValidRecord(entry) || entry.Size > cfg.MaxMetadataBytes ||
+                !MavenMetadata.ReferencesValid(entry, db))
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            MavenMetadata.TryParseAtPath(Convert.FromBase64String(entry.ContentBase64), path, out var document);
+            if (MavenMetadata.PathConflicts(db, scope, path, document!.Coordinates))
+                return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+            expected = Digest(Convert.FromBase64String(entry.ContentBase64), algorithm);
+        }
+        else
+        {
+            var asset = Asset(db, scope, path);
+            if (asset is null) return Results.NotFound();
+            var local = await VerifiedFile(scope, path, asset, cfg, blobs, ctx.RequestAborted);
+            if (local is null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            expected = algorithm == "sha256" ? asset.Sha256 :
+                await ChecksumAsync(local, algorithm, ctx.RequestAborted);
+        }
+        // Sidecars validate committed bytes; they never become an independent
+        // source of truth or a mutable object in the blob store.
+        return string.Equals(expected, supplied, StringComparison.OrdinalIgnoreCase)
+            ? Results.NoContent() : Results.Conflict(new { error = "Checksum differs from committed Maven bytes" });
+    }
 
-        // ASCII hex, optionally terminated by one LF or CRLF. No leading
-        // whitespace, comments, multiple lines or arbitrary suffix bytes.
-        var checksum = Encoding.ASCII.GetString(body);
-        if (checksum.EndsWith("\r\n", StringComparison.Ordinal))
-            checksum = checksum[..^2];
-        else if (checksum.EndsWith("\n", StringComparison.Ordinal))
-            checksum = checksum[..^1];
-        var expectedLength = algorithm switch { "sha256" => 64, "sha1" => 40, _ => 32 };
-        if (checksum.Length != expectedLength || !checksum.All(Uri.IsHexDigit))
-            return Results.BadRequest(new { error = "Invalid Maven checksum body" });
-
-        var asset = db.GetMavenAsset(assetPath);
-        if (asset is null) return Results.NotFound();
-        if (!ValidRecord(asset) || asset.Size > cfg.MaxArtifactBytes)
+    private static async Task<IResult> PutMetadata(string scope, string path,
+        Settings cfg, IPackageDatabase db,
+        BlobStore blobs, ArtifactLocks locks, HttpContext ctx)
+    {
+        var maximum = Math.Min(cfg.MaxMetadataBytes, MavenMetadata.MaxBytes);
+        if (UploadLength(ctx, maximum) is { } denied) return denied;
+        byte[] bytes;
+        try { bytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body, maximum, ctx.RequestAborted); }
+        catch (PayloadTooLargeException)
+        { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+        if (!MavenMetadata.TryParseAtPath(bytes, path, out var document) || document is null)
+            return Results.BadRequest(new { error = "Invalid Maven repository metadata" });
+        var coordinates = document.Coordinates;
+        if (scope == "" && Access.RequireNamespace(ctx, cfg, "maven",
+            coordinates.GroupId + "/" + coordinates.ArtifactId) is { } namespaceDenied)
+            return namespaceDenied;
+        var entry = new MavenMetadataEntry(scope, path, Convert.ToBase64String(bytes),
+            Digest(bytes, "sha256"), bytes.Length, DateTimeOffset.UtcNow.ToString("O"));
+        using var gate = await locks.AcquireAsync("maven-layout", scope, LayoutLockPath(path), ctx.RequestAborted);
+        var previous = db.GetMavenMetadata(scope, path);
+        if (previous is not null && !MavenMetadata.ValidRecord(previous))
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-        var local = blobs.Existing(Key(assetPath));
-        if (local is null || !await ArtifactDigests.MatchesSha256Async(
-            local, asset.Sha256, asset.Size, ctx.RequestAborted))
-            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        if (MavenMetadata.PathConflicts(db, scope, path, coordinates))
+            return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+        var match = ctx.Request.Headers.IfMatch.ToString();
+        if (match != "" && (previous is null || match != "\"" + previous.Sha256 + "\""))
+            return Results.StatusCode(StatusCodes.Status412PreconditionFailed);
+        if (ctx.Request.Headers.IfNoneMatch.ToString() == "*" && previous is not null)
+            return Results.StatusCode(StatusCodes.Status412PreconditionFailed);
+        if (previous is not null)
+        {
+            MavenMetadata.TryParseAtPath(Convert.FromBase64String(previous.ContentBase64), path, out var old);
+            if (!MavenMetadata.Advances(old!, document))
+                return Results.Conflict(new { error = "Maven metadata would remove or rewind published coordinates" });
+        }
+        else if (coordinates.Version is null &&
+            ListedVersions(db, scope, coordinates).Except(document.Versions, StringComparer.Ordinal).Any())
+            return Results.Conflict(new { error = "Maven metadata would remove existing repository versions" });
+        if (!MavenMetadata.TryReferencedPaths(entry, db, out var references))
+            return Results.Conflict(new { error = "Maven metadata references unavailable committed artifacts" });
+        foreach (var reference in references)
+        {
+            var asset = Asset(db, scope, reference);
+            if (asset is null || await VerifiedFile(scope, reference, asset, cfg, blobs,
+                ctx.RequestAborted) is null)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+        if (!db.PutMavenMetadata(entry, Access.Actor(ctx), previous?.Sha256))
+            return Results.Conflict(new { error = "Maven metadata changed concurrently" });
+        ctx.Response.Headers.ETag = "\"" + entry.Sha256 + "\"";
+        return previous is null ? Results.StatusCode(StatusCodes.Status201Created) : Results.NoContent();
+    }
 
-        var expected = algorithm == "sha256" ? asset.Sha256 :
-            await ChecksumAsync(local, algorithm, ctx.RequestAborted);
-        if (!string.Equals(checksum, expected, StringComparison.OrdinalIgnoreCase))
-            return Results.Conflict(new { error = "Checksum does not match committed Maven artifact" });
-
-        // The client checksum is a validated compatibility acknowledgement,
-        // not new metadata, a mutable overwrite or an extra publish intent.
-        return Results.NoContent();
+    internal static async Task<IResult> Write(string scope, string requestedPath,
+        Settings cfg, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks,
+        HttpContext ctx)
+    {
+        var (path, algorithm) = SplitChecksum(requestedPath);
+        var metadata = MavenMetadata.TryParsePath(path, out _);
+        MavenCoordinates.Artifact? coordinate = null;
+        if (!metadata && !ValidAssetPath(path, out coordinate))
+            return Results.BadRequest(new { error = "Unsupported Maven path" });
+        if (metadata)
+        {
+            // Artifact names ending in -SNAPSHOT are valid. Resolve metadata
+            // identity from exact XML, or an existing record for sidecars.
+            if (scope == "")
+            {
+                var candidates = MavenMetadata.PathCandidates(path);
+                var stored = db.GetMavenMetadata(scope, path);
+                if (algorithm is not null && stored is not null && MavenMetadata.ValidRecord(stored))
+                {
+                    MavenMetadata.TryParseAtPath(Convert.FromBase64String(stored.ContentBase64), path, out var doc);
+                    candidates = [doc!.Coordinates];
+                }
+                IResult? namespaceDenied = null;
+                var permitted = false;
+                foreach (var candidate in candidates)
+                {
+                    namespaceDenied = Access.RequireNamespace(ctx, cfg, "maven",
+                        candidate.GroupId + "/" + candidate.ArtifactId);
+                    if (namespaceDenied is null) { permitted = true; break; }
+                }
+                if (!permitted) return namespaceDenied!;
+            }
+            return algorithm is not null
+                ? await VerifySidecar(scope, path, algorithm, true, cfg, db, blobs, ctx)
+                : await PutMetadata(scope, path, cfg, db, blobs, locks, ctx);
+        }
+        var group = coordinate!.GroupId;
+        var name = coordinate.ArtifactId;
+        if (scope == "" && Access.RequireNamespace(ctx, cfg, "maven", group + "/" + name) is { } denied)
+            return denied;
+        if (algorithm is not null)
+            return await VerifySidecar(scope, path, algorithm, false, cfg, db, blobs, ctx);
+        if (UploadLength(ctx, cfg.MaxArtifactBytes) is { } lengthDenied) return lengthDenied;
+        byte[]? pomBytes = null;
+        if (coordinate!.Extension == "pom")
+        {
+            try
+            {
+                pomBytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body,
+                    Math.Min(cfg.MaxMetadataBytes, (int)Math.Min(cfg.MaxArtifactBytes, int.MaxValue)),
+                    ctx.RequestAborted);
+            }
+            catch (PayloadTooLargeException)
+            { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+            if (!PomIdentityMatches(pomBytes, coordinate))
+                return Results.BadRequest(new { error = "POM identity differs from Maven coordinates" });
+        }
+        var key = StorageKey(scope, path);
+        var lockPath = MavenMetadata.PathFor(group, name,
+            MavenCoordinates.IsSnapshot(coordinate.Version) ? coordinate.Version : null);
+        using var gate = await locks.AcquireAsync("maven-layout", scope, LayoutLockPath(lockPath), ctx.RequestAborted);
+        var gaCoordinates = new MavenMetadata.Coordinates(group, name, null);
+        if (MavenMetadata.PathConflicts(db, scope, MavenMetadata.PathFor(group, name), gaCoordinates) ||
+            MavenCoordinates.IsSnapshot(coordinate.Version) && MavenMetadata.PathConflicts(db, scope,
+                MavenMetadata.PathFor(group, name, coordinate.Version),
+                new MavenMetadata.Coordinates(group, name, coordinate.Version)))
+            return Results.Conflict(new { error = "Maven artifact would introduce a metadata path collision" });
+        if (Asset(db, scope, path) is not null || blobs.Contains(key))
+            return Results.Conflict(new { error = "Immutable Maven artifact exists" });
+        db.BeginPublication(key, scope == "" ? "maven" : "feed-maven",
+            scope == "" ? path : scope + "|" + path, coordinate.Version);
+        try
+        {
+            await using var buffered = pomBytes is null ? null : new MemoryStream(pomBytes, writable: false);
+            if (!await blobs.PutAsync(key, buffered ?? ctx.Request.Body,
+                cfg.MaxArtifactBytes, ctx.RequestAborted))
+                return Results.Conflict(new { error = "Immutable Maven blob collision" });
+            var stored = blobs.Existing(key) ?? throw new InvalidDataException("Maven blob missing after write");
+            var size = new FileInfo(stored).Length;
+            if (size <= 0 || size > cfg.MaxArtifactBytes)
+                throw new InvalidDataException("Invalid Maven artifact length");
+            var sha256 = await ChecksumAsync(stored, "sha256", ctx.RequestAborted);
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            var published = scope == ""
+                ? db.PublishMavenAsset(new MavenAssetEntry(path, group, name, coordinate.Version,
+                    sha256, size, MediaType(coordinate.Extension)!, at), Access.Actor(ctx))
+                : db.PublishFeedAsset(new FeedAssetEntry(scope, "maven", path, group + ":" + name,
+                    coordinate.Version, MediaType(coordinate.Extension)!, sha256, size, at), Access.Actor(ctx));
+            if (!published) return Results.Conflict(new { error = "Maven artifact conflict" });
+            db.CompletePublication(key);
+            return Results.StatusCode(StatusCodes.Status201Created);
+        }
+        catch (PayloadTooLargeException)
+        { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+        catch (StorageQuotaExceededException) { return Results.StatusCode(507); }
+        // Unexpected cross-store failures retain the intent for reconciliation.
     }
 
     public static void Map(WebApplication app)
     {
         app.MapMethods("/maven/{**path}", ["GET", "HEAD"], async (
-            string path, Settings cfg, IPackageDatabase db, BlobStore blobs,
-            HttpContext ctx) =>
+            string path, Settings cfg, IPackageDatabase db, BlobStore blobs, HttpContext ctx) =>
         {
-                if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
-                if (TryMetadataCoordinates(path, out var group, out var name, out var metadataChecksum))
-                {
-                    var versions = db.MavenVersions(group, name);
-                    if (versions.Count == 0) return Results.NotFound();
-                    var bytes = Encoding.UTF8.GetBytes(MetadataXml(group, name, versions));
-                    ctx.Response.Headers.CacheControl = "private, no-store";
-                    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
-                    if (metadataChecksum is not null)
-                    {
-                        var digest = metadataChecksum switch
-                        {
-                            ".sha256" => Convert.ToHexStringLower(SHA256.HashData(bytes)),
-                            ".sha1" => Convert.ToHexStringLower(SHA1.HashData(bytes)),
-                            _ => Convert.ToHexStringLower(MD5.HashData(bytes))
-                        };
-                        return Results.Text(digest, "text/plain");
-                    }
-                    return Results.Bytes(bytes, "application/xml");
-                }
-                var checksum = path.EndsWith(".sha256", StringComparison.Ordinal) ? "sha256" :
-                    path.EndsWith(".sha1", StringComparison.Ordinal) ? "sha1" :
-                    path.EndsWith(".md5", StringComparison.Ordinal) ? "md5" : null;
-                var assetPath = checksum is null ? path : path[..^(checksum.Length + 1)];
-                if (!ValidAssetPath(assetPath, out _))
-                    return Results.BadRequest(new { error = "Invalid Maven release path" });
-                var asset = db.GetMavenAsset(assetPath);
-                if (asset is null) return Results.NotFound();
-                if (!ValidRecord(asset) || asset.Size > cfg.MaxArtifactBytes)
-                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-                var local = blobs.Existing(Key(assetPath));
-                if (local is null || !await ArtifactDigests.MatchesSha256Async(
-                    local, asset.Sha256, asset.Size, ctx.RequestAborted))
-                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-
-                ctx.Response.Headers.CacheControl = "private, no-store";
-                ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
-                if (checksum is not null)
-                {
-                    var digest = checksum == "sha256"
-                        ? asset.Sha256
-                        : await ChecksumAsync(local, checksum, ctx.RequestAborted);
-                    return Results.Text(digest, "text/plain");
-                }
-                ctx.Response.Headers.ETag = "\"" + asset.Sha256 + "\"";
-                if (ctx.Request.Headers.IfNoneMatch.ToString() == "\"" + asset.Sha256 + "\"")
-                    return Results.StatusCode(StatusCodes.Status304NotModified);
-                return Results.File(local, asset.MediaType, enableRangeProcessing: true);
+            if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
+            return await Read("", path, cfg, db, blobs, ctx);
         });
-
-        // Apply the mutation rate limiter only to writes: dependency resolution
-        // must not consume the expensive publishing request budget.
-        app.MapPut("/maven/{**path}", async (
-            string path, Settings cfg, IPackageDatabase db, BlobStore blobs,
-            ArtifactLocks locks, HttpContext ctx) =>
+        app.MapPut("/maven/{**path}", async (string path, Settings cfg,
+            IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, cfg, write: true) is { } writeDenied) return writeDenied;
-            if (TryArtifactChecksumPath(path, out var assetPath, out var algorithm,
-                out var checksumCoordinate) && checksumCoordinate is not null)
-                return await VerifyArtifactChecksumPut(assetPath, algorithm,
-                    checksumCoordinate, cfg, db, blobs, ctx);
-            if (!ValidAssetPath(path, out var coord) || coord is null)
-                return Results.BadRequest(new { error = "Unsupported Maven release artifact path" });
-            if (Access.RequireNamespace(ctx, cfg, "maven",
-                coord.GroupId + "/" + coord.ArtifactId) is { } namespaceDenied)
-                return namespaceDenied;
-            if (ctx.Request.ContentLength is null)
-                return Results.StatusCode(StatusCodes.Status411LengthRequired);
-            if (ctx.Request.ContentLength <= 0)
-                return Results.BadRequest(new { error = "Empty Maven upload" });
-            if (ctx.Request.ContentLength > cfg.MaxArtifactBytes)
-                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-
-            byte[]? pomBytes = null;
-            if (coord.Extension == "pom")
-            {
-                try
-                {
-                    pomBytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body,
-                        Math.Min(cfg.MaxMetadataBytes, (int)Math.Min(cfg.MaxArtifactBytes, int.MaxValue)),
-                        ctx.RequestAborted);
-                }
-                catch (PayloadTooLargeException)
-                { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
-                if (!PomIdentityMatches(pomBytes, coord))
-                    return Results.BadRequest(new { error = "POM identity does not match repository path" });
-            }
-            using var gate = await locks.AcquireAsync("maven", path, "", ctx.RequestAborted);
-            var key = Key(path);
-            if (db.GetMavenAsset(path) is not null || blobs.Contains(key))
-                return Results.Conflict(new { error = "Immutable Maven file already exists" });
-            db.BeginPublication(key, "maven", path, coord.Version);
-            try
-            {
-                await using var buffered = pomBytes is null ? null :
-                    new MemoryStream(pomBytes, writable: false);
-                if (!await blobs.PutAsync(key, buffered ?? ctx.Request.Body,
-                    cfg.MaxArtifactBytes, ctx.RequestAborted))
-                    return Results.Conflict(new { error = "Immutable Maven file collision" });
-                var local = blobs.Existing(key) ??
-                    throw new InvalidDataException("Maven file missing after storage acknowledgement");
-                var size = new FileInfo(local).Length;
-                if (size <= 0) throw new InvalidDataException("Empty Maven artifact after upload");
-                await using var input = new FileStream(local, FileMode.Open, FileAccess.Read,
-                    FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                var digest = Convert.ToHexStringLower(
-                    await SHA256.HashDataAsync(input, ctx.RequestAborted));
-                var asset = new MavenAssetEntry(path, coord.GroupId,
-                    coord.ArtifactId, coord.Version, digest, size, MediaType(coord.Extension)!,
-                    DateTimeOffset.UtcNow.ToString("O"));
-                if (!db.PublishMavenAsset(asset, Access.Actor(ctx)))
-                    return Results.Conflict(new { error = "Maven artifact already published" });
-                db.CompletePublication(key);
-                return Results.StatusCode(StatusCodes.Status201Created);
-            }
-            catch (PayloadTooLargeException)
-            { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
-            catch (StorageQuotaExceededException)
-            { return Results.StatusCode(507); }
-            // Cross-store errors deliberately retain intents for explicit recovery.
+            if (Access.Require(ctx, cfg, write: true) is { } denied) return denied;
+            return await Write("", path, cfg, db, blobs, locks, ctx);
         }).RequireRateLimiting("publish");
     }
 }

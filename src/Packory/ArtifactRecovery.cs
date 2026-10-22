@@ -27,6 +27,8 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
         }
         foreach (var maven in database.MavenAssets())
             if (!blobs.Contains(MavenEndpoints.Key(maven.Path))) missing++;
+        foreach (var metadata in database.MavenMetadata())
+            if (!MavenMetadata.ReferencesValid(metadata, database)) missing++;
         foreach (var module in database.GoModules())
             if (!GoModuleBundle.ValidRecord(module) ||
                 !blobs.Contains(GoModuleBundle.Key(module.Name, module.Version))) missing++;
@@ -204,6 +206,12 @@ public sealed class ArtifactRecovery(Settings settings, IPackageDatabase databas
             var key = MavenEndpoints.Key(maven.Path);
             known.Add(key);
             if (!blobs.Contains(key)) missingHosted++;
+        }
+        foreach (var metadata in database.MavenMetadata())
+        {
+            if (MavenMetadata.ReferencesValid(metadata, database)) continue;
+            missingHosted++;
+            logger.LogError("Invalid Maven metadata or missing same-repository reference.");
         }
         foreach (var asset in database.FeedAssets())
         {

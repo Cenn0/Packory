@@ -410,3 +410,33 @@ CI exercises actual SQLite/filesystem references across six ecosystem
 families and PostgreSQL/S3 maintenance authorization (S3 emulated). This
 improves preflight observability, **not** acceptance of M1.6 or MS1 as a
 whole.
+
+
+## Maven metadata upgrade and restore (schema V11)
+
+Maven release and timestamped SNAPSHOT deploys persist mutable repository XML
+inside the metadata database. V11 adds `maven_metadata(scope,path,content_base64,
+sha256,size,updated_at)` without moving or changing existing artifact bytes.
+A metadata change and its audit record commit atomically; immutable artifact
+publication retains the existing journal and blob/ledger sequence. Native
+deployment of a complete multi-file release is still not atomic.
+
+Stop all writers and take a verified consistent backup before upgrading. Start
+the upgraded writer to apply V10→V11, then start matching reader versions. Old
+binaries reject the newer schema marker. To roll back, restore the pre-upgrade
+database **and** its matching blob snapshot with the old binary; do not manually
+lower the schema version.
+
+The SQLite offline tooling verifies Maven metadata bytes, XML identity and
+references during backup and restore. PostgreSQL/S3 schema V11 requires snapshot
+format4 and its embedded `maven_references` inventory; format3 remains valid for
+V10. Verification checks exact database metadata and global/private artifact
+references before restoring; the restored inventories must still match.
+Snapshots with missing, cross-scope or corrupt metadata references fail closed.
+Configured PostgreSQL/Moto tests cover database schemas V4, V10 and V11; Moto
+evidence is separate from qualification of a real object-storage provider.
+
+Run `bash scripts/smoke-maven-deploy.sh` for pinned Maven/Gradle native acceptance
+and `python3 scripts/smoke-feed-recovery.py` for the all-kind SQLite restore
+smoke. See [Maven operations](maven.md) for routes, credentials and deployment
+limits.

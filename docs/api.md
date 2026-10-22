@@ -170,13 +170,14 @@ There is no anonymous, cross-feed, global or upstream fallback.
 | Cargo | `/feeds/{id}/cargo/index/config.json`, sparse index paths; `PUT .../cargo/api/v1/crates/new`; `GET/HEAD .../crates/{name}/{version}/download` | Authenticated sparse registry, immutable metadata/crate bundle; no yank |
 | PyPI | `GET/HEAD /feeds/{id}/pypi/simple/` and project pages; `/files/{name}/{filename}`; `POST .../pypi/legacy/` | Simple HTML/JSON and Twine upload; bounded canonical PEP 440 without epochs; no direct dependency URLs or extra-index fallback |
 | OCI | `/v2/feeds/{id}/{repository}/blobs/...`, `/manifests/{reference}`, `/tags/list`, `/referrers/{digest}` | SHA-256 digest assets, mutable tags and durable sessions; alternate descriptor URLs rejected, inline data digest/size-bound; no blob/manifest deletion |
-| Maven | `PUT/GET/HEAD /feeds/{id}/maven/{release-path}`, generated `maven-metadata.xml` and checksum sidecars | Immutable validated release files; matching checksum acknowledgements; no mutable metadata PUT/deploy/SNAPSHOT |
+| Maven | `PUT/GET/HEAD /feeds/{id}/maven/{artifact-path}`, GA/SNAPSHOT `maven-metadata.xml` and SHA-512/SHA-256/SHA-1/MD5 sidecars | Native release/unique SNAPSHOT deploy, exact atomic metadata with reference/CAS checks; immutable files; no atomic multi-file release or proxy |
 | Go | `POST /feeds/{id}/api/go/modules`; `GET /feeds/{id}/go/{module}/@v/list`, `.info/.mod/.zip`, `@latest` | Immutable triplet; native GOAUTH over HTTPS; no upstream mirror or external checksum trust |
 | Raw | `PUT/GET/HEAD /feeds/{id}/raw/{name}/{version}`; `GET .../metadata` | Immutable generic bytes with SHA-256/range reads, without a native package format |
 
 OCI preserves the native `/v2/` prefix, so `feeds/` is reserved as a global
-OCI repository prefix. Other legacy roots are retained. Schema V10 records
-scoped asset identity and separate OCI tags. npm/Cargo/PyPI publish metadata
+OCI repository prefix. Other legacy roots are retained. Schema V11 retains
+scoped asset identity and separate OCI tags, and stores exact Maven metadata
+atomically in the database. See [Maven metadata contract](maven.md#mutable-metadata-contract). npm/Cargo/PyPI publish metadata
 and original bytes in one immutable bundle; Go publishes one immutable
 triplet. [Feed operations](feeds.md) gives client configuration, exact
 storage/authorization semantics and supported features. Private feed records

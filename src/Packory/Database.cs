@@ -301,6 +301,75 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return true;
     }
 
+    public MavenMetadataEntry? GetMavenMetadata(string scope, string path)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT scope,path,content_base64,sha256,size,updated_at
+            FROM maven_metadata WHERE scope=$scope AND path=$path
+            """;
+        cmd.Parameters.AddWithValue("$scope", scope);
+        cmd.Parameters.AddWithValue("$path", path);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new MavenMetadataEntry(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetInt64(4), reader.GetString(5)) : null;
+    }
+
+    public IReadOnlyList<MavenMetadataEntry> MavenMetadata()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT scope,path,content_base64,sha256,size,updated_at
+            FROM maven_metadata ORDER BY scope,path
+            """;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<MavenMetadataEntry>();
+        while (reader.Read())
+            rows.Add(new MavenMetadataEntry(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5)));
+        return rows;
+    }
+
+    public bool PutMavenMetadata(MavenMetadataEntry entry, string actor, string? expectedSha256)
+    {
+        if (!Packory.MavenMetadata.ValidRecord(entry) ||
+            expectedSha256 is not null && !ArtifactDigests.ValidSha256(expectedSha256))
+            throw new ArgumentException("Invalid Maven metadata revision.", nameof(entry));
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var put = db.CreateCommand();
+        put.Transaction = tx;
+        const string activeScope = """
+            ($scope='' OR EXISTS(SELECT 1 FROM feeds WHERE id=$scope
+                AND kind='maven' AND mode='hosted' AND visibility='private' AND enabled=1))
+            """;
+        put.CommandText = expectedSha256 is null
+            ? """
+                INSERT INTO maven_metadata(scope,path,content_base64,sha256,size,updated_at)
+                SELECT $scope,$path,$content,$sha,$size,$at WHERE
+                """ + activeScope + " ON CONFLICT(scope,path) DO NOTHING"
+            : """
+                UPDATE maven_metadata SET content_base64=$content,sha256=$sha,size=$size,updated_at=$at
+                WHERE scope=$scope AND path=$path AND sha256=$expected AND
+                """ + activeScope;
+        put.Parameters.AddWithValue("$scope", entry.Scope);
+        put.Parameters.AddWithValue("$path", entry.Path);
+        put.Parameters.AddWithValue("$content", entry.ContentBase64);
+        put.Parameters.AddWithValue("$sha", entry.Sha256);
+        put.Parameters.AddWithValue("$size", entry.Size);
+        put.Parameters.AddWithValue("$at", entry.UpdatedAt);
+        if (expectedSha256 is not null) put.Parameters.AddWithValue("$expected", expectedSha256);
+        if (put.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, "metadata-update", "maven",
+            (entry.Scope.Length == 0 ? "global" : "feeds/" + entry.Scope) + "/" + entry.Path,
+            entry.Sha256, actor);
+        tx.Commit();
+        return true;
+    }
+
     public RawArtifactEntry? GetRawArtifact(string name, string version)
     {
         using var db = Open();

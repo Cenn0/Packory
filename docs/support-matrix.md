@@ -1,6 +1,6 @@
 # Packory protocol and deployment support matrix
 
-**Evidence checkpoint: 21 October 2026.** E0 private hosted implementations now
+**E0 evidence checkpoint: 21 October 2026.** E0 private hosted implementations
 cover NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw. All eight GitHub
 workflows and twelve jobs passed on the implementation commit recorded in
 [E0 acceptance](e0-acceptance.md), alongside all eight local native profiles
@@ -12,6 +12,9 @@ including Maven native consumption [#93](https://github.com/Cenn0/Packory/pull/9
 Go content-hash parity [#102](https://github.com/Cenn0/Packory/pull/102), and the
 private Go native authentication fix [#109](https://github.com/Cenn0/Packory/pull/109).
 A prior passing job does not qualify later changes automatically.
+
+The Maven/Gradle row includes the later **22 October 2026 E2 profile**, with its
+separate native, provider and restore evidence in [Maven acceptance](maven.md).
 
 Local native provider parity also passed through
 [smoke-feed-providers.py](../scripts/smoke-feed-providers.py) with PostgreSQL 16
@@ -41,7 +44,7 @@ SQLite test cannot stand in for PostgreSQL/S3 or another native client.
 | Cargo | Legacy and private alternate sparse registries, native publish, immutable crate/index bundles | `FeedCargoTests`; Cargo/rustc 1.99.1 local dual-feed publish/run, fresh caches, restart and native denials | Private yank/unyank, crates.io replacement/proxy and broader client/OS matrix; explicit foreign dependency registries rejected |
 | PyPI | Legacy and private Simple HTML/JSON, Twine upload, immutable distribution files and file hash/size/version metadata | `FeedPyPiTests`; Python 3.12, pip 26.2.1, Twine 6.2.0 local two-feed upload and transitive wheel install, restart and native denials | Bounded canonical PEP 440 without epochs/aliases; no direct-reference dependency or extra-index fallback, PEP 658/714 metadata sidecars, yank/proxy or native source-build qualification |
 | OCI / Helm | Legacy and private SHA-256 blobs/manifests, mutable tags, referrers and durable scoped uploads | `FeedOciTests`; pinned Helm 3.22.0 local private push/pull/template, byte comparison, restart and native denials; legacy Docker smoke remains a separate global scenario | No alternate descriptor URLs; inline data requires matching digest/size. No qualified private Docker/ORAS matrix, Bearer issuer, blob/manifest delete, multi-node session handoff or full OCI/Helm/Kubernetes conformance; bounded referrers |
-| Maven release files | Global and private immutable POM/binary/classifier assets, identity checks, generated metadata and verified checksum sidecars | `FeedMavenTests`; Maven 3.9.11/OpenJDK 17.0.20 local two-feed dependency resolution using exact-feed mirrors, fresh fixture repositories and native 401/403/404 in `smoke-feed-maven.sh` | No native deploy/mutable metadata PUT, SNAPSHOT, atomic multi-file publication, Central proxy or full Gradle variants |
+| Maven / Gradle hosted | Global/private native release and unique timestamped SNAPSHOT deployment; immutable POM/binary/classifier files; exact atomic metadata, SHA-512/SHA-256/SHA-1/MD5 sidecars and scoped reference validation | `MavenDeploymentTests`, `MavenMetadataProviderTests`, existing Maven/feed suites; Maven 3.9.11 + deploy 3.1.4, Gradle 9.8.2 and Java 17: native deploy, fresh-cache transitive build, sources, isolation and restart in `smoke-maven-deploy.sh`; SQLite and PostgreSQL/Moto restore | No multi-file atomic publication, Central proxy, group/plugin-prefix metadata, inherited POM GAV, full Gradle variants or real-provider qualification |
 | Go modules | Global and private immutable triplet import, native GOPROXY list/info/mod/zip/latest, archive digest and canonical local h1 | `FeedGoTests`; Go 1.24.13 local two-feed download/build, separate caches, exact 401/403 and missing module/version/feed/deactivated 404; earlier global go.sum parity evidence | GOAUTH credentials require HTTPS and authority-correct netrc; no public sumdb trust, upstream mirror, universal archive acceptance or broad client/OS matrix |
 | Raw / Generic | Global and private immutable HTTP bytes, SHA-256/size/media metadata, HEAD and ranges | `FeedRawTests`, local curl 8.5.0 `smoke-feed-raw.sh`: exact two-feed bytes, immutable conflict, native 401/403/deactivated 404 and legacy non-leak; provider/recovery tests | Generic transport, without a native package-manager protocol; per-feed quota/retention remains open |
 | Agent Skills distribution and review | Validated immutable ZIP revisions; staged offline SkillSpector scan, explicit approval under the enforcing policy, revocation/rescan and shared REST/MCP publication gates | API approval/revocation tests, `SkillArchiveSafetyTests` and native MCP approved-resource tests | Publisher ownership proof, verified signatures, complete Agent Skills conformance and independently qualified scanner coverage |

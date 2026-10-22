@@ -194,7 +194,7 @@ public sealed class MavenHostedTests
         Assert.Equal(HttpStatusCode.NotFound, await Put(
             "/maven/com/example/demo/2.0/demo-2.0.jar.sha1", Writer,
             Encoding.ASCII.GetBytes(sha1)));
-        Assert.Equal(HttpStatusCode.BadRequest, await Put(
+        Assert.Equal(HttpStatusCode.NotFound, await Put(
             "/maven/com/example/demo/maven-metadata.xml.sha1", Writer,
             Encoding.ASCII.GetBytes(sha1)));
         Assert.Equal(HttpStatusCode.Forbidden, await Put(
@@ -380,7 +380,7 @@ public sealed class MavenHostedTests
             Assert.Single(db.MavenVersions("org.example", "fixture"));
             db.Initialize();
             Assert.Equal(record, db.GetMavenAsset(record.Path));
-            Assert.Equal(10, SchemaVersionGuard.Current);
+            Assert.Equal(11, SchemaVersionGuard.Current);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

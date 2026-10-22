@@ -1,9 +1,10 @@
 # Private hosted feeds — E0 package foundation
 
 **Implemented:** independently routed private hosted NuGet, npm, Cargo, PyPI,
-OCI, Maven, Go and Raw feeds. **Current acceptance:** local native, provider,
-fault/restore and complete test suites have passed; the published-commit
-GitHub gate remains open in [E0 acceptance](e0-acceptance.md).
+OCI, Maven, Go and Raw feeds. **E0 acceptance:** local native, provider,
+fault/restore and complete test suites passed, as did the published-commit
+GitHub gate recorded in [E0 acceptance](e0-acceptance.md). The later Maven E2
+profile and its separate evidence are described in [Maven acceptance](maven.md).
 The protocol profiles below describe available operations and their limits.
 Proxy feeds and private Skills remain disabled drafts; group routing and
 feed-aware MCP discovery are separate work.
@@ -144,7 +145,7 @@ digest before exposing metadata or bytes. Adapters also validate archive
 identity and protocol-specific checksum claims. Go similarly commits its
 `.info`, `.mod` and `.zip` in one validated immutable triplet bundle.
 
-Publishing writes a durable intent before the object, then commits scoped
+Immutable artifact publishing writes a durable intent before the object, then commits scoped
 metadata and audit. A crash between object and metadata writes does not
 publish a guessed package entry. Recovery retains pending evidence or
 quarantines an unindexed local object; a committed missing/corrupted object
@@ -255,25 +256,29 @@ or complete OCI/Helm/Kubernetes conformance is claimed.
 ## Maven
 
 Repository root: `/feeds/{id}/maven/`. Exact read/publish tokens may be supplied
-through a Maven server ID with HTTP Basic password credentials. Immutable
-release `PUT` accepts validated POM and binary/classifier paths. POM group,
-artifact and version must match the URL; DTDs and external entities are rejected.
-`GET|HEAD` verifies stored length/SHA-256. Generated `maven-metadata.xml`
-contains only versions from that feed.
+through a matching Maven server ID with HTTP Basic password credentials. Native
+`mvn deploy` accepts explicit-GAV POMs, immutable release files, source classifiers
+and unique timestamped SNAPSHOTs. The POM version remains the base `-SNAPSHOT`
+version; every deployed timestamp/build file remains immutable. Reads verify
+recorded size/SHA-256 and authoritative remote bytes for S3.
 
-SHA-256, SHA-1 and MD5 GET sidecars derive from verified bytes. Matching checksum
-PUT acknowledgements are accepted only after the original immutable asset is
-committed, without changing that asset. Keys remain
-`feeds/{id}/maven/{canonical-path}`. Native Maven dependency consumption is
-covered; `mvn deploy` with mutable metadata PUT, SNAPSHOT, atomic multi-file
-releases, Maven Central proxy and full Gradle variants remain separate E2 work.
+Mutable GA and SNAPSHOT `maven-metadata.xml` documents are scoped to the same
+feed. V11 stores their exact original bytes and SHA-256 in one metadata/audit
+transaction. Updates validate existing same-feed targets, reject removed or
+rewound versions/classifiers and use compare-and-swap to avoid lost updates.
+Matching SHA-512/SHA-256/SHA-1/MD5 PUT sidecars acknowledge committed bytes
+without replacing them. Artifact keys remain `feeds/{id}/maven/{canonical-path}`.
 
-The native harness bootstraps its pinned public plugin separately, then uses
-`mirrorOf=*` to replace every Maven repository with the selected private feed.
-Each native success/denial has a separate local repository and credential
-configuration. Merely adding `remoteRepositories` would still let
-`maven-dependency-plugin:3.7.1:get` consult Central, as documented by its
-[versioned native contract](https://maven.apache.org/plugins-archives/maven-dependency-plugin-3.7.1/get-mojo.html).
+The pinned [native deploy harness](../scripts/smoke-maven-deploy.sh) covers global
+and two private feeds, release plus two SNAPSHOT generations, fresh-cache Maven
+and Gradle transitive resolution, compiled consumers, classifiers and restart.
+It bootstraps public build plugins separately, then uses `mirrorOf=*` to replace
+every Maven repository with the selected Packory feed. Gradle declares only that
+feed. Credentials and original package bytes remain isolated between feeds.
+
+Atomic publication of the entire POM/JAR/classifier set, Maven Central proxy,
+plugin-prefix metadata, inherited POM GAV and wider Gradle variant conformance
+remain separate E2 work. See [Maven operations, migration and acceptance](maven.md).
 
 ## Go modules
 
