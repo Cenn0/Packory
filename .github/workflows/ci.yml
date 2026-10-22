@@ -122,7 +122,9 @@ jobs:
   dashboard:
     name: MCP dashboard browser regressions
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Playwright --with-deps installs OS packages and a pinned browser from scratch;
+    # the previous ten-minute limit canceled installation before UI tests could run.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
