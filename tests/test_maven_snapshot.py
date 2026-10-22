@@ -119,6 +119,29 @@ class MavenMetadataValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.parse_metadata(path, artifact_versions("1.0.0"))
 
+    def test_group_plugin_metadata_requires_same_scope_pom(self):
+        path = "org/example/maven-metadata.xml"
+        xml = (b"<metadata><groupId>org.example</groupId><plugins>"
+               b"<plugin><prefix>hello</prefix><artifactId>hello-maven-plugin</artifactId></plugin>"
+               b"</plugins></metadata>")
+        parsed = mod.parse_metadata(path, xml)
+        self.assertEqual("hello", parsed["plugins"][0]["prefix"])
+        with self.assertRaises(ValueError):
+            mod.parse_metadata(path, xml.replace(b"org.example", b"org.other"))
+        with self.assertRaises(ValueError):
+            mod.parse_metadata(path, xml.replace(b"</plugins>", b"<plugin><prefix>hello</prefix>"
+                               b"<artifactId>duplicate-plugin</artifactId></plugin></plugins>"))
+        pom_path = "org/example/hello-maven-plugin/1.0/hello-maven-plugin-1.0.pom"
+        pom = b"<project/>"
+        metadata = metadata_record("team-alpha", path, xml)
+        asset = prior.asset("team-beta", "maven", "org.example:hello-maven-plugin",
+                            "1.0", pom_path, "application/xml", pom)
+        with self.assertRaises(ValueError):
+            mod.validate_inventory([metadata], [], [asset], lambda *args: None,
+                                   [feed("team-alpha"), feed("team-beta")])
+        own = dict(asset, feed_id="team-alpha")
+        mod.validate_inventory([metadata], [], [own], lambda *args: None, [feed("team-alpha")])
+
     def test_timestamped_snapshot_paths_and_primary_pom_are_canonical(self):
         path = BASE + "2.0-SNAPSHOT/demo-2.0-20261022.000000-1-sources.jar"
         self.assertEqual("sources", mod.parse_asset_path(path)["classifier"])
