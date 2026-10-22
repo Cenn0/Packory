@@ -61,7 +61,7 @@ def check_sqlite(folder: Path):
         if "packory_schema_version" not in tables:
             return  # Unversioned historical offline backups retain their existing profile.
         row = connection.execute("SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-        if not row or type(row[0]) is not int or row[0] not in range(1, 13):
+        if not row or type(row[0]) is not int or row[0] not in range(1, 14):
             raise ValueError("Unsupported Packory metadata schema version")
         if row[0] < 11:
             return
@@ -84,6 +84,20 @@ def check_sqlite(folder: Path):
                                  rows("maven_assets", maven.ASSET_COLUMNS),
                                  rows("feed_assets", private_columns), verify_blob,
                                  rows("feeds", maven.FEED_COLUMNS))
+
+        if row[0] >= 13:
+            if "feed_npm_tags" not in tables:
+                raise ValueError("V13 npm dist-tag ledger missing")
+            assets = {(a["feed_id"], a["name"], a["version"])
+                      for a in rows("feed_assets", private_columns) if a["kind"] == "npm"}
+            tags = rows("feed_npm_tags",
+                        ("feed_id", "name", "tag", "version", "deleted", "updated_at"))
+            for tag in tags:
+                if (tag["deleted"] not in (0, 1) or
+                        (tag["deleted"] == 1 and tag["version"] != "") or
+                        (tag["deleted"] == 0 and
+                         (tag["feed_id"], tag["name"], tag["version"]) not in assets)):
+                    raise ValueError("Invalid or cross-feed npm dist-tag reference")
 
 def manifest_for(folder: Path) -> dict:
     entries = []
