@@ -1,6 +1,6 @@
 # Experimental graduation — implementation and acceptance ledger
 
-**Baseline:** 22 October 2026, following Maven metadata PR #113.
+**Baseline:** 22 October 2026, after merged PRs #113–#116. See the [current Roadmap V5](roadmap-v5.md) for ordering.
 **Scope:** all entries labelled `experimental` in `RegistryCapabilities.All`, plus the separate overall release gate.
 **Rule:** implementation, repeatable testing, Packory-supported combinations and production recommendation are four distinct statuses. A CI pass never authorizes a blanket production claim.
 
@@ -20,8 +20,8 @@
 | ID | Existing capability | Implementation still required | Per-adapter exit |
 | --- | --- | --- | --- |
 | EXP-01 NuGet V3 | Hosted/proxy + private flatcontainer/push + checksums; #114 introduces scoped search and paginated registration | Broad SemVer/registration/client matrix, symbols, unlisting, package advisories, signed-package trust as independently scoped features | Native authenticated discovery, restore/transitive, fault, recovery, symbol/unlist profile if advertised |
-| EXP-02 npm | Hosted/proxy, private publishing, immutable tarball bundles | Native mutable private dist-tags implemented in EXP-02 (pending CI and merge); defined unpublish/deprecation policy, scoped proxy, cross-client lockfile matrix and attestations | npm/pnpm/Yarn declared versions, tag concurrency, protected retired versions, verified dependency provenance |
-| EXP-03 Cargo | Native hosted alternate sparse registry, yank/unyank added after historical baseline | Verify full yank profile, allowed crate naming, owner grants, allowlisted crates.io mirror with immutable index consistency | Native cargo publish/yank/build/update on cold and warm caches and distinct feeds |
+| EXP-02 npm | Hosted/proxy, private publishing, immutable tarball bundles and audited mutable scoped dist-tags (merged #115) | Defined unpublish/deprecation policy, scoped proxy, cross-client lockfile matrix and attestations; further parallel-tag and recovery qualification | npm/pnpm/Yarn declared versions, tag concurrency, protected retired versions, verified dependency provenance |
+| EXP-03 Cargo | Native hosted alternate sparse registry, without private yank/unyank | Add and verify private yank/unyank, allowed crate naming, owner grants, allowlisted crates.io mirror with immutable index consistency | Native cargo publish/yank/build/update on cold and warm caches and distinct feeds |
 | EXP-04 PyPI | Hosted Simple API HTML/JSON, native Twine/pip | Broader PEP 440, Requires-Python, sidecars, yank, source/wheel compatibility and opt-in trusted proxy | Positive/negative pip/Twine matrix, multiple distributions per release, no extra-index confusion |
 | EXP-05 OCI | Private Docker/Helm-style Distribution v2 with durable sessions and referrers | Standard Bearer issuer/scopes, bounded referrer/descriptor conformance, optional secure delete/GC, Docker/ORAS/Helm matrix | OCI spec-selected contract, restart/digest/denial/concurrent tests |
 | EXP-06 Maven/Gradle | Native deploy/release/SNAPSHOT and V12 inherited POM + plugin-prefix metadata (#113) | Whole-publication visibility contract, allowlisted Central proxy, broader Gradle metadata variants | Maven/Gradle transitive plugins, snapshots, interrupted deployment and recovery |
@@ -39,9 +39,9 @@
 
 ## PR sequencing and evidence
 
-1. Merge pre-existing passing work (#113 completed). Confirm all checks, review the actual head SHA and do not bypass merge protections.
-2. EXP-01 feed-scoped NuGet discovery (#114) with per-feed query, registration, dependency groups and corruption/auth negatives.
-3. EXP-02 npm dist-tag transactional lifecycle and tests; EXP-03 Cargo native negative/mirror proof can proceed independently.
+1. Baseline #113–#116 is merged. For every subsequent PR, confirm checks and the exact head SHA; do not bypass required reviews.
+2. EXP-01 scoped NuGet discovery (#114 merged): broaden SemVer/client acceptance and add symbol/unlisting work only as an explicitly qualified profile.
+3. EXP-02 scoped npm dist-tag lifecycle (#115 merged): extend concurrency/recovery and cross-client tests; EXP-03 private Cargo yank and mirror remain distinct unfinished implementations.
 4. EXP-04 PyPI metadata semantics; EXP-06 Maven atomic staged-publish design and proxy in separate reviewable PRs.
 5. EXP-05 OCI auth and client conformance; EXP-07 Raw policies; EXP-08 Skills publisher/signature and isolated quality runner.
 6. EXP-11 BFF before privileged admin UI; then EXP-13/14 MCP/dashboard, followed by real-provider EXP-12 and release EXP-16.
@@ -56,6 +56,7 @@ The registry must never execute arbitrary submitted package or Skill contents. E
 
 - [V3 roadmap](roadmap.md)
 - [V4 adapter roadmap](roadmap-v4.md)
+- [Current V5 execution roadmap](roadmap-v5.md)
 - [Support matrix](support-matrix.md)
 - [Release and disaster-recovery gates](release-gates.md)
 - [MCP continuation](mcp-roadmap.md)

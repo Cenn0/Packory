@@ -4,8 +4,8 @@
 timestamped SNAPSHOT deployment, repository metadata publication and ordinary
 Maven/Gradle dependency consumption. The global repository and independently
 authorized private feeds use the same protocol implementation. E2 remains
-partial: proxying, atomic publication of an entire multi-file release, plugin
-prefix metadata and wider client/variant qualification are separate work.
+partial: proxying, atomic publication of an entire multi-file release and
+wider client/variant qualification remain open.
 
 ## Repository layout and immutable files
 
@@ -31,11 +31,13 @@ cannot be overwritten, including by identical repeat `PUT`s. Nonunique mutable
 noncanonical build numbers, traversal, encoded separators and oversized paths
 are rejected before storage access.
 
-POMs must contain explicit matching `groupId`, `artifactId` and `version` fields.
-For a timestamped SNAPSHOT filename the POM version is the base `-SNAPSHOT`
-version. Parent-inherited GAV, Maven plugin/group metadata and arbitrary POM
-interpolation are outside this profile. XML parsing is bounded; DTDs and external
-entities are prohibited.
+POMs must resolve to matching `groupId`, `artifactId` and `version` coordinates.
+For a timestamped SNAPSHOT filename the effective POM version is the base
+`-SNAPSHOT` version. A POM can inherit `groupId` and `version` from its
+`<parent>` when the resulting effective coordinates match the artifact path.
+Group-level plugin-prefix metadata is supported under the scoped V12 ledger
+contract below. Arbitrary POM interpolation is not supported. XML parsing is
+bounded; DTDs and external entities are prohibited.
 
 ## Native publishing and consuming
 

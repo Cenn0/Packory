@@ -24,7 +24,7 @@ public static class RegistryCapabilities
         new("oci", "OCI Distribution v2", true, false, true, true, "experimental",
             "Private feeds use reserved feeds/{feedId} repository prefix; pinned Helm client; no Bearer token service"),
         new("maven", "Maven 2 repository layout", true, false, true, true, "experimental",
-            "Hosted releases and timestamped SNAPSHOT deploy with scoped metadata; explicit POM coordinates; no proxy, plugin-prefix metadata or atomic multi-file deployment"),
+            "Hosted releases and timestamped SNAPSHOT deploy with scoped metadata, parent-inherited POM coordinates and plugin-prefix metadata; no proxy or atomic multi-file deployment"),
         new("go", "Go GOPROXY hosted", true, false, false, true, "native-client-tested",
             "Packory-specific import and Go native consumer; isolated hosted feeds; no mirror, pseudo-versions or full ZIP parity"),
         new("raw", "Packory generic byte API", true, false, false, true, "experimental",
