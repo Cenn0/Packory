@@ -607,6 +607,58 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT tag,version,deleted FROM feed_npm_tags
+            WHERE feed_id=$feed AND name=$name ORDER BY tag
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        using var reader = cmd.ExecuteReader();
+        var tags = new List<FeedNpmTag>();
+        while (reader.Read()) tags.Add(new FeedNpmTag(
+            reader.GetString(0), reader.GetString(1), reader.GetInt32(2) == 1));
+        return tags;
+    }
+
+    public bool SetFeedNpmTag(string feedId, string name, string tag,
+        string version, bool deleted, string actor)
+    {
+        if (!FeedDefinition.ValidId(feedId) || !Names.Npm(name) ||
+            !FeedNpmEndpoints.ValidTag(tag) ||
+            (!deleted && !FeedNpmEndpoints.ValidVersion(version)) ||
+            (deleted && version != ""))
+            throw new ArgumentException("Invalid private npm dist-tag reference.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO feed_npm_tags(feed_id,name,tag,version,deleted,updated_at)
+            SELECT $feed,$name,$tag,$version,$deleted,$at
+            WHERE EXISTS (SELECT 1 FROM feeds WHERE id=$feed AND kind='npm'
+                AND mode='hosted' AND visibility='private' AND enabled=1)
+              AND EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=$feed
+                AND kind='npm' AND name=$name AND ($deleted=1 OR version=$version))
+            ON CONFLICT(feed_id,name,tag) DO UPDATE
+                SET version=excluded.version,deleted=excluded.deleted,updated_at=excluded.updated_at
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$tag", tag);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$deleted", deleted ? 1 : 0);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, deleted ? "tag-delete" : "tag-set",
+            "feed-npm", feedId + "/" + name, tag, actor);
+        tx.Commit();
+        return true;
+    }
+
     public string? GetFeedOciTag(string feedId, string name, string tag)
     {
         using var db = Open();
