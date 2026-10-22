@@ -42,6 +42,7 @@ public interface IPackageDatabase
     IReadOnlyList<string> FeedNugetVersions(string feedId, string name);
     FeedNugetRevision? GetFeedNugetRevision(string feedId, string name, string version);
     IReadOnlyList<FeedNugetRevision> FeedNugetRevisions();
+    IReadOnlyList<FeedNugetRevision> FeedNugetRevisions(string feedId);
     bool PublishFeedNuget(string feedId, string name, string version,
         string description, string sha512, long size, string actor);
     void BeginPublication(string key, string kind, string name, string version);
