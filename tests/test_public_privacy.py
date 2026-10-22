@@ -38,6 +38,19 @@ class PrivacyGuardTests(unittest.TestCase):
             problems = mod.check_paths(root, [".env", "production.key", "secrets.p12", ".npmrc"])
             self.assertEqual(4, len(problems))
 
+    def test_native_node_module_sources_are_inspected_and_findings_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            personal = "synthetic" + "@" + "private.example"
+            credential = "AKIA" + "B" * 16
+            for extension in (".cjs", ".mjs"):
+                name = "module" + extension
+                (root / name).write_text(personal + "\n" + credential, encoding="utf-8")
+                problems = mod.check_paths(root, [name])
+                self.assertEqual(2, len(problems))
+                self.assertNotIn(personal, str(problems))
+                self.assertNotIn(credential, str(problems))
+
 
 if __name__ == "__main__":
     unittest.main()

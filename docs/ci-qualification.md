@@ -74,6 +74,12 @@ new scoped V14 behavior. Architecture and both README schema descriptions
 now match V14. npm tag and Cargo yank overlays remain mutable, audited state
 beside immutable package bytes.
 
+Change-scoped review also found that the existing privacy guard omitted
+`.cjs` and `.mjs` sources even though those formats contain the dashboard and
+native MCP test harnesses. Both extensions are now inspected; a regression
+fixture proves contact/credential detection without echoing their values.
+This closes that scanner coverage gap, not all possible secret patterns.
+
 The coordinated PostgreSQL/Moto fixture now also restores V14, including two
 private Cargo states and npm live tags plus deletion tombstones, comparing
 exact restored metadata fingerprints and reference inventories. This is
