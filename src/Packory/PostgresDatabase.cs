@@ -77,6 +77,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
                     AND to_regclass('feed_assets') IS NOT NULL
                     AND to_regclass('feed_oci_tags') IS NOT NULL
                     AND to_regclass('feed_npm_tags') IS NOT NULL
+                    AND to_regclass('feed_cargo_yanks') IS NOT NULL
                 """, null, ("current", SchemaVersionGuard.Current));
             return cmd.ExecuteScalar() is true;
         }
@@ -604,6 +605,44 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         if (cmd.ExecuteNonQuery() != 1) return false;
         Audit(db, tx, deleted ? "tag-delete" : "tag-set",
             "feed-npm", feedId + "/" + name, tag, actor);
+        tx.Commit();
+        return true;
+    }
+
+    public bool? FeedCargoYanked(string feedId, string name, string version)
+    {
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT yanked FROM feed_cargo_yanks
+            WHERE feed_id=@feed AND name=@name AND version=@version
+            """, null, ("feed", feedId), ("name", name), ("version", version));
+        var value = cmd.ExecuteScalar();
+        return value is null or DBNull ? null : Convert.ToInt32(value) == 1;
+    }
+
+    public bool SetFeedCargoYanked(string feedId, string name, string version,
+        bool yanked, string actor)
+    {
+        if (!FeedDefinition.ValidId(feedId) || !CargoEndpoints.IsName(name) ||
+            !FeedCargoEndpoints.IsVersion(version))
+            throw new ArgumentException("Invalid private Cargo yank identity.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = Command(db, """
+            INSERT INTO feed_cargo_yanks(feed_id,name,version,yanked,updated_at)
+            SELECT @feed,@name,@version,@yanked,@at
+            WHERE EXISTS (SELECT 1 FROM feeds WHERE id=@feed AND kind='cargo'
+                AND mode='hosted' AND visibility='private' AND enabled=1)
+              AND EXISTS (SELECT 1 FROM feed_assets WHERE feed_id=@feed
+                AND kind='cargo' AND name=@name AND version=@version AND path=@path)
+            ON CONFLICT(feed_id,name,version) DO UPDATE
+                SET yanked=excluded.yanked,updated_at=excluded.updated_at
+            """, tx, ("feed", feedId), ("name", name), ("version", version),
+            ("yanked", yanked ? 1 : 0), ("at", DateTimeOffset.UtcNow.ToString("O")),
+            ("path", FeedCargoEndpoints.AssetPath(name, version)));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        Audit(db, tx, yanked ? "yank" : "unyank",
+            "feed-cargo", feedId + "/" + name, version, actor);
         tx.Commit();
         return true;
     }
