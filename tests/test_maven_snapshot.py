@@ -248,7 +248,7 @@ class MavenSnapshotTests(unittest.TestCase):
                 if mutation == "old-format": fixture.manifest["schema"] = 3
                 if mutation == "no-table": del fixture.manifest["postgres"]["table_fingerprints"]["maven_metadata"]
                 if mutation == "no-sidecar": del fixture.manifest["maven_references"]
-                if mutation == "future-schema": fixture.manifest["postgres"]["database_schema_version"] = 12
+                if mutation == "future-schema": fixture.manifest["postgres"]["database_schema_version"] = 13
                 fixture.save()
                 with self.assertRaises(snapshot.SnapshotError):
                     snapshot.verify(fixture.root)
