@@ -14,7 +14,7 @@ public static class RegistryCapabilities
     public static readonly IReadOnlyList<Capability> All =
     [
         new("nuget", "NuGet V3", true, true, true, true, "experimental",
-            "Partial client/protocol matrix; only isolated private hosted NuGet feeds"),
+            "Private hosted feeds include scoped search and paginated registration; no symbols, unlisting or broad client matrix"),
         new("npm", "npm registry", true, true, true, true, "experimental",
             "Private hosted feeds; publication-time tags only; no private proxy, mutable dist-tag API or unpublish"),
         new("cargo", "Cargo sparse registry", true, false, true, true, "experimental",
