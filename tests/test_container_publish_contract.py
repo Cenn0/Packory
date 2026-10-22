@@ -51,6 +51,15 @@ class ImagePublicationContractTests(unittest.TestCase):
         self.assertLess(section.index("Registry-authenticated SHA image read-back"),
                         section.index('docker tag "$image:build" "$image:main"'))
 
+    def test_github_summary_never_executes_markdown_as_shell_commands(self):
+        section = step_block("Publish SHA and main tags to GitHub Container Registry")
+        for line in section.splitlines():
+            if '>> "$GITHUB_STEP_SUMMARY"' in line:
+                with self.subTest(line=line.strip()):
+                    # An unescaped Markdown backtick inside a Bash double-quoted
+                    # echo is command substitution, not formatting.
+                    self.assertNotRegex(line, r"(?<!\\)`")
+
     def test_anonymous_check_never_uses_push_credentials_or_claims_release(self):
         section = step_block("Publish SHA and main tags to GitHub Container Registry")
         self.assertIn('DOCKER_CONFIG="$anonymous_config" docker manifest inspect', section)
