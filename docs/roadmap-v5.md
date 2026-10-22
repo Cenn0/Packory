@@ -169,7 +169,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-12 | V14 PG/Moto recovery fixture added; historical release migration, crash matrix and operator rollback remain |
 | V5-13 | Change-scoped authorization/integrity review only; comprehensive route/SSRF/audit review remains |
 | V5-14 | SHA-pinned Actions and source integrity exist; complete SBOM/signatures/license/vulnerability/provenance review remains |
-| V5-15 | Deployment-specific load, alerts, secret rotation, incident and SLO measurements remain |
+| V5-15 | Bounded .NET request/duration/denial instruments and admin process totals implemented; deployment load, alerts, rotations, incident and SLO measurements remain |
 | V5-16 | Blocked on applicable independent release acceptance; no tagged release authorized by a green CI index |
 | V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
 | V5-21 | Durable scoped npm tag API retained; broader client/concurrency/provenance/deprecation work remains |

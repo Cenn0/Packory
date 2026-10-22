@@ -129,6 +129,7 @@ builder.Services.AddSingleton<BlobStore>(provider =>
     return cfg.BlobProvider == "s3" ? new S3BlobStore(cfg) : new BlobStore(cfg);
 });
 builder.Services.AddSingleton<ArtifactLocks>();
+builder.Services.AddSingleton<PackoryTelemetry>();
 builder.Services.AddSingleton<ArtifactRecovery>();
 builder.Services.AddSingleton<ArtifactIntegrityScanner>();
 builder.Services.AddSingleton<PublicationRecoveryService>();
@@ -245,6 +246,8 @@ else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
     throw new InvalidOperationException("Read-only replica requires an initialized shared metadata database.");
 }
 app.UseRouting();
+var telemetry = app.Services.GetRequiredService<PackoryTelemetry>();
+app.Use((ctx, next) => telemetry.Observe(ctx, _ => next(ctx)));
 // Authenticate before applying the MCP token/OIDC scope gate.
 if (settings.OidcEnabled) app.UseAuthentication();
 app.Use(async (ctx, next) =>
@@ -402,6 +405,13 @@ app.MapGet("/api/admin/operations/status", (Settings cfg, IPackageDatabase db,
         missingHostedCount = recovery.MissingHostedCount()
     });
 });
+app.MapGet("/api/admin/metrics", (Settings cfg, PackoryTelemetry observations, HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "private, no-store";
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    return Results.Json(observations.Snapshot());
+});
+
 app.MapGet("/api/admin/audit", (long? before, int? limit, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;

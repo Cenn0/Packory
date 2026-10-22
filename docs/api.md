@@ -241,3 +241,10 @@ The response has `apiVersion`, `items` and `nextCursor`; each item exposes
 `name`, `version`, `mediaType`, `sha256`, `size`, `createdAt` and `url`.
 401/403 precede catalog access; disabled/wrong-kind feeds return 404, invalid
 queries/cursors 400, and invalid committed metadata 503. See [Raw](raw-registry.md).
+
+### Runtime observation totals
+
+`GET /api/admin/metrics` is administrator-only, private/no-store. Returns
+`scope: in-process-since-start`, `requests`, `active`, `authorizationDenied`,
+`serverErrors` and `rateLimited`. No identifiers or request payloads are
+returned. The standard .NET `Packory` Meter supplies live counters/histograms.
