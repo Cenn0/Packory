@@ -67,6 +67,7 @@ public static partial class FeedNpmEndpoints
     public static void Map(WebApplication app)
     {
         FeedNpmTagEndpoints.Map(app);
+        FeedNpmDeprecationEndpoints.Map(app);
         app.MapPut("/feeds/{feedId}/npm/{**resource}", async (
             string feedId, string? resource, Settings cfg, IPackageDatabase db,
             BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
@@ -224,6 +225,10 @@ public static partial class FeedNpmEndpoints
                         tags[tag.Name] = tag.Value.GetString();
                 }
                 FeedNpmTagEndpoints.ApplyPointers(tags, feedId, packageName, db);
+                var deprecations = db.FeedNpmDeprecations(feedId, packageName);
+                if (totalMetadata + deprecations.Values.Sum(message => (long)Encoding.UTF8.GetByteCount(message)) > cfg.MaxMetadataBytes)
+                    return Results.StatusCode(413);
+                FeedNpmDeprecationEndpoints.Apply(versions, deprecations);
                 if (requestedVersion is not null)
                 {
                     var selected = ValidVersion(requestedVersion)

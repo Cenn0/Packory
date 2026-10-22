@@ -141,6 +141,128 @@ public sealed class FeedNpmTests
         return response.StatusCode;
     }
 
+    [Fact]
+    public async Task ScopedDeprecationSurvivesReopenAndNeverChangesImmutableTarballs()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var a = await Create(client, "deprecation-a");
+        var b = await Create(client, "deprecation-b");
+        var bytes = Archive();
+        foreach (var (id, grant) in new[] { ("deprecation-a", a), ("deprecation-b", b) })
+            Assert.Equal(HttpStatusCode.Created, await Publish(client, id, grant.Write, Document(bytes)));
+        var url = "/feeds/deprecation-a/npm/-/deprecations/1.0.0/" + Uri.EscapeDataString(Name);
+        async Task<HttpStatusCode> Change(string? token, string json)
+        {
+            using var request = Request(HttpMethod.Put, url, token);
+            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await client.SendAsync(request);
+            return response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, await Change(null, "{\"message\":\"obsolete\"}"));
+        Assert.Equal(HttpStatusCode.Forbidden, await Change(a.Read, "{\"message\":\"obsolete\"}"));
+        Assert.Equal(HttpStatusCode.Forbidden, await Change(b.Write, "{\"message\":\"obsolete\"}"));
+        foreach (var json in new[] { "{\"message\":null}", "{\"message\":\"a\",\"message\":\"b\"}", "{\"message\":\"line\\ncontrol\"}" })
+            Assert.Equal(HttpStatusCode.BadRequest, await Change(a.Write, json));
+        Assert.Equal(HttpStatusCode.OK, await Change(a.Write, "{\"message\":\"Use the next release\"}"));
+        using (var response = await client.SendAsync(Request(HttpMethod.Get, Url("deprecation-a") + "/1.0.0", a.Read)))
+        {
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("Use the next release", json.RootElement.GetProperty("deprecated").GetString());
+        }
+        using (var response = await client.SendAsync(Request(HttpMethod.Get, Url("deprecation-b") + "/1.0.0", b.Read)))
+        {
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.False(json.RootElement.TryGetProperty("deprecated", out _));
+        }
+        var cfg = host.Services.GetRequiredService<Settings>();
+        var reopened = new Database(cfg);
+        reopened.Initialize();
+        Assert.Equal("Use the next release", reopened.FeedNpmDeprecations("deprecation-a", Name)["1.0.0"]);
+        using (var response = await client.SendAsync(Request(HttpMethod.Get, Url("deprecation-a") + "/-/1.0.0.tgz", a.Read)))
+            Assert.Equal(bytes, await response.Content.ReadAsByteArrayAsync());
+        Assert.False(reopened.SetFeedNpmDeprecation("deprecation-a", Name, "9.9.9", "missing", "fixture"));
+        Assert.Equal(HttpStatusCode.OK, await Change(a.Write, "{\"message\":\"\"}"));
+        Assert.Equal("", reopened.FeedNpmDeprecations("deprecation-a", Name)["1.0.0"]);
+        Assert.Contains(reopened.AuditEvents(null, 100), e => e.Action == "undeprecate" && e.Kind == "feed-npm");
+        Assert.Equal(HttpStatusCode.OK, await Status(client, HttpMethod.Post, "/api/v1/admin/feeds/deprecation-a/deactivate", Admin));
+        Assert.Equal(HttpStatusCode.NotFound, await Change(a.Write, "{\"message\":\"disabled\"}"));
+    }
+
+    [Fact]
+    public void V14ToV15AddsAnnotationsWithoutChangingImmutableFeedAssets()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var cfg = host.Services.GetRequiredService<Settings>();
+        var db = new Database(cfg);
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        Assert.True(db.TryCreateDraftFeed(new FeedDefinition("old-npm", "npm", "hosted", "private", "Synthetic", false, at, at), "fixture"));
+        Assert.True(db.TrySetHostedFeedEnabled("old-npm", "npm", true, "fixture"));
+        var asset = new FeedAssetEntry("old-npm", "npm", Name + "/1.0.0", Name, "1.0.0",
+            FeedNpmEndpoints.MediaType, new string('a', 64), 10, at);
+        Assert.True(db.PublishFeedAsset(asset, "fixture"));
+        using (var connection = db.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TABLE feed_npm_deprecations; UPDATE packory_schema_version SET version=14 WHERE slot=1";
+            command.ExecuteNonQuery();
+        }
+        db.Initialize();
+        Assert.Empty(db.FeedNpmDeprecations("missing-feed", Name));
+        Assert.Equal(asset, db.GetFeedAsset("old-npm", "npm", asset.Path));
+        Assert.True(db.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "After migration", "fixture"));
+        using var verify = db.Open();
+        using var read = verify.CreateCommand();
+        read.CommandText = "SELECT version FROM packory_schema_version WHERE slot=1";
+        Assert.Equal(15, Convert.ToInt32(read.ExecuteScalar()));
+    }
+
+    [Fact]
+    public void PostgreSqlV14MigrationRetainsAssetsAndAuditedDeprecationsSurviveReopen()
+    {
+        var connection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connection)) return;
+        var schema = "npm_annotation_" + Guid.NewGuid().ToString("N")[..12];
+        using var admin = new Npgsql.NpgsqlConnection(connection);
+        admin.Open();
+        using (var create = new Npgsql.NpgsqlCommand("CREATE SCHEMA " + schema, admin)) create.ExecuteNonQuery();
+        try
+        {
+            var builder = new Npgsql.NpgsqlConnectionStringBuilder(connection) { SearchPath = schema };
+            var settings = new Settings { MetadataProvider = "postgresql", PostgresConnectionString = builder.ConnectionString };
+            var db = new PostgresDatabase(settings);
+            db.Initialize();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("old-npm", "npm", "hosted", "private", "Synthetic", false, at, at), "fixture"));
+            Assert.True(db.TrySetHostedFeedEnabled("old-npm", "npm", true, "fixture"));
+            var asset = new FeedAssetEntry("old-npm", "npm", Name + "/1.0.0", Name, "1.0.0", FeedNpmEndpoints.MediaType, new string('a', 64), 10, at);
+            Assert.True(db.PublishFeedAsset(asset, "fixture"));
+            using (var isolated = new Npgsql.NpgsqlConnection(builder.ConnectionString))
+            {
+                isolated.Open();
+                using var command = new Npgsql.NpgsqlCommand("DROP TABLE feed_npm_deprecations; UPDATE packory_schema_version SET version=14 WHERE slot=1", isolated);
+                command.ExecuteNonQuery();
+            }
+            db.Initialize();
+            Assert.Equal(asset, db.GetFeedAsset("old-npm", "npm", asset.Path));
+            Assert.True(db.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "Use the next release", "fixture"));
+            Assert.False(db.SetFeedNpmDeprecation("old-npm", Name, "2.0.0", "missing", "fixture"));
+            var reopened = new PostgresDatabase(settings);
+            reopened.Initialize();
+            Assert.Equal("Use the next release", reopened.FeedNpmDeprecations("old-npm", Name)["1.0.0"]);
+            Assert.True(reopened.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "", "fixture"));
+            Assert.Contains(reopened.AuditEvents(null, 100), row => row.Action == "undeprecate" && row.Kind == "feed-npm");
+            Assert.True(db.TrySetHostedFeedEnabled("old-npm", "npm", false, "fixture"));
+            Assert.False(db.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "disabled", "fixture"));
+        }
+        finally
+        {
+            using var drop = new Npgsql.NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", admin);
+            drop.ExecuteNonQuery();
+        }
+    }
+
     [Theory]
     [InlineData(Name)]
     [InlineData("private-example-demo")]

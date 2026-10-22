@@ -166,13 +166,13 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-03 | Minimal exact-commit CI index implemented; full version/provider/operation records and independent approval remain |
 | V5-10 | Requires selected real provider and authorized isolated resources; emulator success cannot close it |
 | V5-11 | Requires coordinated real-provider restore and measured RPO/RTO |
-| V5-12 | V14 PG/Moto recovery fixture added; historical release migration, crash matrix and operator rollback remain |
+| V5-12 | V14/V15 PG/Moto recovery fixtures, SQLite offline annotations and both-provider V14→V15 migration tests added; full crash/operator rollback acceptance remains |
 | V5-13 | Change-scoped authorization/integrity review only; comprehensive route/SSRF/audit review remains |
 | V5-14 | SHA-pinned Actions and source integrity exist; complete SBOM/signatures/license/vulnerability/provenance review remains |
 | V5-15 | Bounded .NET request/duration/denial instruments and admin process totals implemented; deployment load, alerts, rotations, incident and SLO measurements remain |
 | V5-16 | Blocked on applicable independent release acceptance; no tagged release authorized by a green CI index |
 | V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
-| V5-21 | Durable scoped npm tag API retained; broader client/concurrency/provenance/deprecation work remains |
+| V5-21 | Durable scoped tags and V15 per-version deprecation management implemented; native deprecate writer, broader clients and provenance remain |
 | V5-22 | Private V14 Cargo yank/unyank integrated; allowlisted mirror, broader clients and graduation evidence remain |
 | V5-23 | Private wheel PEP 658/714 sidecars implemented with exact-byte and authorization tests; broader versions/distributions/yank/proxy remain |
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
@@ -205,3 +205,15 @@ independent approval; #118 and #119 had no submitted reviews. Their existing
 individual green runs cannot substitute for integrated-branch qualification.
 
 **No artificial schedule:** no dates, percent complete or estimates are asserted without assigned capacity and measured throughput. Prioritize completion of the limited supported single-writer core over expanding the unchecked protocol inventory.
+
+## Subsequent implementation tranche
+
+Five functional packages extend V5-03 (redacted client/OS inventories),
+V5-15 (bounded .NET observations and admin totals), V5-23 (wheel metadata
+sidecars), V5-27 (private Raw keyset discovery) and V5-21 (durable private
+npm deprecation management). V5-12 adds V15 migration and both recovery
+profiles. These are bounded delivered features, not six fully graduated
+roadmap workstreams. Real-provider qualification, complete native protocol
+matrices, privileged browser identity/UI, signatures and the new ecosystem
+adapters remain open. The final independent security check is external to
+this implementation tranche and must not be represented as completed CI.

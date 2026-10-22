@@ -307,6 +307,30 @@ class MavenSnapshotTests(unittest.TestCase):
 
 
 class MavenOfflineTests(unittest.TestCase):
+    def test_v15_deprecation_messages_survive_offline_restore_and_cross_feed_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.populate(root / "source")
+            source = root / "source/packory.sqlite"
+            with sqlite3.connect(source) as connection:
+                connection.execute("UPDATE packory_schema_version SET version=15")
+                connection.execute("CREATE TABLE feed_npm_tags(feed_id TEXT,name TEXT,tag TEXT,version TEXT,deleted INTEGER,updated_at TEXT)")
+                connection.execute("CREATE TABLE feed_cargo_yanks(feed_id TEXT,name TEXT,version TEXT,yanked INTEGER,updated_at TEXT)")
+                connection.execute("CREATE TABLE feed_npm_deprecations(feed_id TEXT,name TEXT,version TEXT,message TEXT,updated_at TEXT)")
+                row, body = prior.package("alpha-npm", "npm")
+                connection.execute("INSERT INTO feed_assets VALUES(" + ",".join("?" for _ in snapshot.ASSET_COLUMNS) + ")",
+                                   tuple(row[name] for name in snapshot.ASSET_COLUMNS))
+                connection.execute("INSERT INTO feed_npm_deprecations VALUES(?,?,?,?,?)",
+                                   (row["feed_id"], row["name"], row["version"], "Use the next release", STAMP))
+            offline.create(root / "source", root / "backup")
+            offline.restore(root / "backup", root / "restored")
+            with sqlite3.connect(root / "restored/packory.sqlite") as connection:
+                self.assertEqual("Use the next release", connection.execute("SELECT message FROM feed_npm_deprecations").fetchone()[0])
+            with sqlite3.connect(source) as connection:
+                connection.execute("UPDATE feed_npm_deprecations SET feed_id='foreign-feed'")
+            with self.assertRaises(ValueError):
+                offline.create(root / "source", root / "invalid")
+
     def populate(self, root):
         root.mkdir()
         with sqlite3.connect(root / "packory.sqlite") as connection:

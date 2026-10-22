@@ -682,6 +682,46 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return true;
     }
 
+    public IReadOnlyDictionary<string, string> FeedNpmDeprecations(string feedId, string name)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT version,message FROM feed_npm_deprecations WHERE feed_id=$feed AND name=$name ORDER BY version";
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        using var reader = cmd.ExecuteReader();
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        while (reader.Read()) result.Add(reader.GetString(0), reader.GetString(1));
+        return result;
+    }
+
+    public bool SetFeedNpmDeprecation(string feedId, string name, string version, string message, string actor)
+    {
+        if (!FeedDefinition.ValidId(feedId) || !Names.Npm(name) || !FeedNpmEndpoints.ValidVersion(version) ||
+            !FeedNpmDeprecationEndpoints.ValidMessage(message)) throw new ArgumentException("Invalid npm deprecation.");
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        using var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO feed_npm_deprecations(feed_id,name,version,message,updated_at)
+            SELECT $feed,$name,$version,$message,$at
+            WHERE EXISTS(SELECT 1 FROM feeds WHERE id=$feed AND kind='npm' AND mode='hosted' AND visibility='private' AND enabled=1)
+              AND EXISTS(SELECT 1 FROM feed_assets WHERE feed_id=$feed AND kind='npm' AND name=$name AND version=$version AND path=$path)
+            ON CONFLICT(feed_id,name,version) DO UPDATE SET message=excluded.message,updated_at=excluded.updated_at
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.Parameters.AddWithValue("$version", version);
+        cmd.Parameters.AddWithValue("$message", message);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("$path", FeedNpmEndpoints.PackagePath(name, version));
+        if (cmd.ExecuteNonQuery() != 1) return false;
+        InsertAudit(db, tx, message.Length == 0 ? "undeprecate" : "deprecate", "feed-npm", feedId + "/" + name, version, actor);
+        tx.Commit();
+        return true;
+    }
+
     public bool? FeedCargoYanked(string feedId, string name, string version)
     {
         using var db = Open();

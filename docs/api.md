@@ -248,3 +248,12 @@ queries/cursors 400, and invalid committed metadata 503. See [Raw](raw-registry.
 `scope: in-process-since-start`, `requests`, `active`, `authorizationDenied`,
 `serverErrors` and `rateLimited`. No identifiers or request payloads are
 returned. The standard .NET `Packory` Meter supplies live counters/histograms.
+
+### npm deprecation management
+
+`PUT /feeds/{feedId}/npm/-/deprecations/{version}/{encodedName}` uses exact
+feed Publish authorization and accepts only a bounded JSON `message` string.
+An empty string clears the warning; unknown revision/disabled feed returns
+404, invalid/duplicate input 400, oversized body 413, and wrong media type
+415. Standard private npm reads expose the effective `deprecated` property.
+This route is Packory-specific; immutable package deletion stays disabled.

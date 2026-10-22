@@ -40,6 +40,7 @@ FEED_ASSET_TABLES = ("feed_assets",)
 FEED_OCI_TABLES = ("feed_oci_tags",)
 FEED_NPM_TAG_TABLES = ("feed_npm_tags",)
 FEED_CARGO_YANK_TABLES = ("feed_cargo_yanks",)
+FEED_NPM_DEPRECATION_TABLES = ("feed_npm_deprecations",)
 MAVEN_METADATA_TABLES = ("maven_metadata",)
 # Authoritative security and reviewed MCP metadata are independent of core package schema.
 # The v7 application initializes these tables, so an absent table must abort a new backup.
@@ -48,7 +49,7 @@ SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
     *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
-    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
+    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *FEED_NPM_DEPRECATION_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -59,6 +60,7 @@ ASSET_COLUMNS = ("feed_id", "kind", "path", "name", "version", "media_type",
 OCI_TAG_COLUMNS = ("feed_id", "name", "tag", "digest", "updated_at")
 NPM_TAG_COLUMNS = ("feed_id", "name", "tag", "version", "deleted", "updated_at")
 CARGO_YANK_COLUMNS = ("feed_id", "name", "version", "yanked", "updated_at")
+NPM_DEPRECATION_COLUMNS = ("feed_id", "name", "version", "message", "updated_at")
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
                     r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
                     r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
@@ -135,7 +137,7 @@ def database_schema_version(connection):
         return 0
     row = connection.execute(
         "SELECT version FROM packory_schema_version WHERE slot=1").fetchone()
-    if not row or type(row[0]) is not int or row[0] not in range(1, 15):
+    if not row or type(row[0]) is not int or row[0] not in range(1, 16):
         raise SnapshotError("Unknown Packory database schema version")
     return row[0]
 
@@ -160,6 +162,7 @@ def metadata_tables(connection):
             (FEED_OCI_TABLES if version >= 10 else ()) +
             (FEED_NPM_TAG_TABLES if version >= 13 else ()) +
             (FEED_CARGO_YANK_TABLES if version >= 14 else ()) +
+            (FEED_NPM_DEPRECATION_TABLES if version >= 15 else ()) +
             (MAVEN_METADATA_TABLES if version >= 11 else ()) +
             (SECURITY_REGISTRY_TABLES if version >= 7 else ()))
 
@@ -177,6 +180,9 @@ def feed_references(connection):
     if database_schema_version(connection) >= 14:
         references["cargo_yanks"] = rows("feed_cargo_yanks", CARGO_YANK_COLUMNS,
                                          'feed_id COLLATE "C",name COLLATE "C",version COLLATE "C"')
+    if database_schema_version(connection) >= 15:
+        references["npm_deprecations"] = rows("feed_npm_deprecations", NPM_DEPRECATION_COLUMNS,
+                                              'feed_id COLLATE "C",name COLLATE "C",version COLLATE "C"')
     return references
 
 
@@ -603,21 +609,26 @@ def verify_feed_references(manifest, folder):
     schema_version = manifest["postgres"].get("database_schema_version", 0)
     has_npm_tags = schema_version >= 13
     has_cargo_yanks = schema_version >= 14
+    has_deprecations = schema_version >= 15
     keys = {"assets", "oci_tags"}
     if has_npm_tags:
         keys.add("npm_tags")
     if has_cargo_yanks:
         keys.add("cargo_yanks")
+    if has_deprecations:
+        keys.add("npm_deprecations")
     if not isinstance(references, dict) or set(references) != keys:
         raise SnapshotError("Missing private feed reference inventory")
     assets, tags = references["assets"], references["oci_tags"]
     npm_tags = references.get("npm_tags", [])
     cargo_yanks = references.get("cargo_yanks", [])
+    deprecations = references.get("npm_deprecations", [])
     if (not isinstance(assets, list) or not isinstance(tags, list) or
-            not isinstance(npm_tags, list) or not isinstance(cargo_yanks, list) or
+            not isinstance(npm_tags, list) or not isinstance(cargo_yanks, list) or not isinstance(deprecations, list) or
             len(assets) != counts["feed_assets"] or len(tags) != counts["feed_oci_tags"] or
             (has_npm_tags and len(npm_tags) != counts["feed_npm_tags"]) or
-            (has_cargo_yanks and len(cargo_yanks) != counts["feed_cargo_yanks"])):
+            (has_cargo_yanks and len(cargo_yanks) != counts["feed_cargo_yanks"]) or
+            (has_deprecations and len(deprecations) != counts["feed_npm_deprecations"])):
         raise SnapshotError("Private feed reference inventory disagrees with metadata counts")
     current = {entry["key"]: entry for entry in manifest["objects"] if entry["is_latest"]}
     ledger, files = {}, {}
@@ -654,6 +665,20 @@ def verify_feed_references(manifest, folder):
                 pointer["deleted"] == 0 and
                 (pointer["feed_id"], pointer["name"], pointer["version"]) not in npm_assets):
             raise SnapshotError("npm dist-tag refers to missing/cross-feed revision")
+
+    seen_deprecations = set()
+    for pointer in deprecations:
+        if not isinstance(pointer, dict) or set(pointer) != set(NPM_DEPRECATION_COLUMNS):
+            raise SnapshotError("Invalid npm deprecation reference shape")
+        if any(not isinstance(pointer[k], str) for k in NPM_DEPRECATION_COLUMNS):
+            raise SnapshotError("Invalid npm deprecation field type")
+        identity = pointer["feed_id"], pointer["name"], pointer["version"]
+        message = pointer["message"]
+        if (identity not in npm_assets or identity in seen_deprecations or
+                len(message.encode("utf-16-le", errors="surrogatepass")) > 4096 or
+                any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in message) or not pointer["updated_at"]):
+            raise SnapshotError("Invalid or cross-feed npm deprecation reference")
+        seen_deprecations.add(identity)
 
     # V14 mutable Cargo yanks must reference immutable committed crate
     # revisions in exactly their own feed. Neither the bytes nor the original
@@ -790,7 +815,7 @@ def verify(folder):
             raise SnapshotError("V11 requires the Maven metadata snapshot format")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
-            if type(db_version) is not int or db_version not in range(15):
+            if type(db_version) is not int or db_version not in range(16):
                 raise SnapshotError("Unknown Packory database schema version")
             if db_version >= 10 and manifest["schema"] < 3:
                 raise SnapshotError("V10 requires the complete snapshot format")
@@ -823,6 +848,8 @@ def verify(folder):
                 required.update(FEED_NPM_TAG_TABLES)
             if db_version >= 14:
                 required.update(FEED_CARGO_YANK_TABLES)
+            if db_version >= 15:
+                required.update(FEED_NPM_DEPRECATION_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or

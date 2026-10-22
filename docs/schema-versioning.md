@@ -254,3 +254,15 @@ Native API and client instructions:
 [Cargo and PyPI](cargo-pypi.md). This does **not** implement crate owner
 management, crates.io mirrors, independent publisher signatures or complete
 Cargo interoperability.
+
+## V15 — private npm deprecation overlays
+
+V15 adds `feed_npm_deprecations(feed_id,name,version,message,updated_at)`
+with a composite key and protected feed reference. Update and audit share
+a transaction; a mutation requires an active private npm feed and exact
+committed immutable revision. Empty message is a durable clear tombstone.
+No blob key or immutable record changes. Both providers migrate forward
+from V14. Read replicas require the V15 table and marker. Offline SQLite
+and PostgreSQL/S3 recovery include the ledger, its fingerprints, exact feed
+revision bindings, bounded messages and clear tombstones. Restore an earlier
+complete backup for a downgrade; manually lowering the marker is unsupported.

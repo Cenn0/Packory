@@ -128,6 +128,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
     def test_v14_restores_exact_npm_tag_tombstones_and_cargo_yank_states(self):
         self.coordinated_restore(14)
 
+    def test_v15_restores_exact_deprecation_messages_and_clear_tombstones(self):
+        self.coordinated_restore(15)
+
     def coordinated_restore(self, version):
         import boto3
         import psycopg
@@ -162,12 +165,14 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                           *((*mod.RAW_TABLES, *mod.MAVEN_TABLES, *mod.GO_TABLES, *mod.SECURITY_REGISTRY_TABLES) if version >= 10 else ()),
                           *(mod.MAVEN_METADATA_TABLES if version >= 11 else ()),
                           *(mod.FEED_NPM_TAG_TABLES if version >= 13 else ()),
-                          *(mod.FEED_CARGO_YANK_TABLES if version >= 14 else ()))
+                          *(mod.FEED_CARGO_YANK_TABLES if version >= 14 else ()),
+                          *(mod.FEED_NPM_DEPRECATION_TABLES if version >= 15 else ()))
                 for name in tables:
                     if ((version >= 10 and name == "feeds") or
                             (version >= 11 and name in ("maven_assets", "maven_metadata")) or
                             (version >= 13 and name == "feed_npm_tags") or
-                            (version >= 14 and name == "feed_cargo_yanks")):
+                            (version >= 14 and name == "feed_cargo_yanks") or
+                            (version >= 15 and name == "feed_npm_deprecations")):
                         continue
                     source.execute(
                         "CREATE TABLE " + name + " (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
@@ -238,6 +243,16 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                             source.execute("INSERT INTO feed_cargo_yanks VALUES(%s,%s,%s,%s,%s)",
                                            (item["feed_id"], item["name"], item["version"],
                                             int(item["feed_id"].startswith("alpha-")), fixtures.STAMP))
+                if version >= 15:
+                    source.execute("""CREATE TABLE feed_npm_deprecations (
+                        feed_id TEXT NOT NULL REFERENCES feeds(id),name TEXT NOT NULL,
+                        version TEXT NOT NULL,message TEXT NOT NULL,updated_at TEXT NOT NULL,
+                        PRIMARY KEY(feed_id,name,version))""")
+                    for item, _ in feed_objects:
+                        if item["kind"] == "npm":
+                            source.execute("INSERT INTO feed_npm_deprecations VALUES(%s,%s,%s,%s,%s)",
+                                           (item["feed_id"], item["name"], item["version"],
+                                            "Use the next release" if item["feed_id"].startswith("alpha-") else "", fixtures.STAMP))
                 before = mod.metadata_fingerprints(source)
                 self.assertEqual(
                     set(before),
@@ -289,6 +304,9 @@ class CoordinatedRestoreIntegrationTests(unittest.TestCase):
                         self.assertEqual(4, len(references["npm_tags"]))
                         self.assertEqual(2, sum(row["deleted"] for row in references["npm_tags"]))
                         self.assertEqual([1, 0], [row["yanked"] for row in references["cargo_yanks"]])
+                    if version >= 15:
+                        self.assertEqual(["Use the next release", ""],
+                            [row["message"] for row in mod.feed_references(restored)["npm_deprecations"]])
                     if version >= 11:
                         self.assertEqual(saved["maven_references"], mod.maven_references(restored))
                         restored_metadata = mod.maven_references(restored)["metadata"]

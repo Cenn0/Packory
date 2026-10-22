@@ -36,7 +36,7 @@ class CapabilityConsistencyTests(unittest.TestCase):
         self.assertNotIn("pending CI and merge", ledger)
         self.assertIn("durable scoped mutable dist-tag API", english)
         self.assertIn("Feed-begrenzte Dist-Tags", german)
-        self.assertIn("Unpublish-/Deprecate-API fehlt weiterhin", german)
+        self.assertIn("Unpublish bleibt deaktiviert", german)
 
     def test_private_cargo_yank_is_scoped_without_claiming_full_graduation(self):
         capabilities = contents("src/Packory/RegistryCapabilities.cs")

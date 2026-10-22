@@ -6,13 +6,13 @@ namespace Packory;
 /// <summary>
 /// Explicit forward-only database versions. V11 introduced mutable Maven
 /// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers;
-/// V14 adds feed-local Cargo yank pointers.
+/// V14 adds feed-local Cargo yank pointers; V15 adds private npm deprecation overlays.
 /// Immutable global/private artifact rows and keys remain unchanged.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 14;
+    public const int Current = 15;
 
     private static int RequireKnown(object? value)
     {
@@ -250,6 +250,14 @@ public static class SchemaVersionGuard
         );
         """;
 
+    private const string FeedNpmDeprecationSchema = """
+        CREATE TABLE IF NOT EXISTS feed_npm_deprecations (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL,version TEXT NOT NULL,message TEXT NOT NULL,
+            updated_at TEXT NOT NULL,PRIMARY KEY(feed_id,name,version)
+        );
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -427,6 +435,13 @@ public static class SchemaVersionGuard
             cargoYanks.CommandText = FeedCargoYankSchema;
             cargoYanks.ExecuteNonQuery();
         }
+        if (version < 15)
+        {
+            using var deprecations = connection.CreateCommand();
+            deprecations.Transaction = tx;
+            deprecations.CommandText = FeedNpmDeprecationSchema;
+            deprecations.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -568,6 +583,11 @@ public static class SchemaVersionGuard
         {
             using var cargoYanks = new NpgsqlCommand(FeedCargoYankSchema, connection, tx);
             cargoYanks.ExecuteNonQuery();
+        }
+        if (version < 15)
+        {
+            using var deprecations = new NpgsqlCommand(FeedNpmDeprecationSchema, connection, tx);
+            deprecations.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
