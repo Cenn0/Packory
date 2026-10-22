@@ -5,13 +5,13 @@ namespace Packory;
 
 /// <summary>
 /// Explicit forward-only database versions. V11 introduced mutable Maven
-/// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers.
+/// metadata; V12 permits G-level plugin mappings; V13 adds private npm mutable tag pointers;\n/// V14 adds feed-local Cargo yank pointers.
 /// Immutable global/private artifact rows and keys remain unchanged.
 /// </summary>
 public static class SchemaVersionGuard
 {
     private const int Baseline = 1;
-    public const int Current = 13;
+    public const int Current = 14;
 
     private static int RequireKnown(object? value)
     {
@@ -237,6 +237,18 @@ public static class SchemaVersionGuard
         );
         """;
 
+    // V14: Yank is mutable sparse-index state, never an overwrite of the immutable
+    // Cargo crate bundle. The full coordinate remains feed-scoped and audited.
+    private const string FeedCargoYankSchema = """
+        CREATE TABLE IF NOT EXISTS feed_cargo_yanks (
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL, version TEXT NOT NULL,
+            yanked INTEGER NOT NULL CHECK(yanked IN (0,1)),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(feed_id,name,version)
+        );
+        """;
+
     private static readonly (string Id, string Kind, string Name)[] Defaults =
     [
         ("default-nuget", "nuget", "NuGet legacy"),
@@ -407,6 +419,13 @@ public static class SchemaVersionGuard
             npmTags.CommandText = FeedNpmTagSchema;
             npmTags.ExecuteNonQuery();
         }
+        if (version < 14)
+        {
+            using var cargoYanks = connection.CreateCommand();
+            cargoYanks.Transaction = tx;
+            cargoYanks.CommandText = FeedCargoYankSchema;
+            cargoYanks.ExecuteNonQuery();
+        }
         using (var stamp = connection.CreateCommand())
         {
             stamp.Transaction = tx;
@@ -543,6 +562,11 @@ public static class SchemaVersionGuard
         {
             using var npmTags = new NpgsqlCommand(FeedNpmTagSchema, connection, tx);
             npmTags.ExecuteNonQuery();
+        }
+        if (version < 14)
+        {
+            using var cargoYanks = new NpgsqlCommand(FeedCargoYankSchema, connection, tx);
+            cargoYanks.ExecuteNonQuery();
         }
         using (var stamp = new NpgsqlCommand(
             "UPDATE packory_schema_version SET version=@version,applied_at=@at WHERE slot=1 AND version=@previous",
