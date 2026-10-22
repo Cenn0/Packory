@@ -118,6 +118,55 @@ public sealed class MavenDeploymentTests
             root + ".jar", token, Encoding.UTF8.GetBytes(payload)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ParentInheritedPomPublishesOnlyMatchingEffectiveCoordinates(bool privateFeed)
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var prefix = "/maven/";
+        if (privateFeed)
+        {
+            var db = host.Services.GetRequiredService<IPackageDatabase>();
+            var at = DateTimeOffset.UtcNow.ToString("O");
+            Assert.True(db.TryCreateDraftFeed(new FeedDefinition("inherited-pom", "maven",
+                "hosted", "private", "Synthetic parent POM test", false, at, at), "synthetic"));
+            Assert.True(db.TrySetHostedFeedEnabled("inherited-pom", "maven", true, "synthetic"));
+            prefix = "/feeds/inherited-pom/maven/";
+        }
+        const string pom = """
+            <project xmlns="http://maven.apache.org/POM/4.0.0">
+              <modelVersion>4.0.0</modelVersion>
+              <parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>1.0</version></parent>
+              <artifactId>child</artifactId>
+            </project>
+            """;
+        var path = prefix + "org/example/child/1.0/child-1.0.pom";
+        Assert.Equal(HttpStatusCode.Created, await Status(client, HttpMethod.Put,
+            path, privateFeed ? Admin : Writer, Encoding.UTF8.GetBytes(pom)));
+        using var read = await client.SendAsync(Request(HttpMethod.Get,
+            path, privateFeed ? Admin : Reader));
+        Assert.Equal(Encoding.UTF8.GetBytes(pom), await read.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, await Status(client, HttpMethod.Put,
+            prefix + "org/example/child/1.1/child-1.1.pom",
+            privateFeed ? Admin : Writer, Encoding.UTF8.GetBytes(pom)));
+    }
+
+    [Theory]
+    [InlineData("<project><parent><groupId>org.example</groupId><artifactId>root</artifactId><version>1.0</version></parent><artifactId>child</artifactId></project>", true)]
+    [InlineData("<project><parent><groupId>org.other</groupId><artifactId>root</artifactId><version>1.0</version></parent><artifactId>child</artifactId></project>", false)]
+    [InlineData("<project><parent><groupId>org.example</groupId><artifactId>root</artifactId><version>2.0</version></parent><artifactId>child</artifactId></project>", false)]
+    [InlineData("<project><parent><groupId>org.example</groupId><artifactId>root</artifactId><version>1.0</version></parent><artifactId>child</artifactId><groupId>org.other</groupId></project>", false)]
+    [InlineData("<project><parent><groupId>org.example</groupId><artifactId>root</artifactId><version>1.0</version></parent><parent><groupId>org.example</groupId><artifactId>root</artifactId><version>1.0</version></parent><artifactId>child</artifactId></project>", false)]
+    [InlineData("<project><parent><groupId>org.example</groupId><groupId>org.example</groupId><artifactId>root</artifactId><version>1.0</version></parent><artifactId>child</artifactId></project>", false)]
+    [InlineData("<!DOCTYPE project [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><project>&x;</project>", false)]
+    public void EffectiveParentPomCoordinatesAreValidated(string xml, bool expected)
+    {
+        var coordinates = new MavenCoordinates.Artifact("org.example", "child", "1.0", null, "pom");
+        Assert.Equal(expected, MavenEndpoints.PomIdentityMatches(Encoding.UTF8.GetBytes(xml), coordinates));
+    }
+
     [Fact]
     public async Task ReleaseMetadataKeepsExactBytesChecksumsAndConditionalUpdates()
     {

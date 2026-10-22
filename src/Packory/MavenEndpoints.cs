@@ -49,7 +49,8 @@ public static class MavenEndpoints
         DateTimeOffset.TryParse(asset.CreatedAt, out _);
 
     // Maven POMs are XML. Parsing is bounded and DTD/external entity resolution is prohibited.
-    // Explicit GAV coordinates are required; parent-inherited G/V is a separate profile.
+    // Maven permits groupId/version inheritance from an explicit parent. Verify
+    // the effective coordinates without fetching parent files from untrusted URLs.
     // A timestamped filename still carries the base SNAPSHOT version inside its POM.
     public static bool PomIdentityMatches(ReadOnlyMemory<byte> bytes,
         MavenCoordinates.Artifact coordinates)
@@ -77,9 +78,34 @@ public static class MavenEndpoints
                 return fields.Length == 1 && fields[0].Name.Namespace == root.Name.Namespace
                     ? fields[0].Value : null;
             }
-            return Field("groupId") == coordinates.GroupId &&
+            var parents = root.Elements().Where(x => x.Name.LocalName == "parent").ToArray();
+            if (parents.Length > 1 || parents.Any(x => x.Name.Namespace != root.Name.Namespace))
+                return false;
+            var parent = parents.SingleOrDefault();
+            string? ParentField(string name)
+            {
+                if (parent is null) return null;
+                var fields = parent.Elements().Where(x => x.Name.LocalName == name).ToArray();
+                return fields.Length == 1 && fields[0].Name.Namespace == root.Name.Namespace &&
+                    !fields[0].HasElements ? fields[0].Value : null;
+            }
+            // Reject malformed/incomplete parents and duplicate or foreign identity nodes.
+            if (parent is not null && (!MavenCoordinates.ValidGroup(ParentField("groupId")) ||
+                !MavenCoordinates.ValidSegment(ParentField("artifactId")) ||
+                !MavenCoordinates.ValidSegment(ParentField("version"))))
+                return false;
+            foreach (var name in new[] { "groupId", "artifactId", "version" })
+            {
+                var nodes = root.Elements().Where(x => x.Name.LocalName == name).ToArray();
+                if (nodes.Length > 1 || nodes.Any(x => x.Name.Namespace != root.Name.Namespace ||
+                    x.HasElements)) return false;
+            }
+            foreach (var name in new[] { "groupId", "artifactId", "version" })
+                if (parent is not null && parent.Elements().Count(x => x.Name.LocalName == name) != 1)
+                    return false;
+            return (Field("groupId") ?? ParentField("groupId")) == coordinates.GroupId &&
                 Field("artifactId") == coordinates.ArtifactId &&
-                Field("version") == coordinates.Version;
+                (Field("version") ?? ParentField("version")) == coordinates.Version;
         }
         catch (XmlException) { return false; }
         catch (InvalidOperationException) { return false; }
