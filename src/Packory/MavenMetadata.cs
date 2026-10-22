@@ -84,7 +84,8 @@ public static class MavenMetadata
             return bytes.LongLength == entry.Size &&
                 Convert.ToBase64String(bytes) == entry.ContentBase64 &&
                 Convert.ToHexStringLower(SHA256.HashData(bytes)) == entry.Sha256 &&
-                TryParseAtPath(bytes, entry.Path, out _);
+                (TryParseAtPath(bytes, entry.Path, out _) ||
+                    MavenGroupMetadata.TryParseAtPath(bytes, entry.Path, out _));
         }
         catch (FormatException) { return false; }
     }
@@ -267,6 +268,8 @@ public static class MavenMetadata
         if (!ValidRecord(entry) || entry.Scope != "" &&
             db.Feed(entry.Scope) is not { Kind: "maven", Mode: "hosted", Visibility: "private" })
             return false;
+        if (MavenGroupMetadata.TryDocument(entry, out _))
+            return MavenGroupMetadata.TryReferencedPaths(entry, db, out paths);
         TryParseAtPath(Convert.FromBase64String(entry.ContentBase64), entry.Path, out var document);
         var coordinates = document!.Coordinates;
         var references = new HashSet<string>(StringComparer.Ordinal);

@@ -210,9 +210,25 @@ public static class MavenEndpoints
         ctx.Response.Headers.CacheControl = "private, no-store";
         ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
         var (path, algorithm) = SplitChecksum(requestedPath);
+        var groupEntry = db.GetMavenMetadata(scope, path);
+        if (MavenGroupMetadata.TryParsePath(path, out _) &&
+            MavenGroupMetadata.TryDocument(groupEntry, out _))
+        {
+            if (!MavenMetadata.ValidRecord(groupEntry) ||
+                groupEntry!.Size > cfg.MaxMetadataBytes ||
+                MavenGroupMetadata.PathConflicts(db, scope, path) ||
+                !MavenGroupMetadata.TryReferencedPaths(groupEntry, db, out _))
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            var groupBytes = Convert.FromBase64String(groupEntry.ContentBase64);
+            if (algorithm is not null) return Results.Text(Digest(groupBytes, algorithm), "text/plain");
+            ctx.Response.Headers.ETag = "\"" + groupEntry.Sha256 + "\"";
+            if (ctx.Request.Headers.IfNoneMatch.ToString() == ctx.Response.Headers.ETag.ToString())
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            return Results.Bytes(groupBytes, "application/xml");
+        }
         if (MavenMetadata.TryParsePath(path, out var coordinates) && coordinates is not null)
         {
-            var stored = db.GetMavenMetadata(scope, path);
+            var stored = groupEntry;
             byte[] bytes;
             if (stored is not null)
             {
@@ -294,9 +310,17 @@ public static class MavenEndpoints
             if (!MavenMetadata.ValidRecord(entry) || entry.Size > cfg.MaxMetadataBytes ||
                 !MavenMetadata.ReferencesValid(entry, db))
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-            MavenMetadata.TryParseAtPath(Convert.FromBase64String(entry.ContentBase64), path, out var document);
-            if (MavenMetadata.PathConflicts(db, scope, path, document!.Coordinates))
-                return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+            if (MavenGroupMetadata.TryDocument(entry, out _))
+            {
+                if (MavenGroupMetadata.PathConflicts(db, scope, path))
+                    return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+            }
+            else
+            {
+                MavenMetadata.TryParseAtPath(Convert.FromBase64String(entry.ContentBase64), path, out var document);
+                if (MavenMetadata.PathConflicts(db, scope, path, document!.Coordinates))
+                    return Results.Conflict(new { error = "Maven metadata path has conflicting identities" });
+            }
             expected = Digest(Convert.FromBase64String(entry.ContentBase64), algorithm);
         }
         else
@@ -324,6 +348,10 @@ public static class MavenEndpoints
         try { bytes = await BlobStore.ReadBoundedAsync(ctx.Request.Body, maximum, ctx.RequestAborted); }
         catch (PayloadTooLargeException)
         { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+        if (MavenGroupMetadata.TryParseAtPath(bytes, path, out var groupDocument) &&
+            groupDocument is not null)
+            return await PutGroupMetadata(scope, path, bytes, groupDocument,
+                cfg, db, blobs, locks, ctx);
         if (!MavenMetadata.TryParseAtPath(bytes, path, out var document) || document is null)
             return Results.BadRequest(new { error = "Invalid Maven repository metadata" });
         var coordinates = document.Coordinates;
@@ -367,12 +395,53 @@ public static class MavenEndpoints
         return previous is null ? Results.StatusCode(StatusCodes.Status201Created) : Results.NoContent();
     }
 
+    private static async Task<IResult> PutGroupMetadata(string scope, string path,
+        byte[] bytes, MavenGroupMetadata.Document document, Settings cfg,
+        IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx)
+    {
+        if (scope == "")
+            foreach (var plugin in document.Plugins)
+                if (Access.RequireNamespace(ctx, cfg, "maven",
+                    document.GroupId + "/" + plugin.ArtifactId) is { } denied) return denied;
+        var entry = new MavenMetadataEntry(scope, path, Convert.ToBase64String(bytes),
+            Digest(bytes, "sha256"), bytes.Length, DateTimeOffset.UtcNow.ToString("O"));
+        using var gate = await locks.AcquireAsync("maven-layout", scope, LayoutLockPath(path),
+            ctx.RequestAborted);
+        var previous = db.GetMavenMetadata(scope, path);
+        if (previous is not null && !MavenMetadata.ValidRecord(previous))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        if (MavenGroupMetadata.PathConflicts(db, scope, path))
+            return Results.Conflict(new { error = "Maven group metadata path collides with an artifact" });
+        var match = ctx.Request.Headers.IfMatch.ToString();
+        if (match != "" && (previous is null || match != "\"" + previous.Sha256 + "\""))
+            return Results.StatusCode(StatusCodes.Status412PreconditionFailed);
+        if (ctx.Request.Headers.IfNoneMatch.ToString() == "*" && previous is not null)
+            return Results.StatusCode(StatusCodes.Status412PreconditionFailed);
+        if (previous is not null && (!MavenGroupMetadata.TryDocument(previous, out var old) ||
+            !MavenGroupMetadata.Advances(old!, document)))
+            return Results.Conflict(new { error = "Maven plugin mapping would remove or reassign an existing prefix" });
+        if (!MavenGroupMetadata.TryReferencedPaths(entry, db, out var references))
+            return Results.Conflict(new { error = "Maven group metadata references unavailable plugin POMs" });
+        foreach (var pathToCheck in references)
+        {
+            var asset = Asset(db, scope, pathToCheck);
+            if (asset is null || await VerifiedFile(scope, pathToCheck, asset, cfg, blobs,
+                ctx.RequestAborted) is null)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+        if (!db.PutMavenMetadata(entry, Access.Actor(ctx), previous?.Sha256))
+            return Results.Conflict(new { error = "Maven metadata changed concurrently" });
+        ctx.Response.Headers.ETag = "\"" + entry.Sha256 + "\"";
+        return previous is null ? Results.StatusCode(StatusCodes.Status201Created) : Results.NoContent();
+    }
+
     internal static async Task<IResult> Write(string scope, string requestedPath,
         Settings cfg, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks,
         HttpContext ctx)
     {
         var (path, algorithm) = SplitChecksum(requestedPath);
-        var metadata = MavenMetadata.TryParsePath(path, out _);
+        var metadata = MavenMetadata.TryParsePath(path, out _) ||
+            MavenGroupMetadata.TryParsePath(path, out _);
         MavenCoordinates.Artifact? coordinate = null;
         if (!metadata && !ValidAssetPath(path, out coordinate))
             return Results.BadRequest(new { error = "Unsupported Maven path" });
@@ -380,24 +449,26 @@ public static class MavenEndpoints
         {
             // Artifact names ending in -SNAPSHOT are valid. Resolve metadata
             // identity from exact XML, or an existing record for sidecars.
-            if (scope == "")
+            if (scope == "" && algorithm is not null)
             {
-                var candidates = MavenMetadata.PathCandidates(path);
+                // Sidecars have no XML body from which to identify the target.
+                // Authorize against the *stored* identity, never the ambiguous path.
                 var stored = db.GetMavenMetadata(scope, path);
-                if (algorithm is not null && stored is not null && MavenMetadata.ValidRecord(stored))
+                if (MavenGroupMetadata.TryDocument(stored, out var group))
                 {
-                    MavenMetadata.TryParseAtPath(Convert.FromBase64String(stored.ContentBase64), path, out var doc);
-                    candidates = [doc!.Coordinates];
+                    foreach (var plugin in group!.Plugins)
+                        if (Access.RequireNamespace(ctx, cfg, "maven",
+                            group.GroupId + "/" + plugin.ArtifactId) is { } denied) return denied;
                 }
-                IResult? namespaceDenied = null;
-                var permitted = false;
-                foreach (var candidate in candidates)
+                else if (stored is not null && MavenMetadata.ValidRecord(stored) &&
+                    MavenMetadata.TryParseAtPath(Convert.FromBase64String(stored.ContentBase64),
+                        path, out var doc))
                 {
-                    namespaceDenied = Access.RequireNamespace(ctx, cfg, "maven",
-                        candidate.GroupId + "/" + candidate.ArtifactId);
-                    if (namespaceDenied is null) { permitted = true; break; }
+                    if (Access.RequireNamespace(ctx, cfg, "maven",
+                        doc!.Coordinates.GroupId + "/" + doc.Coordinates.ArtifactId)
+                        is { } denied) return denied;
                 }
-                if (!permitted) return namespaceDenied!;
+                else if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
             }
             return algorithm is not null
                 ? await VerifySidecar(scope, path, algorithm, true, cfg, db, blobs, ctx)
