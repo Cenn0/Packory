@@ -70,7 +70,17 @@ public static class FeedCargoEndpoints
                         db, blobs, cfg.MaxArtifactBytes, ctx.RequestAborted);
                     if (package is null || !ValidMetadata(package.Metadata, name, entry.Version, package.Payload))
                         return Results.StatusCode(503);
-                    rows.Add(package.Metadata.GetRawText());
+                    // The immutable bundle is never rewritten for yank/unyank.
+                    // Overlay only the exact feed-local mutable index flag.
+                    var overrideYanked = db.FeedCargoYanked(feedId, name, entry.Version);
+                    if (overrideYanked is { } state)
+                    {
+                        var row = JsonNode.Parse(package.Metadata.GetRawText())?.AsObject()
+                            ?? throw new InvalidDataException("Invalid private Cargo index JSON");
+                        row["yanked"] = state;
+                        rows.Add(row.ToJsonString());
+                    }
+                    else rows.Add(package.Metadata.GetRawText());
                 }
                 var data = string.Join("\n", rows) + "\n";
                 var etag = "\"" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(data))) + "\"";
@@ -152,6 +162,35 @@ public static class FeedCargoEndpoints
             catch (InvalidDataException) { return Results.BadRequest(new { error = "Invalid Cargo archive" }); }
             catch (PayloadTooLargeException) { return Results.StatusCode(413); }
         }).RequireRateLimiting("publish");
+
+        app.MapDelete("/feeds/{feedId}/cargo/api/v1/crates/{name}/{version}/yank",
+            async (string feedId, string name, string version, Settings cfg,
+                IPackageDatabase db, ArtifactLocks locks, HttpContext ctx) =>
+                await ChangeYank(feedId, name, version, true, cfg, db, locks, ctx))
+            .RequireRateLimiting("publish");
+
+        app.MapPut("/feeds/{feedId}/cargo/api/v1/crates/{name}/{version}/unyank",
+            async (string feedId, string name, string version, Settings cfg,
+                IPackageDatabase db, ArtifactLocks locks, HttpContext ctx) =>
+                await ChangeYank(feedId, name, version, false, cfg, db, locks, ctx))
+            .RequireRateLimiting("publish");
+    }
+
+    private static async Task<IResult> ChangeYank(string feedId, string name,
+        string version, bool yanked, Settings cfg, IPackageDatabase db,
+        ArtifactLocks locks, HttpContext ctx)
+    {
+        if (Access.RequireFeed(ctx, cfg, feedId, publish: true) is { } denied)
+            return denied;
+        if (!Active(db, feedId)) return Results.NotFound();
+        if (!CargoEndpoints.IsName(name) || !IsVersion(version))
+            return Results.BadRequest(new { error = "Invalid Cargo coordinates" });
+        using var lease = await locks.AcquireAsync("feed-cargo-yank",
+            feedId + "/" + name, AssetPath(name, version), ctx.RequestAborted);
+        if (!db.SetFeedCargoYanked(feedId, name, version, yanked, Access.Actor(ctx)))
+            return Results.NotFound(new { error = "Unknown private Cargo version" });
+        ctx.Response.Headers.CacheControl = "private, no-store";
+        return Results.Json(new { ok = true });
     }
 
     private static string? String(JsonElement value, string name) =>
