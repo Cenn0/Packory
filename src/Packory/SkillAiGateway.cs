@@ -28,6 +28,9 @@ public sealed class SkillAiTransport : ISkillAiTransport
         if (address.ScopeIdIfIpv6() != 0 || Forbidden.Any(n => n.Contains(address))) return false;
         if (Private.Any(n => n.Contains(address)))
             return (endpoint.AllowedPrivateCidrs ?? []).Any(n => System.Net.IPNetwork.Parse(n).Contains(address));
+        // A local-model profile must never silently exfiltrate to a public IP,
+        // even if an operator configures a misleading HTTP hostname.
+        if (endpoint.Provider == "ollama") return false;
         // IPv6 outside global unicast is not an Internet provider destination.
         return address.AddressFamily == AddressFamily.InterNetwork || System.Net.IPNetwork.Parse("2000::/3").Contains(address);
     }
