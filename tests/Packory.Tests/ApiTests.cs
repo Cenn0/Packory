@@ -99,6 +99,43 @@ public sealed class ApiTests
     }
 
     [Theory]
+    [InlineData("GET", "/nuget/v3/index.json")]
+    [InlineData("GET", "/nuget/v3/search?q=synthetic")]
+    [InlineData("PUT", "/nuget/v3/push")]
+    public async Task NativeGlobalNugetChallengesOnlyUnauthenticatedRequests(
+        string method, string path)
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+
+        using var missing = await client.SendAsync(new HttpRequestMessage(
+            new HttpMethod(method), path));
+        Assert.Equal(HttpStatusCode.Unauthorized, missing.StatusCode);
+        Assert.Contains(missing.Headers.WwwAuthenticate,
+            value => value.Scheme == "Basic" && value.Parameter == "realm=\"Packory NuGet\"");
+
+        // A valid read-only token still cannot publish: the retry challenge
+        // must not transform a 403 into a request for more credentials.
+        using var readOnly = await client.SendAsync(WithToken(
+            new HttpMethod(method), path, token: ReadToken));
+        if (method == "PUT")
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, readOnly.StatusCode);
+            Assert.Empty(readOnly.Headers.WwwAuthenticate);
+        }
+        else
+            Assert.Equal(HttpStatusCode.OK, readOnly.StatusCode);
+
+        // A native Basic credential is accepted only if it matches an
+        // existing Packory token; the protocol has no anonymous fallback.
+        using var basic = new HttpRequestMessage(HttpMethod.Get, "/nuget/v3/index.json");
+        basic.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes("synthetic:" + ReadToken)));
+        using var success = await client.SendAsync(basic);
+        Assert.Equal(HttpStatusCode.OK, success.StatusCode);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public void ManualScanIsolationPreservesSecurityEnforcementAndDefaultWorker(bool backgroundSkillScanning)
