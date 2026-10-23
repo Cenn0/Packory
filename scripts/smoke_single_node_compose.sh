@@ -48,7 +48,7 @@ done
 export PACKORY_ADMIN_TOKEN_SOURCE="$WORK/admin"
 export PACKORY_READ_TOKEN_SOURCE="$WORK/read"
 export PACKORY_WRITE_TOKEN_SOURCE="$WORK/write"
-export PACKORY_PUBLIC_BASE_URL="http://localhost:8080"
+export PACKORY_PUBLIC_BASE_URL="http://127.0.0.1:8080"
 
 # Override only the application image with the locally built CI image.
 # The scanner service is deliberately not started: this is NOT worker testing.
@@ -91,6 +91,9 @@ test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-st
 curl --noproxy '*' -fsS --max-time 10 -K "$WORK/read.curl" "$ARTIFACT" -o "$WORK/download-1"
 cmp "$WORK/payload" "$WORK/download-1"
 
+# Confirm the write token can read the native index before invoking NuGet,
+# isolating application auth from client-side source credential propagation.
+test "$(code -K "$WORK/write.curl" "$BASE/nuget/v3/index.json")" = "200"
 # Publish and consume using real .NET and npm clients with fresh caches.
 native_publish
 native_consume before
