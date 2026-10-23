@@ -8,6 +8,12 @@ All endpoints are relative to `PACKORY_PUBLIC_BASE_URL`. Example values assume `
 
 ## Authentication
 
+The global NuGet v3 routes return a `WWW-Authenticate: Basic` challenge on
+unauthenticated **401** responses so native `dotnet`/NuGet clients can retry
+with configured source credentials. A valid read-only token still receives
+**403** when attempting a publish; no anonymous access or additional grants
+are introduced. Basic credentials require TLS outside isolated loopback tests.
+
 Three optional environment variables define independent static permissions:
 
 | Variable | Allowed operations |
