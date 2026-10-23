@@ -182,7 +182,9 @@ restore_into_fresh_project() {
   test "$source_volume" != "$target_volume"
   # Archive mode preserves the non-root application ownership in the new volume.
   sudo chown -R 1654:1654 "$WORK/$suffix"
-  docker cp -a "$WORK/$suffix/." "$cid:/data"
+  # The runner no longer owns mode-0700 restore directories after chown;
+  # root must read them while preserving UID/GID for the non-root application.
+  sudo docker cp -a "$WORK/$suffix/." "$cid:/data"
   compose start packory >/dev/null
   ready
   curl --noproxy '*' --cacert "$SSL_CERT_FILE" -fsS --max-time 10 \
