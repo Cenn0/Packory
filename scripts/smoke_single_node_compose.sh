@@ -33,8 +33,8 @@ trap cleanup EXIT
 # arguments, output and Git; allow the non-root app UID/GID to read the mounts.
 for role in admin read write; do
   openssl rand -hex 32 >"$WORK/$role"
-  sudo chown 0:1654 "$WORK/$role"
   chmod 0640 "$WORK/$role"
+  sudo chown 0:1654 "$WORK/$role"
 done
 export PACKORY_ADMIN_TOKEN_SOURCE="$WORK/admin"
 export PACKORY_READ_TOKEN_SOURCE="$WORK/read"
