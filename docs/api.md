@@ -59,6 +59,14 @@ Private feed tests additionally exercise independently authorized same-name revi
 - Search (indexed packages): `GET /nuget/v3/search?q={text}&skip=0&take=20`
 - Hosted publish: `PUT /nuget/v3/push` with multipart/form-data and `X-NuGet-ApiKey`
 
+Global and private NuGet package parsing uses a bounded ZIP profile: at most
+10,000 entries, a central directory no larger than 4 MiB, and exactly one root
+`.nuspec` whose actual decompressed bytes are at most 1 MiB. Multi-disk and
+ZIP64 directory trailers are rejected. These limits apply to hosted uploads,
+cached upstream packages and later nuspec reads; clients whose packages exceed
+the profile need a separate compatibility review rather than a larger upload
+limit alone.
+
 Verify end-to-end using an **isolated** NuGet.Config to ensure the SDK does not silently fall back to nuget.org:
 
 ```xml

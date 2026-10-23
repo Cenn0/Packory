@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Buffers.Binary;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
@@ -8,6 +9,10 @@ namespace Packory;
 
 public static class NuGetEndpoints
 {
+    private const int MaxZipEntries = 10_000;
+    private const int MaxCentralDirectoryBytes = 4 * 1024 * 1024;
+    private const int MaxNuspecBytes = 1024 * 1024;
+
     public static void Map(WebApplication app)
     {
         app.MapGet("/nuget/v3/index.json", (Settings settings, HttpContext ctx) =>
@@ -250,13 +255,21 @@ public static class NuGetEndpoints
 
     public static Nuspec ReadNuspec(Stream stream)
     {
+        var declaredEntries = PreflightZipDirectory(stream);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
-        var entries = archive.Entries.Where(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) && !e.FullName.Contains('/')).ToList();
-        if (entries.Count != 1 || entries[0].Length > 1024 * 1024) throw new InvalidDataException("Expected one root nuspec");
+        if (archive.Entries.Count != declaredEntries) throw new InvalidDataException("Invalid NuGet ZIP directory count");
+        var entries = archive.Entries.Where(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) && !e.FullName.Contains('/')).Take(2).ToArray();
+        if (entries.Length != 1 || entries[0].Length > MaxNuspecBytes) throw new InvalidDataException("Expected one root nuspec");
         using var input = entries[0].Open();
         using var bounded = new MemoryStream();
-        input.CopyTo(bounded);
-        if (bounded.Length > 1024 * 1024) throw new InvalidDataException("Nuspec too large");
+        var chunk = new byte[81920];
+        int read;
+        while ((read = input.Read(chunk)) > 0)
+        {
+            if (bounded.Length + read > MaxNuspecBytes) throw new InvalidDataException("Nuspec too large");
+            bounded.Write(chunk, 0, read);
+        }
+        if (bounded.Length != entries[0].Length) throw new InvalidDataException("Nuspec length mismatch");
         var xml = bounded.ToArray();
         using var reader = XmlReader.Create(new MemoryStream(xml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
         var doc = XDocument.Load(reader);
@@ -265,5 +278,70 @@ public static class NuGetEndpoints
         var id = value("id"); var version = value("version");
         if (!Names.Nuget(id) || !Names.Version(version)) throw new InvalidDataException("Invalid NuGet identity");
         return new Nuspec(id, version, value("description")[..Math.Min(value("description").Length, 2000)], xml);
+    }
+
+    private static int PreflightZipDirectory(Stream stream)
+    {
+        // Every production caller supplies a seekable package from a bounded
+        // upload or immutable blob. Check the tiny ZIP trailer before asking
+        // ZipArchive to allocate an entry object for every directory record.
+        if (!stream.CanSeek || stream.Position != 0 || stream.Length < 22)
+            throw new InvalidDataException("Invalid NuGet ZIP stream");
+        var tailLength = (int)Math.Min(stream.Length, 22L + ushort.MaxValue);
+        var tail = new byte[tailLength];
+        stream.Seek(-tailLength, SeekOrigin.End);
+        try { stream.ReadExactly(tail); }
+        catch (EndOfStreamException error)
+        { throw new InvalidDataException("Truncated NuGet ZIP directory", error); }
+        for (var offset = tailLength - 22; offset >= 0; offset--)
+        {
+            var trailer = tail.AsSpan(offset);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(trailer) != 0x06054b50 ||
+                offset + 22 + BinaryPrimitives.ReadUInt16LittleEndian(trailer[20..]) != tailLength)
+                continue;
+            var disk = BinaryPrimitives.ReadUInt16LittleEndian(trailer[4..]);
+            var directoryDisk = BinaryPrimitives.ReadUInt16LittleEndian(trailer[6..]);
+            var entriesOnDisk = BinaryPrimitives.ReadUInt16LittleEndian(trailer[8..]);
+            var entries = BinaryPrimitives.ReadUInt16LittleEndian(trailer[10..]);
+            var directorySize = BinaryPrimitives.ReadUInt32LittleEndian(trailer[12..]);
+            var directoryOffset = BinaryPrimitives.ReadUInt32LittleEndian(trailer[16..]);
+            var trailerPosition = stream.Length - tailLength + offset;
+            if (disk != 0 || directoryDisk != 0 || entries is 0 or ushort.MaxValue ||
+                entriesOnDisk != entries || entries > MaxZipEntries ||
+                directorySize is 0 or uint.MaxValue || directorySize > MaxCentralDirectoryBytes ||
+                directoryOffset == uint.MaxValue ||
+                (ulong)directoryOffset + directorySize != (ulong)trailerPosition)
+                throw new InvalidDataException("NuGet ZIP directory exceeds bounded profile");
+            var directory = new byte[(int)directorySize];
+            stream.Position = directoryOffset;
+            try { stream.ReadExactly(directory); }
+            catch (EndOfStreamException error)
+            { throw new InvalidDataException("Truncated NuGet ZIP directory", error); }
+            var position = 0;
+            var actualEntries = 0;
+            while (position < directory.Length)
+            {
+                var record = directory.AsSpan(position);
+                if (record.Length < 46 || BinaryPrimitives.ReadUInt32LittleEndian(record) != 0x02014b50)
+                    throw new InvalidDataException("Invalid NuGet ZIP directory record");
+                var nameBytes = BinaryPrimitives.ReadUInt16LittleEndian(record[28..]);
+                var extraBytes = BinaryPrimitives.ReadUInt16LittleEndian(record[30..]);
+                var commentBytes = BinaryPrimitives.ReadUInt16LittleEndian(record[32..]);
+                var recordBytes = 46 + nameBytes + extraBytes + commentBytes;
+                if (recordBytes > record.Length ||
+                    BinaryPrimitives.ReadUInt16LittleEndian(record[34..]) != 0 ||
+                    BinaryPrimitives.ReadUInt32LittleEndian(record[20..]) == uint.MaxValue ||
+                    BinaryPrimitives.ReadUInt32LittleEndian(record[24..]) == uint.MaxValue)
+                    throw new InvalidDataException("NuGet ZIP directory record exceeds bounded profile");
+                position += recordBytes;
+                if (++actualEntries > MaxZipEntries)
+                    throw new InvalidDataException("NuGet ZIP contains too many entries");
+            }
+            if (actualEntries != entries)
+                throw new InvalidDataException("NuGet ZIP directory count mismatch");
+            stream.Position = 0;
+            return entries;
+        }
+        throw new InvalidDataException("NuGet ZIP directory trailer missing");
     }
 }
