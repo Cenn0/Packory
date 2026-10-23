@@ -50,6 +50,7 @@ jobs:
           python3 -m unittest discover -s tests -p test_qualification_gate.py -v
           python3 -m unittest discover -s tests -p test_offline_backup.py -v
           python3 -m unittest discover -s tests -p test_maven_snapshot.py -v
+          python3 -m unittest discover -s tests -p test_maven_bootstrap.py -v
       - name: Verify fail-closed signed production release evidence checks (synthetic fixtures)
         run: python3 -m unittest discover -s tests -p test_release_evidence.py -v
       - name: Validate source evidence integrity verifier (synthetic only)

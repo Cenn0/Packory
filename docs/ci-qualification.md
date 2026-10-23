@@ -95,3 +95,11 @@ exact restored metadata fingerprints and reference inventories. This is
 emulator/tooling acceptance; it does not establish a real S3 provider's
 retention semantics or native client operation against restored production
 infrastructure.
+
+Public Maven tooling bootstrap retries only recognized transport failures and
+HTTP 429/502/503/504, including Maven 3.10's `HTTP Status: 429` spelling. At most
+three attempts use 15/30-second backoff and `-U` so cached failed transfers
+cannot suppress the next network attempt. Missing artifacts (404), compiler and
+validation failures do not qualify for retry. The hosted/private protocol
+assertions and checksum gates are unchanged; persistent upstream throttling
+still fails qualification rather than producing a pass.
