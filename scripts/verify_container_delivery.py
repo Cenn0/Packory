@@ -37,7 +37,7 @@ class RegistryRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         target = urllib.parse.urlsplit(newurl)
         if (target.scheme != 'https' or target.hostname != 'pkg-containers.githubusercontent.com'
-                or target.port not in {None, 443} or target.username or target.password or target.fragment
+                or target.port not in {None, 443} or target.username is not None or target.password is not None or target.fragment
                 or '/blobs/' not in urllib.parse.urlsplit(req.full_url).path):
             raise Blocked('unexpected_registry_redirect')
         # Create a new request: the anonymous registry bearer must not follow to the CDN.

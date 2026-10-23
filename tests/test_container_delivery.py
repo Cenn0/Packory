@@ -116,7 +116,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertFalse(result.has_header('Authorization'))
         for url in ('http://pkg-containers.githubusercontent.com/blob', 'https://example.invalid/blob',
                     'https://pkg-containers.githubusercontent.com:444/blob',
-                    'https://synthetic@pkg-containers.githubusercontent.com/blob'):
+                    'https://@pkg-containers.githubusercontent.com/blob'):
             with self.subTest(url=url), self.assertRaises(m.Blocked):
                 handler.redirect_request(req, None, 307, '', {}, url)
 
