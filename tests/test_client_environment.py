@@ -11,6 +11,22 @@ spec.loader.exec_module(mod)
 
 
 class ClientEnvironmentTests(unittest.TestCase):
+    def test_daemon_compose_and_tls_versions_are_separate_from_cli(self):
+        versions = {
+            ("docker", "--version"): "Docker version 28.5.1, build synthetic\n",
+            ("docker", "version", "--format", "{{.Server.Version}}"): "28.4.0\n",
+            ("docker", "compose", "version", "--short"): "v2.40.1\n",
+            ("openssl", "version"): "OpenSSL 3.0.13 30 Jan 2024 (Library: OpenSSL 3.0.13)\n",
+        }
+        def run(command, **kwargs):
+            if tuple(command) not in versions:
+                raise FileNotFoundError()
+            return SimpleNamespace(returncode=0, stdout=versions[tuple(command)])
+        result = mod.collect("a" * 40, run)["clients"]
+        for name, version in (("docker", "28.5.1"), ("docker_engine", "28.4.0"),
+                              ("docker_compose", "2.40.1"), ("openssl", "3.0.13")):
+            self.assertEqual({"status": "observed", "version": version}, result[name])
+
     def test_only_parsed_versions_are_exported(self):
         private = "private" + "@" + "private.example"
         def run(command, **kwargs):

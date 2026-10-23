@@ -30,29 +30,54 @@ This repository does not execute or schedule those operations automatically.
 
 ## Automated CI subset (disposable loopback, not an operator drill)
 
-The `Build Docker image` CI job now starts the **locally built application
-image** via `compose.secrets.yaml` and a temporary Compose override (no
-remote image pull for Packory). It creates three independent ephemeral token
-files with non-root group-read permissions, exercises readiness, negative
-anonymous/invalid/read-only authorization, publishes and consumes one
-synthetic immutable Raw artifact **and native NuGet/npm packages**, forces
-container recreation against the same isolated named volume, then verifies
-Raw/NuGet/npm bytes with fresh native-client caches and a repeated Raw write
-conflict. A unique CI Compose project is deleted with
-`down --volumes` in the cleanup trap. Credentials, paths and full container
-logs are deliberately not exported in the public test report.
+The `Build Docker image` CI job builds `packory:ci` from the proposed source
+and starts it with file-mounted credentials in a uniquely named Compose project.
+It runs the following actual operations; check the job result for the exact
+commit before claiming they passed:
+
+1. Generate a one-day synthetic CA/server certificate with an IP SAN. Mount
+   the PFX read-only for non-root Kestrel; bind HTTP and HTTPS to loopback only.
+   Trust the CA **only in fixture processes**, using curl `--cacert`, Linux
+   .NET/OpenSSL's `SSL_CERT_FILE`/`SSL_CERT_DIR`, and npm `cafile` with
+   `strict-ssl=true`. No system trust-store change or TLS verification bypass.
+2. Check HTTPS liveness/readiness, reject wrong-root and wrong-peer-name
+   connections with curl's certificate error **60**, and exercise denied
+   anonymous/invalid/read-only credentials.
+3. Publish/consume synthetic Raw, NuGet and npm packages. Check original NuGet
+   package bytes/SHA-256 and npm tarball SHA-512 against the HTTPS-origin
+   lockfile. Force container recreation, use fresh native caches and `npm ci`,
+   and verify byte equality plus immutable-write conflicts.
+4. Gracefully stop the sole writer and confirm clean exit. Export its complete
+   mounted data tree, checkpoint **only the offline exported copy**, then run
+   `offline_backup.py create` and `verify`. Never remove a WAL to suppress an
+   incomplete database snapshot.
+5. Restore into a **new Compose project and distinct data volume** before any
+   writer starts. Preserve non-root ownership, repeat native HTTPS consumption
+   with fresh caches, and compare the original artifact bytes.
+6. Publish one post-backup Raw revision, stop that restored installation, and
+   restore the original backup into a third project/volume. The original
+   packages must match and the post-backup revision must be absent. This proves
+   **same-image, same-schema point-in-time rollback by restore**, not a schema
+   downgrade or prior-release upgrade.
+
+The cleanup trap removes only the three fixture projects/volumes and the private
+`mktemp` directory. No existing installation is selected by a script parameter.
+A seven-day `container-client-environment-<SHA>-<attempt>` Actions artifact
+records allowlisted runner, native client, Docker CLI/**daemon**, Compose and
+OpenSSL versions; absent tools are explicit, and no raw logs or credential
+material are uploaded. This version inventory is not proof of execution by itself.
 
 Run only on a **dedicated disposable CI runner** with Docker and passwordless
-local `sudo`; the local image must first be built as `packory:ci`.
-Never run this resource-deleting fixture against an existing installation.
-This is a CI integration test of the application container, file-backed
-secret readability and native NuGet/npm client persistence on **HTTP loopback**.
-The SkillSpector service is intentionally not started. No TLS is involved:
-the test does **not** establish #131 reverse-proxy operation, #133 NuGet/npm
-**HTTPS** workflows, worker survival, daemon/host reboot persistence, host
-capacity, offline backup, isolated restore, upgrade/rollback or production
-readiness.
-Those remain independently required below, with actual sanitized evidence.
+local `sudo`; first build the local application image as `packory:ci`.
+The scanner is intentionally not started. TLS terminates in **Kestrel**, so this
+fixture does **not** qualify Nginx/Nginx Proxy Manager, scanner failure, host or
+daemon reboot, resource capacity, a previous-release schema upgrade, real
+provider recovery or production readiness. Those acceptance cases stay open.
+The test certificate/key must never be reused outside the disposable fixture.
+
+Primary configuration references, checked 23 October 2026:
+[Microsoft ASP.NET Core 10 container HTTPS](https://learn.microsoft.com/en-us/aspnet/core/security/docker-compose-https?view=aspnetcore-10.0)
+and [.NET Linux root-certificate locations](https://learn.microsoft.com/en-us/dotnet/standard/security/cross-platform-cryptography#trusted-root-certificate-locations-on-linux).
 
 ## Disposable-host acceptance sequence
 

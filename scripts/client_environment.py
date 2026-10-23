@@ -22,6 +22,9 @@ CLIENTS = {
     "maven": (["mvn", "--version"], r"^Apache Maven " + VERSION + r"(?:\s|$)"),
     "gradle": (["gradle", "--version"], r"^Gradle " + VERSION + r"\s*$"),
     "docker": (["docker", "--version"], r"^Docker version " + VERSION + r"(?:,|\s|$)"),
+    "docker_engine": (["docker", "version", "--format", "{{.Server.Version}}"], r"^" + VERSION + r"\s*$"),
+    "docker_compose": (["docker", "compose", "version", "--short"], r"^v?" + VERSION + r"\s*$"),
+    "openssl": (["openssl", "version"], r"^OpenSSL " + VERSION + r"(?:\s|$)"),
     "helm": (["helm", "version", "--short"], r"^v" + VERSION + r"\s*$"),
     "curl": (["curl", "--version"], r"^curl " + VERSION + r"(?:\s|$)"),
 }

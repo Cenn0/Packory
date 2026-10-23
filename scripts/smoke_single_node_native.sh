@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sourced by smoke_single_node_compose.sh on an isolated disposable CI host.
 # Native NuGet and npm clients prove published bytes survive container recreation.
-# HTTP loopback only: this is NOT TLS, host reboot or disaster recovery evidence.
+# The caller supplies BASE and a process-local TLS trust bundle for HTTPS.
+# This is NOT host reboot, schema upgrade or production recovery evidence.
 
 native_prepare() {
   NATIVE_WORK="$WORK/native"
@@ -47,7 +48,7 @@ XML
     cat >"$NATIVE_WORK/NuGet.$role.Config" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
-  <packageSources><clear /><add key="packory" value="http://127.0.0.1:8080/nuget/v3/index.json" allowInsecureConnections="true" /></packageSources>
+  <packageSources><clear /><add key="packory" value="$BASE/nuget/v3/index.json" allowInsecureConnections="false" /></packageSources>
   <packageSourceCredentials><packory>
     <add key="Username" value="synthetic" />
     <add key="ClearTextPassword" value="$(cat "$WORK/$role")" />
@@ -66,8 +67,8 @@ JSON
 JSON
   : >"$NATIVE_WORK/empty.npmrc"
   for role in write read; do
-    printf 'registry=http://127.0.0.1:8080/npm/\n//127.0.0.1:8080/npm/:_authToken=%s\n' \
-      "$(cat "$WORK/$role")" >"$NATIVE_WORK/$role.npmrc"
+    printf 'registry=%s/npm/\n//%s/npm/:_authToken=%s\nstrict-ssl=true\ncafile=%s\n' \
+      "$BASE" "${BASE#*://}" "$(cat "$WORK/$role")" "$SSL_CERT_FILE" >"$NATIVE_WORK/$role.npmrc"
     chmod 600 "$NATIVE_WORK/$role.npmrc"
   done
 }
@@ -87,7 +88,7 @@ print('NuGet stage:', 'push_attempted' if 'Pushing ' in log or 'PUT ' in log els
 PYCODE
       return 1;
     }
-  npm publish "$NATIVE_WORK/npm-package" --registry="http://127.0.0.1:8080/npm/" \
+  npm publish "$NATIVE_WORK/npm-package" --registry="$BASE/npm/" \
     --userconfig="$NATIVE_WORK/write.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-publish-cache" --access public --provenance=false \
     --ignore-scripts --fetch-retries=0 --loglevel error \
@@ -98,7 +99,8 @@ PYCODE
 
 native_consume() {
   local revision="$1" action=install
-  [[ "$revision" == after ]] && action=ci
+  [[ "$revision" != before ]] && action=ci
+  mkdir -p "$NATIVE_WORK/npm-$revision"
   local cache="$NATIVE_WORK/nuget-cache-$revision"
   dotnet restore "$NATIVE_WORK/nuget-consumer/Consumer.csproj" \
     --configfile "$NATIVE_WORK/NuGet.read.Config" --packages "$cache" \
@@ -108,7 +110,7 @@ native_consume() {
   test "$(sha256sum "$restored" | cut -d' ' -f1)" = "$NATIVE_NUGET_SHA"
 
   npm "$action" --prefix "$NATIVE_WORK/npm-consumer" \
-    --registry="http://127.0.0.1:8080/npm/" \
+    --registry="$BASE/npm/" \
     --userconfig="$NATIVE_WORK/read.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-cache-$revision" --ignore-scripts --no-audit --no-fund \
     --fetch-retries=0 --loglevel error >"$NATIVE_WORK/npm-$revision.log" 2>&1 || {
@@ -118,7 +120,7 @@ native_consume() {
     "$NATIVE_WORK/npm-consumer/node_modules/@packory-compose/demo"
   npm pack '@packory-compose/demo@1.0.0' \
     --pack-destination "$NATIVE_WORK/npm-$revision" \
-    --registry="http://127.0.0.1:8080/npm/" \
+    --registry="$BASE/npm/" \
     --userconfig="$NATIVE_WORK/read.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-pack-cache-$revision" --ignore-scripts --no-audit \
     --no-fund --fetch-retries=0 --loglevel error \
@@ -127,6 +129,21 @@ native_consume() {
     }
   local archive="$NATIVE_WORK/npm-$revision/packory-compose-demo-1.0.0.tgz"
   test -s "$archive"
+  # The lock must retain HTTPS Packory origin and exact tarball integrity;
+  # a successful install from an unrelated cache or public fallback is no pass.
+  node - "$NATIVE_WORK/npm-consumer/package-lock.json" "$archive" "$BASE" <<'JS'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [lockFile, archive, base] = process.argv.slice(2);
+const locked = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
+  .packages['node_modules/@packory-compose/demo'];
+const integrity = 'sha512-' + crypto.createHash('sha512')
+  .update(fs.readFileSync(archive)).digest('base64');
+if (locked.version !== '1.0.0' || !locked.resolved.startsWith(base + '/npm/') ||
+    locked.integrity !== integrity) {
+  throw new Error('Synthetic npm lock origin or integrity mismatch');
+}
+JS
   if [[ "$revision" == before ]]; then
     NATIVE_NPM_SHA="$(sha256sum "$archive" | cut -d' ' -f1)"
   else

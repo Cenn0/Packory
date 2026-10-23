@@ -197,10 +197,20 @@ jobs:
           package-manager-cache: false
       - name: Build self-hosted image
         run: docker build -t packory:ci .
-      - name: Exercise disposable file-secret single-node container lifecycle
+      - name: Exercise disposable HTTPS native clients and isolated container recovery
         run: |
-          bash -n scripts/smoke_single_node_compose.sh scripts/smoke_single_node_native.sh
+          bash -n scripts/smoke_single_node_compose.sh scripts/smoke_single_node_native.sh scripts/smoke_single_node_tls.sh
           bash scripts/smoke_single_node_compose.sh
+      - name: Record container recovery client and runner versions
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/client_environment.py --sha "$SOURCE_SHA" --output "$RUNNER_TEMP/container-client-environment.json"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: container-client-environment-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/container-client-environment.json
+          if-no-files-found: error
+          retention-days: 7
   qualification:
     name: Complete qualification
     needs: [privacy, test, maven, dashboard, container]

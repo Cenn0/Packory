@@ -82,6 +82,10 @@ The main integration job additionally uploads a seven-day
 `client-environment-<SHA>-<attempt>` inventory. It records an allowlisted
 OS/distribution/architecture and parsed versions for the known CLI commands.
 Missing, failed, timed-out or unrecognized commands are explicitly unavailable.
+The container job separately records Docker daemon, Compose and OpenSSL versions
+in `container-client-environment-<SHA>-<attempt>` after its native HTTPS,
+offline backup, isolated restore and same-schema rollback smoke. Its scope
+is described in [single-node qualification](single-node-qualification.md).
 No raw stdout/stderr, hostnames, paths, account data or credential values are
 exported. It is labelled **versions-only**, not an operation/provider pass.
 Tools provisioned inside a harness's temporary directory may not be on PATH;
