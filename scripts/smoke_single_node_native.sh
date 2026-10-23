@@ -47,7 +47,7 @@ XML
     cat >"$NATIVE_WORK/NuGet.$role.Config" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
-  <packageSources><clear /><add key="packory" value="http://localhost:8080/nuget/v3/index.json" allowInsecureConnections="true" /></packageSources>
+  <packageSources><clear /><add key="packory" value="http://127.0.0.1:8080/nuget/v3/index.json" allowInsecureConnections="true" /></packageSources>
   <packageSourceCredentials><packory>
     <add key="Username" value="synthetic" />
     <add key="ClearTextPassword" value="$(cat "$WORK/$role")" />
@@ -66,7 +66,7 @@ JSON
 JSON
   : >"$NATIVE_WORK/empty.npmrc"
   for role in write read; do
-    printf 'registry=http://localhost:8080/npm/\n//localhost:8080/npm/:_authToken=%s\n' \
+    printf 'registry=http://127.0.0.1:8080/npm/\n//127.0.0.1:8080/npm/:_authToken=%s\n' \
       "$(cat "$WORK/$role")" >"$NATIVE_WORK/$role.npmrc"
     chmod 600 "$NATIVE_WORK/$role.npmrc"
   done
@@ -87,7 +87,7 @@ print('NuGet stage:', 'push_attempted' if 'Pushing ' in log or 'PUT ' in log els
 PYCODE
       return 1;
     }
-  npm publish "$NATIVE_WORK/npm-package" --registry="http://localhost:8080/npm/" \
+  npm publish "$NATIVE_WORK/npm-package" --registry="http://127.0.0.1:8080/npm/" \
     --userconfig="$NATIVE_WORK/write.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-publish-cache" --access public --provenance=false \
     --ignore-scripts --fetch-retries=0 --loglevel error \
@@ -108,7 +108,7 @@ native_consume() {
   test "$(sha256sum "$restored" | cut -d' ' -f1)" = "$NATIVE_NUGET_SHA"
 
   npm "$action" --prefix "$NATIVE_WORK/npm-consumer" \
-    --registry="http://localhost:8080/npm/" \
+    --registry="http://127.0.0.1:8080/npm/" \
     --userconfig="$NATIVE_WORK/read.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-cache-$revision" --ignore-scripts --no-audit --no-fund \
     --fetch-retries=0 --loglevel error >"$NATIVE_WORK/npm-$revision.log" 2>&1 || {
@@ -118,7 +118,7 @@ native_consume() {
     "$NATIVE_WORK/npm-consumer/node_modules/@packory-compose/demo"
   npm pack '@packory-compose/demo@1.0.0' \
     --pack-destination "$NATIVE_WORK/npm-$revision" \
-    --registry="http://localhost:8080/npm/" \
+    --registry="http://127.0.0.1:8080/npm/" \
     --userconfig="$NATIVE_WORK/read.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
     --cache="$NATIVE_WORK/npm-pack-cache-$revision" --ignore-scripts --no-audit \
     --no-fund --fetch-retries=0 --loglevel error \
