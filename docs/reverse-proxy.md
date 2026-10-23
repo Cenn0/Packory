@@ -105,6 +105,26 @@ Expanded configurations (which may include host paths) are never printed
 to CI logs. This is a **static Compose configuration check**, not evidence
 that non-root mounts, TLS, native clients, image digests or host recovery work.
 
+## CI-only static expansion guard
+
+The `scripts/validate_deployment_compose.sh` job now rejects noncanonical
+`PACKORY_PUBLIC_BASE_URL` values (userinfo, paths, query strings, fragments,
+loopback origins, invalid HTTPS ports), mutable or foreign private-ingress
+container images, root application overrides and secrets passed to the
+networkless scanner. Private-ingress images must use the exact
+`ghcr.io/cenn0/packory@sha256:<64 lowercase hex>` and
+`ghcr.io/cenn0/packory-skillspector@sha256:<64 lowercase hex>` forms.
+The origin is an ASCII DNS hostname or bracketed IPv6 address, optionally
+followed by a valid TLS port; use a punycode hostname for internationalized
+domains. Run the expansion script in an isolated CI environment with only
+synthetic sources; it intentionally does not display resolved Compose values.
+
+**Limit:** this only verifies configuration shape, not image authenticity,
+whether both images represent the same revision, non-root secret readability,
+actual TLS, OAuth/native-client behavior, daemon persistence or security
+of other containers attached to the network. Retain separate real-service
+acceptance and digest/source provenance checks.
+
 ## Required independent HTTPS acceptance (not executed by the example)
 
 Bind every result to exact application/worker digests, source SHA,

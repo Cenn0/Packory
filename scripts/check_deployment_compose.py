@@ -4,13 +4,45 @@
 This is a structural contract check only. It cannot certify TLS, bind-mount
 permissions, host networking, client interoperability or process recovery.
 """
+import ipaddress
 import json
+import re
 import sys
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def canonical_https_origin(value):
+    """Require a DNS/IPv6 HTTPS origin, never paths, credentials or user input."""
+    if not isinstance(value, str) or len(value) > 2048:
+        return False
+    label = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+    hostname = rf"(?:{label})(?:\.(?:{label}))*"
+    match = re.fullmatch(
+        rf"https://(?P<host>{hostname}|\[[0-9a-f:.]+\])(?::(?P<port>[0-9]{{1,5}}))?",
+        value,
+    )
+    if match is None:
+        return False
+    host = match.group("host")
+    if host in ("localhost", "127.0.0.1", "[::1]"):
+        return False
+    if host.startswith("["):
+        try:
+            ipaddress.IPv6Address(host[1:-1])
+        except ValueError:
+            return False
+    port = match.group("port")
+    return port is None or 1 <= int(port) <= 65535
+
+
+def pinned_image(value, name):
+    return isinstance(value, str) and re.fullmatch(
+        rf"ghcr\.io/cenn0/{re.escape(name)}@sha256:[0-9a-f]{{64}}", value
+    ) is not None
 
 
 def check(profile, spec):
@@ -20,6 +52,7 @@ def check(profile, spec):
             "Unexpected deployment services")
     app = services["packory"]
     worker = services["skillspector"]
+    require(type(app) is dict and type(worker) is dict, "Invalid Compose service shape")
 
     require("privileged" not in app or app["privileged"] is False, "Privileged app forbidden")
     require("privileged" not in worker or worker["privileged"] is False, "Privileged worker forbidden")
@@ -32,6 +65,8 @@ def check(profile, spec):
     require(worker.get("user") == "1654:1654", "Worker must keep its non-root UID/GID")
     require(not worker.get("ports"), "Worker must never expose ports")
     require(not worker.get("networks"), "Worker cannot attach to ingress")
+    require(not worker.get("environment"), "Worker cannot receive environment credentials")
+    require(not worker.get("secrets"), "Worker cannot receive runtime secrets")
     require(worker.get("pids_limit") is not None, "Worker process cap is required")
     require(worker.get("mem_limit") is not None or
             worker.get("deploy", {}).get("resources", {}).get("limits", {}).get("memory") is not None,
@@ -50,6 +85,7 @@ def check(profile, spec):
         require(isinstance(spec["secrets"][secret].get("file"), str),
                 "Secret source must be an operator-selected file")
     require("ALL" in app.get("cap_drop", []), "Application capabilities were increased")
+    require(app.get("user") not in ("0", "0:0", "root"), "Root application override forbidden")
     require(not app.get("pid"), "Application cannot join a host PID namespace")
 
     if profile == "loopback":
@@ -68,8 +104,12 @@ def check(profile, spec):
         network = spec.get("networks", {}).get("ingress", {})
         require(network.get("external") is True,
                 "Ingress network must be operator-owned and external")
-        require(appenv.get("PACKORY_PUBLIC_BASE_URL", "").startswith("https://"),
-                "Private ingress needs HTTPS public origin")
+        require(canonical_https_origin(appenv.get("PACKORY_PUBLIC_BASE_URL")),
+                "Private ingress needs a canonical HTTPS origin")
+        require(pinned_image(app.get("image"), "packory"),
+                "Private application image must have a full Packory SHA-256 digest")
+        require(pinned_image(worker.get("image"), "packory-skillspector"),
+                "Private scanner image must have a full SkillSpector SHA-256 digest")
         require(appenv.get("PACKORY_OCI_AUTHENTICATED_PING") == "true",
                 "Private OCI ping must require authentication")
     else:
