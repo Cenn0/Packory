@@ -24,11 +24,11 @@ failed/canceled/neutral/skipped results block immediately. An earlier green
 attempt cannot substitute for a later red attempt. API failures fail closed.
 
 The job runs even if a main CI dependency fails, so its check cannot silently
-disappear. Configure **`Complete qualification` as an administrator-required
-status check** and require independent approvals on current commits. A YAML
-job alone does not establish branch-policy enforcement. Keep deletion and
-force-push prohibitions. Repository rules and bypass actors still require
-administrator review and a controlled negative/positive merge test (V5-01).
+disappear. **`Complete qualification` is now an administrator-required status
+check on `main`**, bound to GitHub Actions, with an up-to-date branch requirement
+and no bypass actors in its ruleset. A YAML job alone would not establish this:
+the administrative readback and negative merge proof are recorded below.
+Independent current-code approval remains a separate review obligation.
 
 The automatically published development containers now require the full CI
 gate. Publication rechecks the eight independent inventories before building,
@@ -38,15 +38,39 @@ independent provider runs for an arbitrary untested branch.
 
 ## Protected main: administrative acceptance checkpoint (issue #76)
 
-**Observed 23 October 2026:** The two readable active rulesets on
+**Observed 23 October 2026, 19:47 UTC:** The active rulesets on
 `refs/heads/main` are [main-1](https://github.com/Cenn0/Packory/rules/25258491)
 and [main-2](https://github.com/Cenn0/Packory/rules/25258492).
 The first protects against deletion/non-fast-forward updates; the second
 configures pull-request approvals with explicit bypass capabilities.
-**Neither readable ruleset currently declares `required_status_checks`.**
-The legacy branch-protection REST read returned HTTP 403 to the installed
-integration, so other effective protection cannot be excluded. Successful
-CI runs or a rule named "approval" **do not** prove status-check enforcement.
+The additional [required-ci-qualification ruleset](https://github.com/Cenn0/Packory/rules/25751077)
+requires `Complete qualification` from GitHub Actions (integration ID 15368),
+with `strict_required_status_checks_policy=true`, enforcement on branch
+creation, and an empty bypass list. It applies only to `refs/heads/main`.
+The existing deletion/non-fast-forward and review rules were preserved.
+Review-rule bypass actors cannot bypass this separate required-CI ruleset.
+
+The installed GitHub integration still cannot read the legacy protection
+endpoint. A separately authorized administrator CLI read returned HTTP 404
+(`Branch not protected`): at this checkpoint enforcement is provided by the
+three repository rulesets, rather than an additional legacy protection rule.
+No token, personal identity or private administration log is retained here.
+
+[Synthetic PR #148](https://github.com/Cenn0/Packory/pull/148), head
+`657477b39f17c4c85e58751cd045d08435b0fcc7`, deliberately failed the
+[required check](https://github.com/Cenn0/Packory/actions/runs/40014015482/job/120621313385).
+The ordinary merge API through the same integration used for approved PRs
+returned **HTTP 405**, explicitly identifying
+`Required status check "Complete qualification" is failing.` Readback showed
+`merged=false` and `mergeable_state=blocked`; main remained
+`1d92c373f6c911623e1bbadaac509fdff00f50c8`. The synthetic PR was closed without
+merging. Its deliberately reduced workflow never reached main.
+
+The positive proof is a separately reviewed, current-main PR with its full
+exact-head qualification green and a successful ordinary merge under this
+unchanged ruleset. Retain that PR/check/merge readback in [issue #76](https://github.com/Cenn0/Packory/issues/76).
+This administrative control does not prove dependency safety, independent
+human approval, actual-provider recovery or production readiness.
 
 An authorized repository administrator must, in a controlled test:
 
@@ -71,10 +95,11 @@ An authorized repository administrator must, in a controlled test:
 5. Review whether approvals are actually independent and current, especially
    after new commits. Store approval/testing evidence with [release gates](release-gates.md).
 
-Until all five are witnessed, issue #76 remains **open and not verified**.
-This limitation applies even when the current integration reports green
-build, native-client, privacy and storage checks. The integration cannot
-change the repository's administrative rules through its available actions.
+The required-CI negative proof is now witnessed. Issue #76 remains open until
+the positive proof and final rule readback are attached. The review ruleset
+retains its existing bypass capabilities and does not dismiss stale approvals;
+operators must still obtain independent approval of the current change for
+release acceptance. Neither a green CI index nor this control is that approval.
 
 ## Evidence index
 
