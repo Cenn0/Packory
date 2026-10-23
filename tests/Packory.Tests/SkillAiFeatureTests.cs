@@ -85,6 +85,8 @@ public sealed class SkillAiFeatureTests : IDisposable
             Assert.False(SkillAiTransport.AddressAllowed(cloud, IPAddress.Parse(value)), value);
         Assert.True(SkillAiTransport.AddressAllowed(Local, IPAddress.Loopback));
         Assert.False(SkillAiTransport.AddressAllowed(Local, IPAddress.Parse("169.254.169.254")));
+        Assert.False(SkillAiTransport.AddressAllowed(Local, IPAddress.Parse("1.1.1.1")),
+            "Local model transports must never connect to a public provider IP without explicit external profile/consent.");
         Assert.True(SkillAiTransport.AddressAllowed(cloud, IPAddress.Parse("1.1.1.1")));
         Assert.Throws<InvalidDataException>(() =>
             new SkillAiDeployment { Endpoints = [new("unsafe", "openai", "http://169.254.169.254")] }.Validate());
