@@ -12,7 +12,7 @@ public static class NuGetEndpoints
     {
         app.MapGet("/nuget/v3/index.json", (Settings settings, HttpContext ctx) =>
         {
-            var denied = Access.Require(ctx, settings);
+            var denied = Access.RequireNativeNuget(ctx, settings);
             if (denied is not null) return denied;
             var root = settings.Base + "/nuget/v3/";
             return Results.Json(new
@@ -30,7 +30,7 @@ public static class NuGetEndpoints
 
         app.MapGet("/nuget/v3/flatcontainer/{id}/index.json", async (string id, Settings settings, IPackageDatabase db, IHttpClientFactory clients, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant();
             if (!Names.Nuget(id)) return Results.BadRequest(new { error = "Invalid NuGet package ID" });
             if (settings.DeniesNuget(id)) return Results.StatusCode(403);
@@ -67,7 +67,7 @@ public static class NuGetEndpoints
             string id, string version, string file, Settings settings, IPackageDatabase db, BlobStore blobs,
             IHttpClientFactory clients, ArtifactLocks locks, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings) is { } denied) return denied;
             id = id.ToLowerInvariant(); version = version.ToLowerInvariant();
             if (!Names.Nuget(id) || !Names.Version(version)) return Results.BadRequest();
             if (settings.DeniesNuget(id)) return Results.StatusCode(403);
@@ -99,7 +99,7 @@ public static class NuGetEndpoints
         app.MapGet("/nuget/v3/registration/{id}/index.json", async (string id, Settings settings, IPackageDatabase db,
             BlobStore blobs, IHttpClientFactory clients, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings) is { } denied) return denied;
             if (!Names.Nuget(id)) return Results.BadRequest();
             if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var result = await NugetRegistration.GetIndex(id.ToLowerInvariant(), settings, db, blobs,
@@ -110,7 +110,7 @@ public static class NuGetEndpoints
         app.MapGet("/nuget/v3/registration/{id}/{**suffix}", async (string id, string? suffix, Settings settings,
             IPackageDatabase db, BlobStore blobs, IHttpClientFactory clients, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings) is { } denied) return denied;
             if (!Names.Nuget(id) || string.IsNullOrEmpty(suffix)) return Results.BadRequest();
             if (settings.DeniesNuget(id)) return Results.StatusCode(403);
             var resource = await NugetRegistration.GetResource(id.ToLowerInvariant(), Uri.UnescapeDataString(suffix),
@@ -120,7 +120,7 @@ public static class NuGetEndpoints
 
         app.MapGet("/nuget/v3/search", (string? q, int? skip, int? take, Settings settings, IPackageDatabase db, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings) is { } denied) return denied;
             var matching = db.Search(q ?? "", "nuget", 100).Where(x => !settings.DeniesNuget(x.Name)).ToList();
             var groups = matching.GroupBy(x => x.Name).Skip(Math.Clamp(skip ?? 0, 0, 10000)).Take(Math.Clamp(take ?? 20, 1, 100));
             var records = groups.Select(g => new
@@ -134,7 +134,7 @@ public static class NuGetEndpoints
 
         app.MapMethods("/nuget/v3/push", ["PUT", "POST"], async (Settings settings, IPackageDatabase db, BlobStore blobs, ArtifactLocks locks, HttpContext ctx) =>
         {
-            if (Access.Require(ctx, settings, write: true) is { } denied) return denied;
+            if (Access.RequireNativeNuget(ctx, settings, write: true) is { } denied) return denied;
             if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = "Expected multipart NuGet push" });
             var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
             if (form.Files.Count != 1) return Results.BadRequest(new { error = "Expected exactly one nupkg" });
