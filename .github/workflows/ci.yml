@@ -84,6 +84,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
       - name: Validate synthetic single-node evidence ledger
         run: python3 -m unittest discover -s tests -p test_single_node_acceptance.py -v
+      - name: Check isolated Compose profile expansion (synthetic only)
+        run: |
+          python3 -m unittest discover -s tests -p test_deployment_compose.py -v
+          bash scripts/validate_deployment_compose.sh
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Verify dashboard ecosystem parity with implemented catalog

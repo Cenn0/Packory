@@ -94,6 +94,17 @@ image layers, access logs or public debugging records. The example disables
 Nginx access logs until the operator provides safe, bounded redacted logging
 that excludes authorization headers and query strings.
 
+## CI-only Compose isolation checks
+
+`scripts/validate_deployment_compose.sh` expands both file-secret and
+private-ingress profiles with **synthetic placeholder paths and image
+references**. It validates that the worker remains networkless/non-root,
+no direct secrets enter the app environment, loopback binds to 127.0.0.1,
+and private ingress uses only an external network without host ports.
+Expanded configurations (which may include host paths) are never printed
+to CI logs. This is a **static Compose configuration check**, not evidence
+that non-root mounts, TLS, native clients, image digests or host recovery work.
+
 ## Required independent HTTPS acceptance (not executed by the example)
 
 Bind every result to exact application/worker digests, source SHA,
