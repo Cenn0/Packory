@@ -1,0 +1,34 @@
+# Optional overlay: docker compose -f compose.yaml -f compose.skill-ai.yaml up -d --build
+# Both scanners remain networkless. Only the API brokers approved model requests.
+services:
+  packory:
+    environment:
+      PACKORY_SKILL_AI_ENDPOINTS_FILE: /run/secrets/skill-ai-endpoints.json
+      PACKORY_SKILL_AI_KEYRING_FILE: /run/secrets/skill-ai-keyring.json
+    volumes:
+      - skill-ai-in:/data/skill-ai/in
+      - skill-ai-out:/data/skill-ai/out
+      - ${PACKORY_SKILL_AI_ENDPOINTS_PATH:?Supply an operator-owned endpoint inventory}:/run/secrets/skill-ai-endpoints.json:ro
+      - ${PACKORY_SKILL_AI_KEYRING_PATH:?Supply an operator-owned encryption keyring}:/run/secrets/skill-ai-keyring.json:ro
+  skillspector-ai:
+    build: ./workers/skillspector
+    restart: unless-stopped
+    entrypoint: ["python3", "/opt/packory/ai_worker.py"]
+    network_mode: none
+    read_only: true
+    user: "1654:1654"
+    volumes:
+      - skill-ai-in:/work/in:ro
+      - skill-ai-out:/work/out
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2.0
+volumes:
+  skill-ai-in:
+  skill-ai-out:

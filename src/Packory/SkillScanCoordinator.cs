@@ -11,7 +11,7 @@ namespace Packory;
 /// </summary>
 public sealed class SkillScanCoordinator(
     Settings settings, SkillSecurityStore store, IPackageDatabase database,
-    BlobStore blobs, ILogger<SkillScanCoordinator> logger) : BackgroundService
+    BlobStore blobs, ILogger<SkillScanCoordinator> logger, SkillAiStore? ai = null) : BackgroundService
 {
     public string Root => Path.Combine(Path.GetFullPath(settings.DataDirectory), "skill-scans");
     public string Incoming => Path.Combine(Root, "in");
@@ -49,7 +49,16 @@ public sealed class SkillScanCoordinator(
             ct.ThrowIfCancellationRequested();
             if (entry.State == "PUBLISHING")
             {
-                try { await FinishApprovalAsync(entry, ct); }
+                try
+                {
+                    if (ai is not null) await ai.PolicyGate.WaitAsync(ct);
+                    try
+                    {
+                        if (ai is null || ai.CanApprove(entry.Name, entry.Version, entry.Sha256))
+                            await FinishApprovalAsync(entry, ct);
+                    }
+                    finally { ai?.PolicyGate.Release(); }
+                }
                 catch (Exception ex) { logger.LogWarning(ex, "Skill publication recovery is pending."); }
                 continue;
             }
@@ -121,11 +130,16 @@ public sealed class SkillScanCoordinator(
     {
         if (settings.RecoveryMaintenance)
             throw new InvalidOperationException("Skill approval is disabled during offline recovery maintenance.");
-        if (!store.TryTransition(name, version, digest, "NEEDS_REVIEW", "PUBLISHING", actor, reason))
-            return false;
-        var rev = store.Get(name, version)!;
-        await FinishApprovalAsync(rev, ct);
-        return store.IsApproved(name, version);
+        if (ai is not null) await ai.PolicyGate.WaitAsync(ct);
+        try
+        {
+            if (ai is not null && !ai.CanApprove(name, version, digest)) return false;
+            if (!store.TryTransition(name, version, digest, "NEEDS_REVIEW", "PUBLISHING", actor, reason)) return false;
+            var rev = store.Get(name, version)!;
+            await FinishApprovalAsync(rev, ct);
+            return store.IsApproved(name, version);
+        }
+        finally { ai?.PolicyGate.Release(); }
     }
 
     private async Task FinishApprovalAsync(SkillSecurityStore.Revision rev, CancellationToken ct)
@@ -219,7 +233,7 @@ public static class SkillScanResult
     /// a clean result. Unknown suppressed findings are not safe to release.
     /// </summary>
     public static (string State, int? Risk, string? Recommendation, string? Report) Parse(
-        string serialized, string requiredDigest)
+        string serialized, string requiredDigest, bool expectLlm = false)
     {
         if (serialized.Length > 1024 * 1024)
             throw new InvalidDataException("Oversized scanner response.");
@@ -256,12 +270,14 @@ public static class SkillScanResult
             if (!report.TryGetProperty("metadata", out var metadata) ||
                 metadata.ValueKind != JsonValueKind.Object ||
                 !metadata.TryGetProperty("llm_requested", out var llm) ||
-                llm.ValueKind != JsonValueKind.False)
+                llm.ValueKind != (expectLlm ? JsonValueKind.True : JsonValueKind.False))
                 return Failed;
             // A request claiming static mode cannot advertise an LLM-backed
             // analysis result, even if the risk score looks acceptable.
-            if (metadata.TryGetProperty("llm_used", out var used) &&
-                used.ValueKind != JsonValueKind.False)
+            if (expectLlm
+                ? !metadata.TryGetProperty("llm_available", out var availableAi) || availableAi.ValueKind != JsonValueKind.True ||
+                  (metadata.TryGetProperty("llm_used", out var usedAi) && usedAi.ValueKind != JsonValueKind.True)
+                : metadata.TryGetProperty("llm_used", out var used) && used.ValueKind != JsonValueKind.False)
                 return Failed;
 
             if (!report.TryGetProperty("risk_assessment", out var assessment) ||

@@ -15,12 +15,12 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
     public sealed record Job(string Id, string Name, string Version, string Sha256, string StagingKey,
         string Kind, long Revision, string Snapshot, string? Ciphertext, string State,
         long CreatedAt, long? Deadline, string? ReportJson, int? RiskScore,
-        string? Recommendation, string? ErrorCode, int Requests);
+        string? Recommendation, string? ErrorCode, int Requests, string ScannerCommit, string ScannerVersion, string Profile);
     public sealed record Usage(string Month, long ReservedMicroUsd, long InputTokens, long OutputTokens, long Requests, long RequestsWithMissingUsage);
     private readonly object sync = new();
     internal SemaphoreSlim PolicyGate { get; } = new(1, 1);
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    private const string Columns = "id,name,version,sha256,staging_key,kind,revision,snapshot_json,secret_ciphertext,state,created_at,deadline,report_json,risk_score,recommendation,error_code,requests";
+    private const string Columns = "id,name,version,sha256,staging_key,kind,revision,snapshot_json,secret_ciphertext,state,created_at,deadline,report_json,risk_score,recommendation,error_code,requests,scanner_commit,scanner_version,profile";
 
     private DbConnection Open()
     {
@@ -59,7 +59,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
                     kind TEXT NOT NULL, revision BIGINT NOT NULL, snapshot_json TEXT NOT NULL, secret_ciphertext TEXT,
                     state TEXT NOT NULL, created_at BIGINT NOT NULL, deadline BIGINT,
                     report_json TEXT, risk_score INTEGER, recommendation TEXT, error_code TEXT,
-                    requests INTEGER NOT NULL DEFAULT 0);
+                    requests INTEGER NOT NULL DEFAULT 0, scanner_commit TEXT NOT NULL, scanner_version TEXT NOT NULL, profile TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS skill_ai_jobs_pending ON skill_ai_jobs(state,created_at);
                 CREATE INDEX IF NOT EXISTS skill_ai_jobs_artifact ON skill_ai_jobs(name,version,revision,created_at);
                 CREATE TABLE IF NOT EXISTS skill_ai_requests (
@@ -140,7 +140,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
         r.GetString(7),r.IsDBNull(8)?null:r.GetString(8),r.GetString(9),r.GetInt64(10),
         r.IsDBNull(11)?null:r.GetInt64(11),r.IsDBNull(12)?null:r.GetString(12),
         r.IsDBNull(13)?null:r.GetInt32(13),r.IsDBNull(14)?null:r.GetString(14),
-        r.IsDBNull(15)?null:r.GetString(15),r.GetInt32(16));
+        r.IsDBNull(15)?null:r.GetString(15),r.GetInt32(16),r.GetString(17),r.GetString(18),r.GetString(19));
     private static Job? Find(DbConnection db, string id)
     {
         using var cmd = Command(db, $"SELECT {Columns} FROM skill_ai_jobs WHERE id=@id", ("id", id));
@@ -159,6 +159,31 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
             while (r.Read()) jobs.Add(ReadJob(r)); return jobs;
         }
     }
+    /// <summary>Bounded pending inventory, including revisions beyond the dashboard's first page.
+    /// Any existing assessment for this policy revision suppresses automatic retries.</summary>
+    public IReadOnlyList<SkillSecurityStore.Revision> AutomaticCandidates(int limit = 10)
+    {
+        lock (sync)
+        {
+            using var db = Open(); var cfg = ReadConfiguration(db).Configuration;
+            if (!cfg.Enabled || cfg.Trigger == "manual") return [];
+            using var cmd = Command(db, """
+                SELECT r.name,r.version,r.description,r.sha256,r.staging_key,r.state,r.risk_score,r.recommendation,r.updated_at
+                FROM skill_security_revisions r
+                WHERE r.state IN ('NEEDS_REVIEW','QUARANTINED')
+                  AND (@all=1 OR r.risk_score>0 OR r.state='QUARANTINED')
+                  AND NOT EXISTS (SELECT 1 FROM skill_ai_jobs j WHERE j.name=r.name AND j.version=r.version
+                                  AND j.sha256=r.sha256 AND j.revision=@revision AND j.kind='assessment'
+                                  AND j.scanner_commit=@scanner AND j.profile=@profile)
+                ORDER BY r.updated_at,r.name,r.version LIMIT @limit
+                """, ("all", cfg.Trigger == "always" ? 1 : 0), ("revision", cfg.Revision), ("limit", Math.Clamp(limit, 1, 25)),
+                ("scanner", SkillAiDeployment.ScannerCommit), ("profile", SkillAiDeployment.Profile));
+            using var r = cmd.ExecuteReader(); var results = new List<SkillSecurityStore.Revision>();
+            while (r.Read()) results.Add(new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+                r.GetString(4), r.GetString(5), r.IsDBNull(6) ? null : r.GetInt32(6), r.IsDBNull(7) ? null : r.GetString(7), null, r.GetString(8)));
+            return results;
+        }
+    }
     public Job Queue(SkillSecurityStore.Revision? skill, string requestId, string actor, string reason, bool automatic = false)
     {
         if (reason?.Length is not (>= 3 and <= 512) || (!automatic && !Guid.TryParseExact(requestId, "N", out _)))
@@ -171,7 +196,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
             if (skill is not null && skill.State is not ("NEEDS_REVIEW" or "QUARANTINED" or "APPROVED" or "REVOKED" or "PUBLISHING"))
                 throw new InvalidOperationException("A completed static scan is required first.");
             var dedupe = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{skill?.Name}\n{skill?.Version}\n{skill?.Sha256}\n{config.Revision}\n{(automatic ? "automatic" : requestId)}")));
+                $"{skill?.Name}\n{skill?.Version}\n{skill?.Sha256}\n{config.Revision}\n{SkillAiDeployment.ScannerCommit}\n{SkillAiDeployment.Profile}\n{(automatic ? "automatic" : requestId)}")));
             using (var existing = Command(db, $"SELECT {Columns} FROM skill_ai_jobs WHERE dedupe_key=@key", ("key", dedupe)))
             { using var r = existing.ExecuteReader(); if (r.Read()) return ReadJob(r); }
             using (var count = Command(db, "SELECT COUNT(*) FROM skill_ai_jobs WHERE state IN ('QUEUED','RUNNING')"))
@@ -182,12 +207,13 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
             using var tx = db.BeginTransaction();
             using var cmd = Command(db, """
                 INSERT INTO skill_ai_jobs(id,dedupe_key,name,version,sha256,staging_key,kind,revision,snapshot_json,
-                    secret_ciphertext,state,created_at)
-                VALUES(@id,@dedupe,@name,@version,@sha,@staging,@kind,@revision,@snapshot,@secret,'QUEUED',@now)
+                    secret_ciphertext,state,created_at,scanner_commit,scanner_version,profile)
+                VALUES(@id,@dedupe,@name,@version,@sha,@staging,@kind,@revision,@snapshot,@secret,'QUEUED',@now,@scanner,@scannerVersion,@profile)
                 """, ("id", id), ("dedupe", dedupe), ("name", skill?.Name ?? ""), ("version", skill?.Version ?? ""),
                 ("sha", skill?.Sha256 ?? ""), ("staging", skill?.StagingKey ?? ""),
                 ("kind", skill is null ? "probe" : "assessment"), ("revision", config.Revision),
-                ("snapshot", JsonSerializer.Serialize(config, SkillAiJson.Options)), ("secret", stored.Ciphertext), ("now", createdAt));
+                ("snapshot", JsonSerializer.Serialize(config, SkillAiJson.Options)), ("secret", stored.Ciphertext), ("now", createdAt),
+                ("scanner", SkillAiDeployment.ScannerCommit), ("scannerVersion", SkillAiDeployment.ScannerVersion), ("profile", SkillAiDeployment.Profile));
             cmd.Transaction = tx; cmd.ExecuteNonQuery();
             Audit(db, tx, automatic ? "automatic_queued" : "manual_queued", config.Revision, id, actor, reason);
             tx.Commit(); return Find(db, id)!;
@@ -198,7 +224,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
         lock (sync)
         {
             using var db = Open(); var job = Find(db, id); var cfg = ReadConfiguration(db).Configuration;
-            if (job is null || job.State != "QUEUED" || !cfg.Enabled || job.Revision != cfg.Revision) return false;
+            if (job is null || job.State != "QUEUED" || !cfg.Enabled || job.Revision != cfg.Revision || !CurrentProfile(job)) return false;
             using (var count = Command(db, "SELECT COUNT(*) FROM skill_ai_jobs WHERE state='RUNNING'"))
                 if (Convert.ToInt64(count.ExecuteScalar()) >= cfg.MaxConcurrentScans) return false;
             using var cmd = Command(db, "UPDATE skill_ai_jobs SET state='RUNNING',deadline=@deadline WHERE id=@id AND state='QUEUED'",
@@ -241,7 +267,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
         var cfg = Configuration().Configuration;
         if (!cfg.RequireForApproval) return true;
         var latest = List(name, version, limit: 1).FirstOrDefault();
-        return cfg.Enabled && latest is { State: "COMPLETED" } && latest.Revision == cfg.Revision && latest.Sha256 == digest;
+        return cfg.Enabled && latest is { State: "COMPLETED" } && latest.Revision == cfg.Revision && latest.Sha256 == digest && CurrentProfile(latest);
     }
     public Usage Budget()
     {
@@ -265,7 +291,7 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
         {
             error = "job_unavailable"; using var db = Open(); var job = Find(db, jobId);
             var cfg = ReadConfiguration(db).Configuration;
-            if (job is null || job.State != "RUNNING" || (job.Deadline is null || job.Deadline <= Now) || !cfg.Enabled || job.Revision != cfg.Revision) return false;
+            if (job is null || job.State != "RUNNING" || (job.Deadline is null || job.Deadline <= Now) || !cfg.Enabled || job.Revision != cfg.Revision || !CurrentProfile(job)) return false;
             if (job.Requests >= cfg.MaxRequestsPerScan) { error = "request_limit"; return false; }
             var usage = Budget(db); var reserved = cfg.ReservationMicroUsd;
             if (reserved > 0 && usage.ReservedMicroUsd + reserved > cfg.MonthlyBudgetMicroUsd)
@@ -311,11 +337,13 @@ public sealed class SkillAiStore(Settings settings, SkillAiDeployment deployment
             return [.. results];
         }
     }
+    public static bool CurrentProfile(Job job) => job.ScannerCommit == SkillAiDeployment.ScannerCommit &&
+        job.ScannerVersion == SkillAiDeployment.ScannerVersion && job.Profile == SkillAiDeployment.Profile;
     public static object Summary(Job job) => new
     {
         job.Id,job.Name,job.Version,job.Sha256,job.Kind,job.Revision,job.State,job.CreatedAt,job.Deadline,
         job.RiskScore,job.Recommendation,job.ErrorCode,job.Requests,
-        scannerCommit = SkillAiDeployment.ScannerCommit, profile = SkillAiDeployment.Profile,
+        job.ScannerCommit, job.ScannerVersion, job.Profile,
         configuration = SkillAiJson.Read<SkillAiConfiguration>(job.Snapshot, 16384)
     };
 }

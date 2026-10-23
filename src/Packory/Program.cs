@@ -142,6 +142,13 @@ builder.Services.AddSingleton<PublicationRecoveryService>();
 builder.Services.AddSingleton<PostgresSingleWriterLease>();
 builder.Services.AddSingleton<OciUploadStore>();
 builder.Services.AddSingleton<SkillSecurityStore>();
+builder.Services.AddSingleton(SkillAiDeployment.FromEnvironment());
+builder.Services.AddSingleton<SkillAiSecrets>();
+builder.Services.AddSingleton<SkillAiStore>();
+builder.Services.AddSingleton<ISkillAiTransport, SkillAiTransport>();
+builder.Services.AddSingleton<SkillAiGateway>();
+builder.Services.AddSingleton<SkillAiCoordinator>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillAiCoordinator>());
 builder.Services.AddSingleton<McpRegistryStore>();
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
@@ -243,6 +250,7 @@ if (!readerInstance)
     {
         metadata.Initialize();
         app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
+        app.Services.GetRequiredService<SkillAiStore>().Initialize();
         app.Services.GetRequiredService<McpRegistryStore>().Initialize();
         app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
     }
@@ -538,6 +546,7 @@ NuGetEndpoints.Map(app);
 NpmEndpoints.Map(app);
 SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
+SkillAiEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
 SkillQualityEndpoints.Map(app);
 McpOAuthResourceMetadata.Map(app);
