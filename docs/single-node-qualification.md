@@ -28,6 +28,30 @@ This repository does not execute or schedule those operations automatically.
 - Preserve the current development-image designation; any stable release
   still requires the independent [production release gates](release-gates.md).
 
+## Automated CI subset (disposable loopback, not an operator drill)
+
+The `Build Docker image` CI job now starts the **locally built application
+image** via `compose.secrets.yaml` and a temporary Compose override (no
+remote image pull for Packory). It creates three independent ephemeral token
+files with non-root group-read permissions, exercises readiness, negative
+anonymous/invalid/read-only authorization, publishes and consumes one
+synthetic immutable Raw artifact, forces container recreation against the
+same isolated named volume, then verifies the original SHA-256 and a
+repeated-write conflict. A unique CI Compose project is deleted with
+`down --volumes` in the cleanup trap. Credentials, paths and full container
+logs are deliberately not exported in the public test report.
+
+Run only on a **dedicated disposable CI runner** with Docker and passwordless
+local `sudo`; the local image must first be built as `packory:ci`.
+Never run this resource-deleting fixture against an existing installation.
+This is a CI integration test of the application container and file-backed
+secret readability **only**. The SkillSpector service is intentionally not
+started. Loopback HTTP is used, not TLS: the test does **not** establish
+#131 reverse-proxy operation, #133 NuGet/npm HTTPS workflows, worker
+survival, daemon/host reboot persistence, host capacity, offline backup,
+isolated restore, upgrade/rollback or a production-ready deployment.
+Those remain independently required below, with actual sanitized evidence.
+
 ## Disposable-host acceptance sequence
 
 | Stage | Required execution and observation | Boundary |
