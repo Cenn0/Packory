@@ -140,3 +140,46 @@ approved records before accepting or sharing a sanitized ledger.
 No measured host figures or passing real-deployment results are included
 in this repository. Production qualification and separate issue #36
 remain blocked without real-provider and security/operations evidence.
+
+## Opt-in bounded latency probe
+
+`scripts/single_node_load_probe.py` provides an executable **Raw HTTP workload
+subset**, separate from the self-reported ledger. Run it only against an
+explicitly authorized disposable installation. It creates retained synthetic
+immutable Raw versions; it never deletes them or changes deployment settings.
+
+```bash
+python3 scripts/single_node_load_probe.py --confirm-isolated-test \
+  --origin https://packory.example.invalid \
+  --token-file /protected/disposable-write-token \
+  --source-sha <40_HEX_SOURCE_REVISION> \
+  --workers 4 --operations 16 --payload-bytes 32768 --deadline-seconds 60 \
+  --output /protected/new-latency-evidence.json
+```
+
+The defaults mean **16 publish/download pairs** across at most four workers,
+with 32 KiB per artifact. Maximums are four workers, 40 pairs, 1 MiB each and
+a 300-second declared deadline. Each network operation has at most a ten-second
+I/O timeout. The absolute deadline is checked between single buffered reads;
+an in-flight operation can take up to its remaining I/O timeout to stop.
+No new request begins after the deadline. A failed, redirected, oversized,
+byte-mismatched, timed-out or rate-limited operation makes the result fail.
+
+TLS certificate and hostname validation remain enabled. The script disables
+environment proxy routing and rejects redirects instead of forwarding the
+credential to another destination. The token is read from a bounded absolute
+regular file, not an argument or environment variable; symlink/reparse-point
+files, control characters and world-readable POSIX files are rejected. Output
+is created exclusively with owner-only permissions and never overwrites prior
+evidence. Keep the parent directory protected as well.
+
+The JSON contains workload counts, successful pair count, elapsed time and
+nearest-rank p95 publish/download latency. It excludes origin, paths, tokens,
+response/error bodies and logs. The source SHA is **operator-asserted**, not
+remotely attested. Verify both image digests and labels independently before
+binding the result to a deployment. Partial results never count as a pass.
+
+This is neither a sustained capacity/SLO test nor a complete native-client
+matrix. It does not measure CPU/RAM/disk, reboot a host, inject provider faults,
+perform recovery or grant production qualification. Synthetic transport tests
+cover these safety boundaries; actual execution must be recorded separately.

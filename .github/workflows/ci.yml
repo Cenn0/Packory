@@ -83,7 +83,9 @@ jobs:
       - name: Validate private ingress profile and proxy authorization boundaries
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
       - name: Validate synthetic single-node evidence ledger
-        run: python3 -m unittest discover -s tests -p test_single_node_acceptance.py -v
+        run: |
+          python3 -m unittest discover -s tests -p test_single_node_acceptance.py -v
+          python3 -m unittest discover -s tests -p test_single_node_load_probe.py -v
       - name: Check isolated Compose profile expansion (synthetic only)
         run: |
           python3 -m unittest discover -s tests -p test_deployment_compose.py -v

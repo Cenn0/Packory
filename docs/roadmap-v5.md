@@ -302,3 +302,15 @@ or issue #133. Check exact-head CI results; the complete host-boot, scanner,
 capacity/fault, prior-release migration, real-provider and independent release
 criteria remain open. No browser BFF, new ecosystem adapter, stable release or
 production deployment is introduced. See [the precise automated scope](single-node-qualification.md).
+
+## Bounded load-probe tranche — 23 October 2026
+
+V5-15 gains an opt-in Raw publish/download latency probe with fixed workload
+caps, exact-byte verification, validated HTTPS, rejected redirects and
+file-backed credentials. Its sanitized output reports measured pair counts
+and p95 latencies; a declared source revision is explicitly operator-asserted.
+Failure, truncation, wrong bytes and timeouts cannot become a passing result.
+The CI synthetic transport cases verify these controls without using a real
+installation. See [single-node qualification](single-node-qualification.md#opt-in-bounded-latency-probe).
+Measured resource pressure, sustained capacity/SLOs, boot, provider faults,
+recovery and independent qualification remain separate unfinished acceptance.
