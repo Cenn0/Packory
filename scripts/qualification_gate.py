@@ -26,6 +26,28 @@ REQUIRED = {
     "skillspector-smoke.yml": {"scanner"},
     "source-evidence.yml": {"Exact source evidence"},
 }
+REQUIRED_STEPS = {
+    "Real signed Keycloak JWT": {"Real Keycloak OIDC issuer, audience and authorization"},
+    "Official TS SDK v2.3.1 HTTP conformance": {"Exercise independent HTTP client"},
+    "Cargo and pip (Python 3.12)": {"Real hosted Cargo and pip workflows"},
+    "Cargo and pip (Python 3.13)": {"Real hosted Cargo and pip workflows"},
+    "npm pnpm Yarn Classic private lockfiles": {
+        "Verify isolated private native consumers and locked fresh-cache installs"},
+    "postgres": {"Run the full suite with PostgreSQL provider checks enabled"},
+    "documentation": {"Validate public README and local links"},
+    "S3 backend integration": {
+        "Test coordinated PostgreSQL and versioned Moto S3 snapshot and isolated restore (emulator only)",
+        "Test real AWS S3 client requests",
+        "Test PostgreSQL-S3 publication recovery and exclusive writer lease",
+        "Test private feed bundles with PostgreSQL and S3 including cold reads and corruption",
+        "Verify native private feeds with PostgreSQL and S3 (emulator only)",
+    },
+    "scanner": {"Scan a synthetic benign Skill in a networkless runtime",
+                "Test Compose scan, approval, MCP distribution and scanner outage recovery",
+                "Integration smoke - compose staging, offline scan, approval and revoke"},
+    "Exact source evidence": {"Verify source identity and public privacy",
+                              "Verify generated source archive digest and narrow qualification claim"},
+}
 
 
 class Blocked(ValueError):
@@ -68,6 +90,8 @@ def positive_int(value):
 def qualify(read, sha, event):
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or event not in {"push", "pull_request"}:
         raise Blocked("invalid_source_identity")
+    if set(REQUIRED_STEPS) != set().union(*REQUIRED.values()):
+        raise Blocked("incomplete_required_step_policy")
     evidence = []
     pending = False
     for filename, names in REQUIRED.items():
@@ -109,11 +133,29 @@ def qualify(read, sha, event):
             raise Blocked("missing_required_job:" + filename)
         if len({j["id"] for j in jobs}) != len(jobs):
             raise Blocked("duplicate_job_identity")
+        observed_steps = []
         for job in jobs:
             if (not positive_int(job["id"]) or job["run_id"] != run_id or
                     job["head_sha"] != sha or job["status"] != "completed" or
                     job["conclusion"] != "success"):
                 raise Blocked("unsuccessful_or_mismatched_job:" + filename)
+            if job["name"] not in names:
+                continue
+            steps = job.get("steps")
+            if type(steps) is not list or not steps:
+                raise Blocked("missing_step_inventory:" + filename)
+            if any(not positive_int(step.get("number")) for step in steps) or \
+                    len({step["number"] for step in steps}) != len(steps):
+                raise Blocked("invalid_step_identity:" + filename)
+            for required in REQUIRED_STEPS[job["name"]]:
+                matches = [step for step in steps if step.get("name") == required]
+                if len(matches) != 1 or matches[0].get("status") != "completed" or \
+                        matches[0].get("conclusion") != "success":
+                    raise Blocked("required_step_not_successful:" + filename)
+                # A successful named step is only an Actions status observation.
+                # PR-controlled workflow text can change what the step executes.
+                observed_steps.append({"jobId": job["id"], "number": matches[0]["number"],
+                                       "name": required})
         # Re-read after the job inventory: a newly queued rerun invalidates it.
         current = read(f"/actions/runs/{run_id}")
         if (current["run_attempt"] != attempt or current["head_sha"] != sha or
@@ -121,10 +163,12 @@ def qualify(read, sha, event):
             raise Pending("workflow_changed_during_verification")
         evidence.append({"workflow": filename, "runId": run_id, "attempt": attempt,
                          "jobs": sorted(j["id"] for j in jobs),
+                         "observedSuccessfulSteps": sorted(
+                             observed_steps, key=lambda step: (step["jobId"], step["number"])),
                          "url": f"https://github.com/{REPOSITORY}/actions/runs/{run_id}"})
     if pending:
         raise Pending("required_workflow_missing_or_running")
-    return {"schema": "packory.ci-qualification/1", "sourceSha": sha,
+    return {"schema": "packory.ci-qualification/2", "sourceSha": sha,
             "event": event, "qualification": "ci-workflows-only",
             "productionRecommended": False, "independentApprovalVerified": False,
             "workflows": evidence}
