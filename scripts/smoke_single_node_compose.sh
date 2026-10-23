@@ -33,6 +33,8 @@ trap cleanup EXIT
 # arguments, output and Git; allow the non-root app UID/GID to read the mounts.
 for role in admin read write; do
   openssl rand -hex 32 >"$WORK/$role"
+  # Render the curl credential while this runner still owns the secret source.
+  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$WORK/$role")" >"$WORK/$role.curl"
   chmod 0640 "$WORK/$role"
   sudo chown 0:1654 "$WORK/$role"
 done
@@ -51,9 +53,6 @@ YAML
 compose config --quiet
 
 # curl -K avoids exposing token values as process arguments.
-for role in admin read write; do
-  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$WORK/$role")" >"$WORK/$role.curl"
-done
 printf 'header = "Authorization: Bearer invalid-fixture"\n' >"$WORK/invalid.curl"
 printf 'Packory single-node immutable synthetic fixture\n' >"$WORK/payload"
 SHA="$(sha256sum "$WORK/payload" | cut -d' ' -f1)"
