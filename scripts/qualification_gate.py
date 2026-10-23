@@ -18,7 +18,8 @@ API = "https://api.github.com/repos/" + REPOSITORY
 REQUIRED = {
     "keycloak.yml": {"Real signed Keycloak JWT"},
     "mcp-typescript.yml": {"Official TS SDK v2.3.1 HTTP conformance"},
-    "native-matrix.yml": {"Cargo and pip (Python 3.12)", "Cargo and pip (Python 3.13)"},
+    "native-matrix.yml": {"Cargo and pip (Python 3.12)", "Cargo and pip (Python 3.13)",
+                          "npm pnpm Yarn Classic private lockfiles"},
     "postgres.yml": {"postgres"},
     "public-docs.yml": {"documentation"},
     "s3.yml": {"S3 backend integration"},

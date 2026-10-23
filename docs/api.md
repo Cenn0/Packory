@@ -271,3 +271,7 @@ grant and returns `feedId`, `artifacts`, `bytes`, `maxBytes`, `maxArtifacts`,
 `accounting` and `retention`. Zero limits are disabled. Quota-limited PUTs return
 507 before storage mutation. Existing immutable coordinates remain 409. See
 [capacity and retention](operations.md#private-raw-feed-capacity-and-retention).
+
+Private npm publication rejects non-string, control-containing or oversized
+`deprecated` fields. The read path also rejects malformed persisted warnings
+instead of treating an invalid archive's metadata as a valid lifecycle state.

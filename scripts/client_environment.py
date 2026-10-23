@@ -12,6 +12,8 @@ CLIENTS = {
     "dotnet": (["dotnet", "--version"], r"^" + VERSION + r"\s*$"),
     "node": (["node", "--version"], r"^v" + VERSION + r"\s*$"),
     "npm": (["npm", "--version"], r"^" + VERSION + r"\s*$"),
+    "pnpm": (["pnpm", "--version"], r"^" + VERSION + r"\s*$"),
+    "yarn": (["yarn", "--version"], r"^" + VERSION + r"\s*$"),
     "cargo": (["cargo", "--version"], r"^cargo " + VERSION + r"(?:\s|$)"),
     "python": (["python3", "--version"], r"^Python " + VERSION + r"\s*$"),
     "pip": (["python3", "-m", "pip", "--version"], r"^pip " + VERSION + r"(?:\s|$)"),

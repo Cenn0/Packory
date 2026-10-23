@@ -108,6 +108,8 @@ public static partial class FeedNpmEndpoints
             if (!ValidVersion(version) || node is not JsonObject manifest ||
                 Text(manifest["name"]) != name || Text(manifest["version"]) != version ||
                 !RegistryDependenciesOnly(manifest) ||
+                manifest.ContainsKey("deprecated") &&
+                    (Text(manifest["deprecated"]) is not { } warning || !FeedNpmDeprecationEndpoints.ValidMessage(warning)) ||
                 attachments.First().Value is not JsonObject attachment ||
                 Text(attachment["data"]) is not { } encoded)
                 return Results.BadRequest(new { error = "Invalid npm package identity or attachment" });
@@ -319,6 +321,8 @@ public static partial class FeedNpmEndpoints
             packageName.GetString() != name ||
             !manifest.TryGetProperty("version", out var release) || release.ValueKind != JsonValueKind.String ||
             release.GetString() != version ||
+            manifest.TryGetProperty("deprecated", out var warning) &&
+                (warning.ValueKind != JsonValueKind.String || !FeedNpmDeprecationEndpoints.ValidMessage(warning.GetString())) ||
             !metadata.TryGetProperty("tags", out var tags) || tags.ValueKind != JsonValueKind.Object ||
             tags.EnumerateObject().Any(t => !ValidTag(t.Name) || t.Value.ValueKind != JsonValueKind.String ||
                 t.Value.GetString() != version) ||

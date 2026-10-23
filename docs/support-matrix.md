@@ -79,3 +79,28 @@ See [Release gates](release-gates.md) for provider and production evidence still
 Private Raw additionally provides committed-byte/count usage and optional
 per-feed limits, with concurrent writer and HTTP-client quota tests. This does
 not graduate physical S3 capacity, automatic retention/GC or UI/MCP discovery.
+
+### Pinned private npm consumer matrix
+
+The native matrix workflow independently runs npm 11.9.0, pnpm 10.20.0 and
+**Yarn Classic 1.22.22** against two isolated feeds holding different bytes at
+identical scoped coordinates. Native npm publishes the synthetic transitive
+fixtures. Each alternate consumer performs a cold install and a frozen-lock
+install with removed node_modules and a new cache/store after server restart.
+Assertions bind dependency bytes, lockfile origins and SHA-512 integrity to the
+selected feed and require the frozen run to preserve the lockfile exactly.
+A manifest change to an existing 2.0.0 must fail for a lock mismatch, not a
+missing-package/network error, without changing the lockfile.
+
+Run with `PACKORY_SMOKE_ALTERNATE_CLIENTS=1` and explicit pinned CLI paths; the
+workflow provisions all three versions with installation scripts disabled.
+Only the loopback fixture's Yarn process clears inherited proxies because
+Classic can force an explicit proxy despite NO_PROXY; fixture packages never
+use public dependency origins. Credentials/configurations/caches are temporary
+and not exported as evidence. npm native 401/403/404 checks remain in the same
+harness; this does not claim every alternate client's authorization edge case.
+
+This is bounded client compatibility evidence, not upstream vendor endorsement,
+modern Yarn (2+) support, dependency provenance verification or production
+qualification. See [pnpm 10 install](https://github.com/pnpm/pnpm.io/blob/main/versioned_docs/version-10.x/cli/install.md)
+and [Yarn Classic install](https://classic.yarnpkg.com/en/docs/cli/install).

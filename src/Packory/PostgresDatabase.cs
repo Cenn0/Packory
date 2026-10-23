@@ -93,6 +93,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
     public void Initialize()
     {
         using var db = Open();
+        using var schemaLease = PostgresSchemaLock.Acquire(db);
         SchemaVersionGuard.Verify(db);
         using var cmd = Command(db, """
             CREATE TABLE IF NOT EXISTS packages (
