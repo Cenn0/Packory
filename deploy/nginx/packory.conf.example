@@ -1,0 +1,54 @@
+# Reference Nginx configuration: adapt host and certificate paths before enabling.
+# Define the following in the 'http' context and attach this Nginx container to
+# the same dedicated Docker ingress network as Packory.
+limit_req_zone $binary_remote_addr zone=packory_edge:10m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=packory_connections:10m;
+upstream packory_upstream {
+    server packory:8080;
+    keepalive 16;
+}
+
+server {
+    listen 443 ssl;
+    server_name packory.example.invalid; # REPLACE with exact operator-controlled FQDN
+    ssl_certificate /etc/nginx/certs/packory.crt; # Operator-managed certificate
+    ssl_certificate_key /etc/nginx/certs/packory.key; # Never commit real key material
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+
+    # Avoid logging bearer tokens, URL credentials and query-string secrets.
+    # Configure a redacted HTTP-level log format before enabling access logs.
+    access_log off;
+    client_max_body_size 256m;
+    client_body_timeout 60s;
+    send_timeout 300s;
+
+    location / {
+        limit_req zone=packory_edge burst=90 nodelay;
+        limit_conn packory_connections 40;
+        proxy_pass http://packory_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto "https";
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # Never forward spoofed upstream identity/authorization assertions.
+        proxy_set_header X-Forwarded-User "";
+        proxy_set_header X-Forwarded-Email "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header Remote-User "";
+
+        # Preserve *client-provided* registry/MCP Authorization; Packory checks it.
+        proxy_set_header Authorization $http_authorization;
+        # Other native headers, including X-NuGet-ApiKey, are forwarded by default.
+        proxy_request_buffering off;
+        proxy_buffering off; # Required for bounded streaming MCP responses.
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+}
