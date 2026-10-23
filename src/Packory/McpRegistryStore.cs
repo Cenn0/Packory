@@ -208,6 +208,8 @@ public sealed class McpRegistryStore(Settings settings)
     public void Initialize()
     {
         using var db = Open();
+        using var schemaLease = db is NpgsqlConnection postgres
+            ? PostgresSchemaLock.Acquire(postgres) : null;
         using var cmd = Sql(db, """
             CREATE TABLE IF NOT EXISTS mcp_registry_manifests (
                 name TEXT NOT NULL, version TEXT NOT NULL,

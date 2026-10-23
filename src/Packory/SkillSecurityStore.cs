@@ -56,6 +56,8 @@ public sealed class SkillSecurityStore(Settings settings)
     public void Initialize()
     {
         using var db = Open();
+        using var schemaLease = db is NpgsqlConnection postgres
+            ? PostgresSchemaLock.Acquire(postgres) : null;
         using var cmd = Command(db, """
             CREATE TABLE IF NOT EXISTS skill_security_revisions (
                 name TEXT NOT NULL, version TEXT NOT NULL, description TEXT NOT NULL,

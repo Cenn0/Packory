@@ -265,3 +265,9 @@ The consumer-matrix review also rejects malformed `deprecated` fields during
 publication and immutable-metadata reads, with a regression for null/non-string,
 control-containing and oversized values. No schema change or payload rewriting
 is introduced. Separate security review remains deferred to the user.
+
+The final provider CI exposed a pre-existing concurrent PostgreSQL first-start
+DDL race (`pg_type_typname_nsp_index`). Metadata, Skill-release and MCP-catalog
+initialization now share a database/schema advisory lock, with a twelve-start
+fresh-schema regression and failure/retry coverage. This is an incremental
+V5-12 startup correction, not distributed writer fencing or full DR acceptance.

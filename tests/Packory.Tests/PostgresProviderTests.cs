@@ -9,6 +9,49 @@ namespace Packory.Tests;
 public sealed class PostgresProviderTests
 {
     [Fact]
+    public async Task ConcurrentFreshSchemaBootstrapSerializesAllMetadataStores()
+    {
+        var shared = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(shared)) return;
+        var schema = "bootstrap_race_" + Guid.NewGuid().ToString("N")[..16];
+        using var administrator = new NpgsqlConnection(shared);
+        await administrator.OpenAsync();
+        await using (var create = new NpgsqlCommand("CREATE SCHEMA " + schema, administrator))
+            await create.ExecuteNonQueryAsync();
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(shared) { SearchPath = schema };
+            var settings = new Settings { MetadataProvider = "postgresql", PostgresConnectionString = builder.ConnectionString };
+            using var start = new ManualResetEventSlim();
+            var tasks = Enumerable.Range(0, 12).Select(_ => Task.Run(() =>
+            {
+                start.Wait();
+                new PostgresDatabase(settings).Initialize();
+                new SkillSecurityStore(settings).Initialize();
+                new McpRegistryStore(settings).Initialize();
+            })).ToArray();
+            start.Set();
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(45));
+            Assert.True(new PostgresDatabase(settings).IsHealthy());
+            // A failed version check must also release the session-scoped bootstrap lock.
+            using var connection = new NpgsqlConnection(builder.ConnectionString);
+            await connection.OpenAsync();
+            await using (var future = new NpgsqlCommand("UPDATE packory_schema_version SET version=99 WHERE slot=1", connection))
+                await future.ExecuteNonQueryAsync();
+            Assert.Throws<InvalidOperationException>(() => new PostgresDatabase(settings).Initialize());
+            await using (var restore = new NpgsqlCommand("UPDATE packory_schema_version SET version=" + SchemaVersionGuard.Current + " WHERE slot=1", connection))
+                await restore.ExecuteNonQueryAsync();
+            await Task.Run(() => new PostgresDatabase(settings).Initialize()).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(new PostgresDatabase(settings).IsHealthy());
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand("DROP SCHEMA " + schema + " CASCADE", administrator);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
     public void ReadReplicaHealthRejectsUninitializedFutureAndIncompleteSchema()
     {
         var shared = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");

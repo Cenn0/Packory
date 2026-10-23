@@ -486,3 +486,15 @@ free capacity. Any offline operator removal requires coherent metadata/blob
 backup and recovery procedures; quotas never silently remove pinned data.
 Content still follows the bounded Raw name/version/media-type and byte-integrity
 profile; it is never executed or interpreted as a native package format.
+
+### Concurrent PostgreSQL bootstrap
+
+Cooperating metadata, Skill-release and MCP-catalog initializers acquire a
+shared per-database/schema PostgreSQL advisory lock before version checks,
+bootstrap DDL or migrations. `CREATE TABLE IF NOT EXISTS` alone cannot safely
+serialize concurrent type/table creation. Acquisition is bounded to 30 seconds;
+successful or failed initialization releases the lock before returning its
+connection. A terminated session releases it server-side. This coordinates
+initialization only, with a distinct lock key space; it does not permit multiple
+active application writers or supply independent failover fencing.
+See [PostgreSQL advisory locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
