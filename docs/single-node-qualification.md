@@ -159,19 +159,24 @@ python3 scripts/single_node_load_probe.py --confirm-isolated-test \
 
 The defaults mean **16 publish/download pairs** across at most four workers,
 with 32 KiB per artifact. Maximums are four workers, 40 pairs, 1 MiB each and
-a 300-second declared deadline. Each network operation has at most a ten-second
-I/O timeout. The absolute deadline is checked between single buffered reads;
-an in-flight operation can take up to its remaining I/O timeout to stop.
-No new request begins after the deadline. A failed, redirected, oversized,
-byte-mismatched, timed-out or rate-limited operation makes the result fail.
+a 300-second declared deadline. The CLI runs the workload in a disposable
+child process and terminates it when the declared deadline plus a two-second
+startup margin expires; process cleanup can add a short bounded interval.
+Each network operation also has at most a ten-second I/O timeout. A failed,
+redirected, oversized GET or PUT response, mismatched bytes, timeout or
+rate-limited operation makes the result fail.
 
 TLS certificate and hostname validation remain enabled. The script disables
 environment proxy routing and rejects redirects instead of forwarding the
 credential to another destination. The token is read from a bounded absolute
 regular file, not an argument or environment variable; symlink/reparse-point
-files, control characters and world-readable POSIX files are rejected. Output
-is created exclusively with owner-only permissions and never overwrites prior
-evidence. Keep the parent directory protected as well.
+files and control characters are rejected. POSIX files must belong to the
+current user or root, may be group-readable, and cannot be group-writable or
+world-accessible. On Windows the script checks for reparse points and file
+identity but does not inspect NTFS ACLs; the operator must protect the token
+and evidence parent directories. Output is created exclusively with requested
+mode 0600 and never overwrites prior evidence; POSIX enforces this mode,
+while Windows access depends on the inherited ACL.
 
 The JSON contains workload counts, successful pair count, elapsed time and
 nearest-rank p95 publish/download latency. It excludes origin, paths, tokens,
@@ -181,5 +186,7 @@ binding the result to a deployment. Partial results never count as a pass.
 
 This is neither a sustained capacity/SLO test nor a complete native-client
 matrix. It does not measure CPU/RAM/disk, reboot a host, inject provider faults,
-perform recovery or grant production qualification. Synthetic transport tests
-cover these safety boundaries; actual execution must be recorded separately.
+perform recovery or grant production qualification. The synthetic unit tests
+cover parsing, file checks, error redaction and timeouts, including a local
+stalled handshake. They do not establish real-provider TLS, proxy or redirect
+behavior. Actual execution and certificate validation must be recorded separately.

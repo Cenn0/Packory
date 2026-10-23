@@ -310,7 +310,9 @@ caps, exact-byte verification, validated HTTPS, rejected redirects and
 file-backed credentials. Its sanitized output reports measured pair counts
 and p95 latencies; a declared source revision is explicitly operator-asserted.
 Failure, truncation, wrong bytes and timeouts cannot become a passing result.
-The CI synthetic transport cases verify these controls without using a real
-installation. See [single-node qualification](single-node-qualification.md#opt-in-bounded-latency-probe).
+CI checks the parser, error-redaction and bounded-worker behavior with
+synthetic transports and a local stalled handshake. Real TLS/redirect/host
+behavior and resource measurements require an operator-run installation test.
+See [single-node qualification](single-node-qualification.md#opt-in-bounded-latency-probe).
 Measured resource pressure, sustained capacity/SLOs, boot, provider faults,
 recovery and independent qualification remain separate unfinished acceptance.

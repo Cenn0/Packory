@@ -1,9 +1,13 @@
 """Synthetic transport tests: no external endpoints or live credentials."""
 import importlib.util
 import contextlib
+import http.client
 import io
 import json
 import os
+import socket
+import subprocess
+import sys
 from pathlib import Path
 import ssl
 import tempfile
@@ -75,6 +79,85 @@ class BoundedLoadProbeTests(unittest.TestCase):
                 self.assertGreater(result['failed_pairs'], 0)
                 self.assertNotIn(TOKEN, json.dumps(result))
 
+    def test_reflected_token_http_parser_error_cannot_escape_worker(self):
+        class Malformed:
+            def open(self, request, timeout):
+                raise http.client.BadStatusLine('malformed Bearer ' + TOKEN)
+        with contextlib.redirect_stderr(io.StringIO()) as error:
+            result = probe.workload('https://synthetic.example.invalid', TOKEN, operations=1,
+                                    opener_factory=lambda: Malformed())
+        self.assertEqual(result['result'], 'failed')
+        self.assertNotIn(TOKEN, error.getvalue() + json.dumps(result))
+        receiver, sender = __import__('multiprocessing').Pipe(duplex=False)
+        with mock.patch.object(probe, 'workload', side_effect=http.client.BadStatusLine(TOKEN)):
+            with contextlib.redirect_stderr(io.StringIO()) as error:
+                probe.isolated_worker(sender, {})
+        self.assertEqual(receiver.recv()['result'], 'failed')
+        self.assertNotIn(TOKEN, error.getvalue())
+        receiver.close()
+
+    def test_cli_bounds_stalled_tls_handshake_without_exposing_token(self):
+        with tempfile.TemporaryDirectory() as folder:
+            token = Path(folder) / 'token'
+            token.write_text(TOKEN)
+            token.chmod(0o600)
+            output = Path(folder) / 'evidence.json'
+            listener = socket.socket()
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(1)
+            listener.settimeout(7)
+            stopped = threading.Event()
+            def stall():
+                try:
+                    peer, _ = listener.accept()
+                    with peer:
+                        stopped.wait(7)
+                except OSError:
+                    pass
+            thread = threading.Thread(target=stall, daemon=True)
+            thread.start()
+            args = [sys.executable, str(Path(probe.__file__)), '--confirm-isolated-test',
+                    '--origin', 'https://127.0.0.1:' + str(listener.getsockname()[1]),
+                    '--token-file', str(token), '--source-sha', 'a' * 40,
+                    '--output', str(output), '--deadline-seconds', '1', '--operations', '1']
+            started = time.monotonic()
+            try:
+                completed = subprocess.run(args, capture_output=True, text=True, timeout=8)
+            finally:
+                stopped.set()
+                listener.close()
+                thread.join(timeout=1)
+            self.assertLess(time.monotonic() - started, 7)
+            self.assertNotEqual(completed.returncode, 0)
+            evidence = json.loads(output.read_text())
+            self.assertEqual(evidence['result'], 'failed')
+            self.assertNotIn(TOKEN, completed.stdout + completed.stderr + json.dumps(evidence))
+
+    def test_isolated_worker_is_terminated_when_it_misses_deadline(self):
+        class Handle:
+            pid = 1
+            alive = True
+            terminated = False
+            def start(self): pass
+            def join(self, timeout): pass
+            def is_alive(self): return self.alive
+            def terminate(self): self.terminated, self.alive = True, False
+            def kill(self): raise AssertionError('cooperative termination should suffice')
+        class PipeEnd:
+            def poll(self, timeout):
+                self_timeout = timeout
+                assert self_timeout == 3
+                return False
+            def close(self): pass
+        handle = Handle()
+        class Context:
+            def Pipe(self, duplex): return PipeEnd(), PipeEnd()
+            def Process(self, target, args): return handle
+        with mock.patch.object(probe.multiprocessing, 'get_context', return_value=Context()):
+            result = probe.isolated_workload({'deadline_seconds': 1})
+        self.assertEqual(result['result'], 'failed')
+        self.assertTrue(handle.terminated)
+
     def test_unsafe_origin_rejected_before_transport_construction(self):
         for value in ('http://synthetic.example.invalid', 'https://fixture:fixture@example.invalid',
                       'https://synthetic.example.invalid/a', 'https://synthetic.example.invalid/?token=x',
@@ -127,6 +210,9 @@ class BoundedLoadProbeTests(unittest.TestCase):
                 with self.assertRaises(probe.ProbeError):
                     probe.read_token(alias)
                 path.chmod(0o644)
+                with self.assertRaises(probe.ProbeError):
+                    probe.read_token(path)
+                path.chmod(0o660)
                 with self.assertRaises(probe.ProbeError):
                     probe.read_token(path)
             with self.assertRaises(probe.ProbeError):

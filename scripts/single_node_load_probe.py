@@ -7,9 +7,11 @@ a deployment. Resource, boot, provider and independent-review gates are separate
 """
 import argparse
 import concurrent.futures
+import http.client
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -60,7 +62,8 @@ def read_token(path):
                              getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0))
         opened = os.fstat(descriptor)
         if (not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino) or
-                not 32 <= opened.st_size <= 1024 or (os.name != 'nt' and opened.st_mode & 0o007)):
+                not 32 <= opened.st_size <= 1024 or (os.name != 'nt' and
+                (opened.st_mode & 0o027 or opened.st_uid not in (0, os.geteuid())))):
             raise ProbeError('invalid_token_file')
         with os.fdopen(descriptor, 'rb') as handle:
             descriptor = None
@@ -140,7 +143,10 @@ def workload(base, token, *, workers=4, operations=16, payload_bytes=32768, dead
             with opener.open(request, timeout=min(10, remaining)) as response:
                 if response.status != (201 if method == 'PUT' else 200):
                     raise ProbeError('unexpected_status')
-                content = bounded_read(response, payload_bytes + 1, end, stop)
+                limit = payload_bytes + 1 if method == 'GET' else 4097
+                content = bounded_read(response, limit, end, stop)
+                if method == 'PUT' and len(content) > 4096:
+                    raise ProbeError('oversized_response')
                 if method == 'GET' and (len(content) != payload_bytes or hashlib.sha256(content).digest() != expected):
                     raise ProbeError('byte_integrity_failed')
             durations.append((time.perf_counter() - started) * 1000)
@@ -153,7 +159,8 @@ def workload(base, token, *, workers=4, operations=16, payload_bytes=32768, dead
         for future in concurrent.futures.as_completed(futures):
             try:
                 passed.append(future.result())
-            except (ProbeError, OSError, TimeoutError, urllib.error.URLError):
+            except (ProbeError, OSError, TimeoutError, urllib.error.URLError,
+                    http.client.HTTPException):
                 failures += 1
                 stop.set()
     return {
@@ -168,6 +175,52 @@ def workload(base, token, *, workers=4, operations=16, payload_bytes=32768, dead
         'tls': 'certificate_and_hostname_validated', 'synthetic_artifacts_retained': True,
         'resource_measurements': 'not_collected', 'production_qualified': False,
     }
+
+
+def isolated_worker(sender, options):
+    try:
+        result = workload(**options)
+    except BaseException:
+        # The HTTPS peer can control exception text from the HTTP parser.
+        # No traceback or exception string crosses the child boundary.
+        result = {'schema': 'packory.single-node-load-probe/1', 'result': 'failed',
+                  'reason': 'transport_or_worker_rejected', 'production_qualified': False}
+    try:
+        sender.send(result)
+    except OSError:
+        pass
+    finally:
+        sender.close()
+
+
+def isolated_workload(options):
+    context = multiprocessing.get_context('spawn')
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(target=isolated_worker, args=(sender, options))
+    try:
+        process.start()
+        sender.close()
+        if receiver.poll(options['deadline_seconds'] + 2):
+            try:
+                result = receiver.recv()
+            except (EOFError, OSError):
+                result = None
+        else:
+            result = None
+        if result is None or not isinstance(result, dict) or result.get('result') not in ('passed', 'failed'):
+            return {'schema': 'packory.single-node-load-probe/1', 'result': 'failed',
+                    'reason': 'deadline_or_worker_failed', 'production_qualified': False}
+        return result
+    finally:
+        receiver.close()
+        sender.close()
+        process.join(timeout=.2) if process.pid is not None else None
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1)
 
 
 def main():
@@ -194,11 +247,12 @@ def main():
     try:
         with os.fdopen(descriptor, 'w') as output:
             try:
-                result = workload(args.origin, read_token(args.token_file), workers=args.workers,
-                    operations=args.operations, payload_bytes=args.payload_bytes, deadline_seconds=args.deadline_seconds)
+                result = isolated_workload({'base': args.origin, 'token': read_token(args.token_file),
+                    'workers': args.workers, 'operations': args.operations,
+                    'payload_bytes': args.payload_bytes, 'deadline_seconds': args.deadline_seconds})
                 result['declared_source_sha'] = args.source_sha
                 result['source_binding'] = 'operator_asserted_not_remotely_verified'
-            except (ProbeError, OSError, ValueError):
+            except Exception:
                 result = {'schema': 'packory.single-node-load-probe/1', 'result': 'failed',
                           'reason': 'input_or_transport_rejected', 'production_qualified': False}
             output.write(json.dumps(result, indent=2, allow_nan=False) + '\n')
