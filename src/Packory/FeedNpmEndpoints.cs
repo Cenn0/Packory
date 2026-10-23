@@ -97,6 +97,9 @@ public static partial class FeedNpmEndpoints
             catch (JsonException) { return Results.BadRequest(new { error = "Invalid npm JSON" }); }
             catch (PayloadTooLargeException) { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
 
+            if (!publish.ContainsKey("_attachments"))
+                return await FeedNpmDeprecationEndpoints.Native(feedId, name!, publish, cfg, db, blobs, ctx);
+
             if (Text(publish["name"]) != name || publish["versions"] is not JsonObject versions ||
                 versions.Count != 1 || publish["_attachments"] is not JsonObject attachments ||
                 attachments.Count != 1)
@@ -203,32 +206,10 @@ public static partial class FeedNpmEndpoints
                         return Results.BadRequest();
                 }
                 if (cfg.DeniesNpm(packageName)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-                var entries = db.FeedPackageAssets(feedId, "npm", packageName);
-                if (entries.Count == 0) return Results.NotFound();
-                var versions = new JsonObject();
-                var tags = new JsonObject();
-                long totalMetadata = 0;
-                foreach (var entry in entries.OrderBy(x => x.CreatedAt, StringComparer.Ordinal)
-                    .ThenBy(x => x.Version, StringComparer.Ordinal))
-                {
-                    var package = await FeedPackageStore.ReadAsync(feedId, "npm", entry.Path,
-                        db, blobs, cfg.MaxArtifactBytes, ctx.RequestAborted)
-                        ?? throw new InvalidDataException("Private npm revision disappeared.");
-                    ValidateStoredMetadata(package.Metadata, package.Payload, packageName, entry.Version);
-                    totalMetadata += Encoding.UTF8.GetByteCount(package.Metadata.GetRawText());
-                    if (totalMetadata > cfg.MaxMetadataBytes)
-                        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-                    var manifest = JsonNode.Parse(package.Metadata.GetProperty("manifest").GetRawText())!.AsObject();
-                    manifest["dist"]!["tarball"] = TarballUrl(cfg, feedId, packageName, entry.Version);
-                    versions[entry.Version] = manifest;
-                    foreach (var tag in package.Metadata.GetProperty("tags").EnumerateObject())
-                        tags[tag.Name] = tag.Value.GetString();
-                }
-                FeedNpmTagEndpoints.ApplyPointers(tags, feedId, packageName, db);
-                var deprecations = db.FeedNpmDeprecations(feedId, packageName);
-                if (totalMetadata + deprecations.Values.Sum(message => (long)Encoding.UTF8.GetByteCount(message)) > cfg.MaxMetadataBytes)
-                    return Results.StatusCode(413);
-                FeedNpmDeprecationEndpoints.Apply(versions, deprecations);
+                var packument = await Packument(feedId, packageName, cfg, db, blobs, ctx.RequestAborted);
+                if (packument is null) return Results.NotFound();
+                var versions = packument["versions"]!.AsObject();
+                var tags = packument["dist-tags"]!.AsObject();
                 if (requestedVersion is not null)
                 {
                     var selected = ValidVersion(requestedVersion)
@@ -236,14 +217,49 @@ public static partial class FeedNpmEndpoints
                     return selected is not null && versions[selected] is { } manifest
                         ? Results.Json(manifest) : Results.NotFound();
                 }
-                return Results.Json(new JsonObject
-                {
-                    ["name"] = packageName, ["versions"] = versions, ["dist-tags"] = tags
-                });
+                return Results.Json(packument);
             }
+            catch (PayloadTooLargeException) { return Results.StatusCode(413); }
             catch (Exception error) when (error is InvalidDataException or IOException or JsonException)
             { return Results.StatusCode(StatusCodes.Status503ServiceUnavailable); }
         });
+    }
+
+    internal static async Task<JsonObject?> Packument(string feedId, string packageName,
+        Settings cfg, IPackageDatabase db, BlobStore blobs, CancellationToken ct)
+    {
+        var entries = db.FeedPackageAssets(feedId, "npm", packageName);
+        if (entries.Count == 0) return null;
+        var versions = new JsonObject();
+        var tags = new JsonObject();
+        long totalMetadata = 0;
+        foreach (var entry in entries.OrderBy(x => x.CreatedAt, StringComparer.Ordinal)
+            .ThenBy(x => x.Version, StringComparer.Ordinal))
+        {
+            var package = await FeedPackageStore.ReadAsync(feedId, "npm", entry.Path,
+                db, blobs, cfg.MaxArtifactBytes, ct)
+                ?? throw new InvalidDataException("Private npm revision disappeared.");
+            ValidateStoredMetadata(package.Metadata, package.Payload, packageName, entry.Version);
+            totalMetadata += Encoding.UTF8.GetByteCount(package.Metadata.GetRawText());
+            if (totalMetadata > cfg.MaxMetadataBytes)
+                throw new PayloadTooLargeException();
+            var manifest = JsonNode.Parse(package.Metadata.GetProperty("manifest").GetRawText())!.AsObject();
+            manifest["dist"]!["tarball"] = TarballUrl(cfg, feedId, packageName, entry.Version);
+            versions[entry.Version] = manifest;
+            foreach (var tag in package.Metadata.GetProperty("tags").EnumerateObject())
+                tags[tag.Name] = tag.Value.GetString();
+        }
+        FeedNpmTagEndpoints.ApplyPointers(tags, feedId, packageName, db);
+        var deprecations = db.FeedNpmDeprecations(feedId, packageName);
+        if (totalMetadata + deprecations.Values.Sum(message => (long)Encoding.UTF8.GetByteCount(message)) > cfg.MaxMetadataBytes)
+            throw new PayloadTooLargeException();
+        FeedNpmDeprecationEndpoints.Apply(versions, deprecations);
+        var packument = new JsonObject
+        {
+            ["name"] = packageName, ["versions"] = versions, ["dist-tags"] = tags
+        };
+        packument["_rev"] = FeedNpmDeprecationEndpoints.Revision(packument);
+        return packument;
     }
 
     private static string? Text(JsonNode? node) =>

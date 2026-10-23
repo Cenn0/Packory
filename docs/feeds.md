@@ -336,8 +336,17 @@ as the annotation/audit update. Immutable original bundles and tarballs
 are never rewritten or removed. Native packument/version reads apply the
 overlay, including native `npm view ... deprecated` and install warnings.
 
-This is an explicit Packory management endpoint; it does not implement the
-full-packument `npm deprecate` write protocol. Unpublish/delete remains
+Native `npm deprecate <name>@<range> <message>` and empty-message clearing
+also work through full-packument GET/PUT on the private npm package route.
+The client selects matching versions, including prereleases. GET supplies an
+opaque `_rev`; PUT must preserve it and may change only `deprecated` strings.
+A stale revision returns 409; other metadata, dist-tags, version deletion and
+new versions without attachments are rejected. All changed versions and audit
+events commit in one database transaction; a missing target rolls back every
+change. Both database providers serialize overlay writers and compare current
+overlays before commit. Refetch and retry after a conflict.
+
+This does not add npm owner/login or provenance support. Unpublish/delete remains
 disabled so pinned/lockfile consumers can still retrieve published bytes.
 The mutable empty-string tombstone survives recovery and suppresses an
 original published warning. Audit stores action/coordinate, not message

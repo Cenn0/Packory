@@ -33,6 +33,9 @@ public interface IPackageDatabase
     IReadOnlyList<FeedNpmTag> FeedNpmTags(string feedId, string name);
     IReadOnlyDictionary<string, string> FeedNpmDeprecations(string feedId, string name);
     bool SetFeedNpmDeprecation(string feedId, string name, string version, string message, string actor);
+    bool SetFeedNpmDeprecations(string feedId, string name,
+        IReadOnlyDictionary<string, string> changes,
+        IReadOnlyDictionary<string, string>? expected, string actor);
     bool SetFeedNpmTag(string feedId, string name, string tag, string version, bool deleted, string actor);
     string? GetFeedOciTag(string feedId, string name, string tag);
     IReadOnlyList<string> FeedOciTags(string feedId, string name);

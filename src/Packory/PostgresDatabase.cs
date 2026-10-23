@@ -641,24 +641,16 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
-    public bool SetFeedNpmDeprecation(string feedId, string name, string version, string message, string actor)
+    public bool SetFeedNpmDeprecation(string feedId, string name, string version, string message, string actor) =>
+        SetFeedNpmDeprecations(feedId, name,
+            new Dictionary<string, string>(StringComparer.Ordinal) { [version] = message }, null, actor);
+
+    public bool SetFeedNpmDeprecations(string feedId, string name,
+        IReadOnlyDictionary<string, string> changes,
+        IReadOnlyDictionary<string, string>? expected, string actor)
     {
-        if (!FeedDefinition.ValidId(feedId) || !Names.Npm(name) || !FeedNpmEndpoints.ValidVersion(version) ||
-            !FeedNpmDeprecationEndpoints.ValidMessage(message)) throw new ArgumentException("Invalid npm deprecation.");
         using var db = Open();
-        using var tx = db.BeginTransaction();
-        using var cmd = Command(db, """
-            INSERT INTO feed_npm_deprecations(feed_id,name,version,message,updated_at)
-            SELECT @feed,@name,@version,@message,@at
-            WHERE EXISTS(SELECT 1 FROM feeds WHERE id=@feed AND kind='npm' AND mode='hosted' AND visibility='private' AND enabled=1)
-              AND EXISTS(SELECT 1 FROM feed_assets WHERE feed_id=@feed AND kind='npm' AND name=@name AND version=@version AND path=@path)
-            ON CONFLICT(feed_id,name,version) DO UPDATE SET message=excluded.message,updated_at=excluded.updated_at
-            """, tx, ("feed", feedId), ("name", name), ("version", version), ("message", message),
-            ("at", DateTimeOffset.UtcNow.ToString("O")), ("path", FeedNpmEndpoints.PackagePath(name, version)));
-        if (cmd.ExecuteNonQuery() != 1) return false;
-        Audit(db, tx, message.Length == 0 ? "undeprecate" : "deprecate", "feed-npm", feedId + "/" + name, version, actor);
-        tx.Commit();
-        return true;
+        return FeedNpmDeprecationStore.Write(db, feedId, name, changes, expected, actor);
     }
 
     public bool? FeedCargoYanked(string feedId, string name, string version)

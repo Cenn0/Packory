@@ -142,6 +142,57 @@ public sealed class FeedNpmTests
     }
 
     [Fact]
+    public async Task NativeDeprecationIsAtomicRejectsStaleMetadataAndPreservesBundles()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var grant = await Create(client, "npm-native");
+        var other = await Create(client, "npm-other");
+        foreach (var version in new[] { "1.0.0", "1.1.0-beta.1" })
+            Assert.Equal(HttpStatusCode.Created, await Publish(client, "npm-native", grant.Write,
+                Document(Archive(version: version), version: version)));
+        async Task<JsonObject> Read()
+        {
+            using var response = await client.SendAsync(Request(HttpMethod.Get, Url("npm-native"), grant.Read));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        }
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        var before = db.FeedPackageAssets("npm-native", "npm", Name).ToArray();
+        var original = await Read();
+        var changed = original.DeepClone().AsObject();
+        foreach (var (_, node) in changed["versions"]!.AsObject())
+            node!["deprecated"] = "Upgrade to the next release";
+        Assert.Equal(HttpStatusCode.Unauthorized, await Publish(client, "npm-native", null, changed));
+        Assert.Equal(HttpStatusCode.Forbidden, await Publish(client, "npm-native", grant.Read, changed));
+        Assert.Equal(HttpStatusCode.Forbidden, await Publish(client, "npm-native", other.Write, changed));
+        var bad = changed.DeepClone().AsObject();
+        bad["versions"]!["1.0.0"]!["dist"]!["tarball"] = "https://example.invalid/substitute";
+        Assert.Equal(HttpStatusCode.BadRequest, await Publish(client, "npm-native", grant.Write, bad));
+        Assert.Empty(db.FeedNpmDeprecations("npm-native", Name));
+        Assert.Equal(HttpStatusCode.OK, await Publish(client, "npm-native", grant.Write, changed));
+        Assert.Equal(2, db.FeedNpmDeprecations("npm-native", Name).Count);
+        Assert.Equal(HttpStatusCode.Conflict, await Publish(client, "npm-native", grant.Write, original));
+        var latest = await Read();
+        Assert.NotEqual(original["_rev"]!.GetValue<string>(), latest["_rev"]!.GetValue<string>());
+        foreach (var (_, node) in latest["versions"]!.AsObject()) node!["deprecated"] = "";
+        Assert.Equal(HttpStatusCode.OK, await Publish(client, "npm-native", grant.Write, latest));
+        Assert.All(db.FeedNpmDeprecations("npm-native", Name), row => Assert.Equal("", row.Value));
+        Assert.Equal(before, db.FeedPackageAssets("npm-native", "npm", Name));
+        var reopened = new Database(host.Services.GetRequiredService<Settings>());
+        reopened.Initialize();
+        Assert.Equal(2, reopened.FeedNpmDeprecations("npm-native", Name).Count);
+        var expected = reopened.FeedNpmDeprecations("npm-native", Name);
+        Assert.False(reopened.SetFeedNpmDeprecations("npm-native", Name,
+            new Dictionary<string, string> { ["1.0.0"] = "partial", ["9.0.0"] = "missing" }, expected, "fixture"));
+        Assert.All(reopened.FeedNpmDeprecations("npm-native", Name), row => Assert.Equal("", row.Value));
+        Assert.True(reopened.SetFeedNpmDeprecation("npm-native", Name, "1.0.0", "concurrent", "fixture"));
+        Assert.False(reopened.SetFeedNpmDeprecations("npm-native", Name,
+            new Dictionary<string, string> { ["1.1.0-beta.1"] = "stale" }, expected, "fixture"));
+        Assert.Equal("", reopened.FeedNpmDeprecations("npm-native", Name)["1.1.0-beta.1"]);
+    }
+
+    [Fact]
     public async Task ScopedDeprecationSurvivesReopenAndNeverChangesImmutableTarballs()
     {
         using var host = new Host();
@@ -253,6 +304,13 @@ public sealed class FeedNpmTests
             Assert.Equal("Use the next release", reopened.FeedNpmDeprecations("old-npm", Name)["1.0.0"]);
             Assert.True(reopened.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "", "fixture"));
             Assert.Contains(reopened.AuditEvents(null, 100), row => row.Action == "undeprecate" && row.Kind == "feed-npm");
+            var expected = reopened.FeedNpmDeprecations("old-npm", Name);
+            Assert.False(reopened.SetFeedNpmDeprecations("old-npm", Name,
+                new Dictionary<string, string> { ["1.0.0"] = "partial", ["9.0.0"] = "missing" }, expected, "fixture"));
+            Assert.Equal("", reopened.FeedNpmDeprecations("old-npm", Name)["1.0.0"]);
+            Assert.True(reopened.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "concurrent", "fixture"));
+            Assert.False(reopened.SetFeedNpmDeprecations("old-npm", Name,
+                new Dictionary<string, string> { ["1.0.0"] = "stale" }, expected, "fixture"));
             Assert.True(db.TrySetHostedFeedEnabled("old-npm", "npm", false, "fixture"));
             Assert.False(db.SetFeedNpmDeprecation("old-npm", Name, "1.0.0", "disabled", "fixture"));
         }
