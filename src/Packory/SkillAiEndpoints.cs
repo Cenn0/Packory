@@ -77,7 +77,7 @@ public static class SkillAiEndpoints
             await store.PolicyGate.WaitAsync(ctx.RequestAborted);
             try
             {
-                var revision = security.Get(request.Name, request.Version);
+                var revision = security.Get(request.Name!, request.Version!);
                 if (revision is null || revision.Sha256 != request.Sha256) return Results.Conflict();
                 var job = store.Queue(revision, request.RequestId, Access.Actor(ctx), request.Reason);
                 return Results.Accepted("/api/admin/skill-ai/jobs/" + job.Id, SkillAiStore.Summary(job));
