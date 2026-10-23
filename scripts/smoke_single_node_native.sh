@@ -83,6 +83,7 @@ from pathlib import Path
 log=Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
 status=sorted(set(re.findall(r'(?<![0-9])(?:HTTP +)?[1-5][0-9]{2}(?![0-9])|NU[0-9]{4}', log)))
 print('Disposable native NuGet publication failed; error codes:', ','.join(status) or 'unclassified')
+print('NuGet stage:', 'push_attempted' if 'Pushing ' in log or 'PUT ' in log else 'source_discovery')
 PYCODE
       return 1;
     }
