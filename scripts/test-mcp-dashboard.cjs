@@ -305,8 +305,8 @@ async function tokenScenario(h) {
   const boundary = h.calls.length;
   await h.page.locator('#token').press('Tab');
   await h.ready('new', true);
-  const fresh = h.calls.slice(boundary);
   await h.text('ai-status', 'AI is disabled');
+  const fresh = h.calls.slice(boundary);
   assert.deepEqual(fresh.map(call => call.kind).sort(),
     ['ai-audit', 'ai-jobs', 'ai-settings', 'catalog', 'mcp', 'security', 'skills']);
   assert.ok(fresh.every(call => call.authorization === `Bearer ${newToken}`));
@@ -448,8 +448,9 @@ async function main() {
       assert.equal(call.q, 'beta');
       return { items: [serverRecord('beta-1')], nextCursor: null };
     }, paginationScenario);
-    await scenario('token change and six stale responses', defaultReply, tokenScenario);
+    await scenario('token change and stale responses', defaultReply, tokenScenario);
     await scenario('revoke, rescan and refresh invalidation', defaultReply, invalidationScenario);
+    await scenario('optional AI form and safe assessment rendering', defaultReply, skillAiScenario);
     await scenario('desktop and mobile layout', call => {
       const result = defaultReply(call);
       const name = 'fixture-' + 'a'.repeat(56);
