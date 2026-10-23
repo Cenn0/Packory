@@ -172,7 +172,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-15 | Bounded .NET request/duration/denial instruments and admin process totals implemented; deployment load, alerts, rotations, incident and SLO measurements remain |
 | V5-16 | Blocked on applicable independent release acceptance; no tagged release authorized by a green CI index |
 | V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
-| V5-21 | Durable scoped tags and V15 per-version deprecation management implemented; native deprecate writer, broader clients and provenance remain |
+| V5-21 | Durable scoped tags and V15 per-version deprecation management implemented; native deprecate/clear with atomic CAS overlays implemented; broader clients and provenance remain |
 | V5-22 | Private V14 Cargo yank/unyank integrated; allowlisted mirror, broader clients and graduation evidence remain |
 | V5-23 | Private wheel PEP 658/714 sidecars implemented with exact-byte and authorization tests; broader versions/distributions/yank/proxy remain |
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
@@ -217,3 +217,15 @@ roadmap workstreams. Real-provider qualification, complete native protocol
 matrices, privileged browser identity/UI, signatures and the new ecosystem
 adapters remain open. The final independent security check is external to
 this implementation tranche and must not be represented as completed CI.
+
+## Native npm lifecycle checkpoint — 23 October 2026
+
+V5-21 now includes native npm deprecate/clear, digest-bound packument revisions,
+atomic multi-version overlays/audit and optimistic concurrency on both metadata
+providers. No schema change is needed beyond V15. `FeedNpmTests` covers native
+shape, same-feed grants, rejected manifest edits, stale revisions, transactional
+rollback, reopening and immutable bundle parity. The private npm CLI harness
+now uses native deprecate/clear rather than the Packory-specific mutation API.
+This completes this lifecycle slice, not the broader pnpm/Yarn/provenance or
+provider production acceptance. V5-01 remains externally blocked by effective
+branch-policy access; V5-10/11 require selected real-provider resources.

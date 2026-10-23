@@ -257,3 +257,9 @@ An empty string clears the warning; unknown revision/disabled feed returns
 404, invalid/duplicate input 400, oversized body 413, and wrong media type
 415. Standard private npm reads expose the effective `deprecated` property.
 This route is Packory-specific; immutable package deletion stays disabled.
+
+Native `npm deprecate` uses the private package GET/PUT route instead. The
+full packument includes `_rev`; a metadata-only PUT must echo it and preserve
+every field except per-version `deprecated`. One atomic transaction applies
+all changed versions and their audit events; stale updates return 409. Missing
+attachments never authorize a new version or arbitrary manifest/tag changes.

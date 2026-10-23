@@ -141,10 +141,12 @@ fi
 grep -Eq 'E409|EPUBLISHCONFLICT|previously published' "$WORK/duplicate.log"
 
 # Prove committed bundles and private metadata remain usable after restart.
-curl --noproxy 127.0.0.1 --fail -sS -X PUT \
-  -H "Authorization: Bearer $A_WRITE" -H 'Content-Type: application/json' \
-  --data-binary '{"message":"Use the next release"}' \
-  "$BASE/feeds/npm-alpha/npm/-/deprecations/1.0.0/%40packory-private%2Fdemo" >/dev/null
+npm deprecate '@packory-private/demo@<2.0.0' 'Use the next release' \
+  --registry="$BASE/feeds/npm-alpha/npm/" --userconfig="$WORK/alpha-write.npmrc" \
+  --globalconfig="$WORK/empty.npmrc" --cache="$WORK/native-deprecate-cache" \
+  --fetch-retries=0 --loglevel error >"$WORK/native-deprecate.log" 2>&1 || {
+    echo 'Native npm deprecate failed' >&2; exit 1;
+  }
 kill "$PID"
 wait "$PID" || true
 PID=""
@@ -157,10 +159,12 @@ python3 - "$WORK/deprecation.json" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1])) == "Use the next release"
 PY
-curl --noproxy 127.0.0.1 --fail -sS -X PUT \
-  -H "Authorization: Bearer $A_WRITE" -H 'Content-Type: application/json' \
-  --data-binary '{"message":""}' \
-  "$BASE/feeds/npm-alpha/npm/-/deprecations/1.0.0/%40packory-private%2Fdemo" >/dev/null
+npm deprecate '@packory-private/demo@1.0.0' '' \
+  --registry="$BASE/feeds/npm-alpha/npm/" --userconfig="$WORK/alpha-write.npmrc" \
+  --globalconfig="$WORK/empty.npmrc" --cache="$WORK/native-undeprecate-cache" \
+  --fetch-retries=0 --loglevel error >"$WORK/native-undeprecate.log" 2>&1 || {
+    echo 'Native npm undeprecate failed' >&2; exit 1;
+  }
 for flavor in alpha beta; do
   (
     cd "$WORK/$flavor/consumer"
