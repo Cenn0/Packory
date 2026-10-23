@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Real Docker application smoke in disposable CI resources only.
-# Tests file-mounted credentials and immutable Raw data across recreation;
-# deliberately does NOT test TLS, scanner behavior, host boot or full restore.
+# Tests file-mounted credentials, native NuGet/npm and immutable Raw data
+# across recreation; does NOT test TLS, scanner, host boot or full restore.
 set -euo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-for tool in docker openssl curl cmp sha256sum sudo; do
+for tool in docker openssl curl cmp sha256sum sudo dotnet npm node; do
   command -v "$tool" >/dev/null
 done
 
@@ -35,13 +35,20 @@ for role in admin read write; do
   openssl rand -hex 32 >"$WORK/$role"
   # Render the curl credential while this runner still owns the secret source.
   printf 'header = "Authorization: Bearer %s"\n' "$(cat "$WORK/$role")" >"$WORK/$role.curl"
+done
+# Generate native client configs while these disposable synthetic secrets are
+# still readable by the runner; the container itself gets separate root-owned
+# group-readable bind mounts only after preparation.
+source "$ROOT/scripts/smoke_single_node_native.sh"
+native_prepare
+for role in admin read write; do
   chmod 0640 "$WORK/$role"
   sudo chown 0:1654 "$WORK/$role"
 done
 export PACKORY_ADMIN_TOKEN_SOURCE="$WORK/admin"
 export PACKORY_READ_TOKEN_SOURCE="$WORK/read"
 export PACKORY_WRITE_TOKEN_SOURCE="$WORK/write"
-export PACKORY_PUBLIC_BASE_URL="http://localhost:8080"
+export PACKORY_PUBLIC_BASE_URL="http://127.0.0.1:8080"
 
 # Override only the application image with the locally built CI image.
 # The scanner service is deliberately not started: this is NOT worker testing.
@@ -84,6 +91,13 @@ test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-st
 curl --noproxy '*' -fsS --max-time 10 -K "$WORK/read.curl" "$ARTIFACT" -o "$WORK/download-1"
 cmp "$WORK/payload" "$WORK/download-1"
 
+# Confirm the write token can read the native index before invoking NuGet,
+# isolating application auth from client-side source credential propagation.
+test "$(code -K "$WORK/write.curl" "$BASE/nuget/v3/index.json")" = "200"
+# Publish and consume using real .NET and npm clients with fresh caches.
+native_publish
+native_consume before
+
 # The second container is created against the same isolated named volume.
 # Re-running the immutable PUT must be a conflict, not a silent overwrite.
 compose up -d --no-deps --force-recreate packory >/dev/null
@@ -94,4 +108,5 @@ test "$(sha256sum "$WORK/download-2" | cut -d' ' -f1)" = "$SHA"
 test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-stream' \
   --data-binary "@$WORK/payload" "$ARTIFACT")" = "409"
 
-printf 'CI-only Docker file-secret, auth, immutable Raw and recreation smoke passed.\n'
+native_consume after
+printf 'CI-only Docker file-secret, native NuGet/npm, immutable Raw and recreation smoke passed.\n'

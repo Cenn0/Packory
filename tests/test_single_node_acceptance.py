@@ -44,6 +44,50 @@ class SingleNodeEvidenceTests(unittest.TestCase):
             self.assertFalse(complete)
             self.assertEqual(1, counts[state])
 
+    def test_rejects_status_reason_mismatches(self):
+        for status, reason in (
+            ("failed", "not_executed"),
+            ("failed", "missing_tool"),
+            ("skipped", "assertion_failed"),
+            ("skipped", "not_executed"),
+            ("not_run", "timeout"),
+            ("not_run", "operator_not_authorized"),
+        ):
+            with self.subTest(status=status, reason=reason):
+                fixture = self.qualified_fixture()
+                fixture["cases"][0] = {
+                    "id": fixture["cases"][0]["id"],
+                    "status": status, "reason": reason,
+                }
+                with self.assertRaises(mod.EvidenceError):
+                    mod.validate(fixture)
+
+    def test_accepted_reasons_still_block_completion(self):
+        for status, reason in (
+            ("failed", "assertion_failed"),
+            ("failed", "timeout"),
+            ("skipped", "missing_tool"),
+            ("skipped", "unavailable_provider"),
+            ("skipped", "unsafe_to_run"),
+            ("skipped", "operator_not_authorized"),
+            ("not_run", "not_executed"),
+        ):
+            with self.subTest(status=status, reason=reason):
+                fixture = self.qualified_fixture()
+                fixture["cases"][0] = {
+                    "id": fixture["cases"][0]["id"],
+                    "status": status, "reason": reason,
+                }
+                counts, complete = mod.validate(fixture)
+                self.assertFalse(complete)
+                self.assertEqual(1, counts[status])
+
+    def test_rejects_identical_image_digests(self):
+        fixture = self.qualified_fixture()
+        fixture["source"]["image_digests"]["scanner"] = fixture["source"]["image_digests"]["app"]
+        with self.assertRaises(mod.EvidenceError):
+            mod.validate(fixture)
+
     def test_rejects_unknown_fields_and_duplicate_case(self):
         fixture = self.qualified_fixture()
         fixture["operator_email"] = "redacted"

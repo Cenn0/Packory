@@ -73,6 +73,19 @@ public static class Access
             statusCode: StatusCodes.Status403Forbidden);
     }
 
+    /// <summary>
+    /// Global NuGet v3 endpoints use a Basic challenge so native NuGet clients
+    /// retry their configured source credentials. The underlying authorization
+    /// policy remains identical to Require (including 403 for insufficient grants).
+    /// </summary>
+    public static IResult? RequireNativeNuget(HttpContext context, Settings settings, bool write = false)
+    {
+        var denied = Require(context, settings, write);
+        if (denied is IStatusCodeHttpResult { StatusCode: StatusCodes.Status401Unauthorized })
+            context.Response.Headers.WWWAuthenticate = "Basic realm=\"Packory NuGet\"";
+        return denied;
+    }
+
     // Remote MCP must require an authenticated reader even when the public REST catalog is anonymous.
     public static IResult? RequireMcp(HttpContext context, Settings settings)
     {

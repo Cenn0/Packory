@@ -35,21 +35,23 @@ image** via `compose.secrets.yaml` and a temporary Compose override (no
 remote image pull for Packory). It creates three independent ephemeral token
 files with non-root group-read permissions, exercises readiness, negative
 anonymous/invalid/read-only authorization, publishes and consumes one
-synthetic immutable Raw artifact, forces container recreation against the
-same isolated named volume, then verifies the original SHA-256 and a
-repeated-write conflict. A unique CI Compose project is deleted with
+synthetic immutable Raw artifact **and native NuGet/npm packages**, forces
+container recreation against the same isolated named volume, then verifies
+Raw/NuGet/npm bytes with fresh native-client caches and a repeated Raw write
+conflict. A unique CI Compose project is deleted with
 `down --volumes` in the cleanup trap. Credentials, paths and full container
 logs are deliberately not exported in the public test report.
 
 Run only on a **dedicated disposable CI runner** with Docker and passwordless
 local `sudo`; the local image must first be built as `packory:ci`.
 Never run this resource-deleting fixture against an existing installation.
-This is a CI integration test of the application container and file-backed
-secret readability **only**. The SkillSpector service is intentionally not
-started. Loopback HTTP is used, not TLS: the test does **not** establish
-#131 reverse-proxy operation, #133 NuGet/npm HTTPS workflows, worker
-survival, daemon/host reboot persistence, host capacity, offline backup,
-isolated restore, upgrade/rollback or a production-ready deployment.
+This is a CI integration test of the application container, file-backed
+secret readability and native NuGet/npm client persistence on **HTTP loopback**.
+The SkillSpector service is intentionally not started. No TLS is involved:
+the test does **not** establish #131 reverse-proxy operation, #133 NuGet/npm
+**HTTPS** workflows, worker survival, daemon/host reboot persistence, host
+capacity, offline backup, isolated restore, upgrade/rollback or production
+readiness.
 Those remain independently required below, with actual sanitized evidence.
 
 ## Disposable-host acceptance sequence
@@ -95,11 +97,13 @@ python3 scripts/single_node_acceptance.py --template /tmp/packory-acceptance.jso
 python3 scripts/single_node_acceptance.py --validate /tmp/packory-acceptance.json
 ```
 
-The validator requires one exact source SHA, both `sha256:` image digests,
-both matching image revision labels, six pinned native/runtime versions,
+The validator requires one exact source SHA, two distinct `sha256:` image digests
+(one for the application, one for the scanner), both matching image revision
+labels, six pinned native/runtime versions,
 declared boot-test scope, bounded workload and numeric measurements when
-claiming resource tests passed. It requires 20 separate case outcomes, with
-finite status/reason enums, forbids additional fields and caps input at
+claiming resource tests passed. It requires 20 separate case outcomes, with status-consistent reason codes (`failed`: assertion/timeout;
+`skipped`: missing tool/provider, unsafe or unauthorized;
+`not_run`: not executed), forbids additional fields and caps input at
 64 KiB. Missing or failed cases return nonzero; complete results say
 **self-reported**, not independently corroborated.
 
