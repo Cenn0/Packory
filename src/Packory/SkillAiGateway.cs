@@ -85,7 +85,7 @@ internal static class SkillAiAddressExtensions
 }
 
 public sealed class SkillAiGateway(SkillAiDeployment deployment, SkillAiSecrets secrets,
-    SkillAiStore store, ISkillAiTransport transport)
+    SkillAiStore store, ISkillAiTransport transport, PostgresSingleWriterLease writerLease)
 {
     private static readonly HashSet<string> OpenAiFields = new(StringComparer.Ordinal)
     { "model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "tools", "tool_choice", "response_format", "stream", "stop", "seed", "reasoning_effort", "parallel_tool_calls", "n", "store" };
@@ -140,6 +140,7 @@ public sealed class SkillAiGateway(SkillAiDeployment deployment, SkillAiSecrets 
     }
     public async Task<string> CompleteAsync(SkillAiStore.Job job, string requestId, string raw, CancellationToken ct)
     {
+        if (!writerLease.IsHeld()) throw new InvalidOperationException("Writer lease unavailable.");
         var cfg = SkillAiJson.Read<SkillAiConfiguration>(job.Snapshot, 16384);
         var endpoint = deployment.Resolve(cfg.EndpointId);
         var body = ValidateRequest(raw, cfg, endpoint);
@@ -150,6 +151,7 @@ public sealed class SkillAiGateway(SkillAiDeployment deployment, SkillAiSecrets 
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1, (job.Deadline ?? 0) - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())));
             var response = await transport.SendAsync(endpoint, body, secret, deadline.Token);
+            if (!writerLease.IsHeld()) throw new InvalidOperationException("Writer lease unavailable.");
             var json = SkillAiJson.Read<JsonObject>(response, 1024 * 1024);
             if (endpoint.Provider == "anthropic"
                 ? json["content"] is not JsonArray
@@ -164,7 +166,11 @@ public sealed class SkillAiGateway(SkillAiDeployment deployment, SkillAiSecrets 
             store.RecordUsage(requestId, "COMPLETED", input, output);
             return response;
         }
-        catch { store.RecordUsage(requestId, "FAILED"); throw; }
+        catch
+        {
+            if (writerLease.IsHeld()) store.RecordUsage(requestId, "FAILED");
+            throw;
+        }
     }
     private static string nativeField(SkillAiEndpoint endpoint, string native, string other) => endpoint.Provider == "anthropic" ? native : other;
     private static long? Tokens(JsonNode? node) => node is JsonValue value && value.TryGetValue<long>(out var n) && n is >= 0 and <= 100_000_000 ? n : null;

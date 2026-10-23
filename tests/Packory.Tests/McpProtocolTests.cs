@@ -67,7 +67,7 @@ public sealed class McpProtocolTests
 
         public async Task<(string Digest, Dictionary<string, byte[]> Files)> Publish(
             string name, string version = "1.0.0", Dictionary<string, byte[]>? extraFiles = null,
-            string extraFrontmatter = "")
+            string extraFrontmatter = "", bool legacyInvalidFixture = false)
         {
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
@@ -83,7 +83,9 @@ public sealed class McpProtocolTests
                     entry.Write(bytes);
                 }
             var archive = buffer.ToArray();
-            Assert.Equal(name, SkillEndpoints.InspectZip(archive).Name);
+            if (legacyInvalidFixture)
+                Assert.Throws<InvalidDataException>(() => SkillEndpoints.InspectZip(archive));
+            else Assert.Equal(name, SkillEndpoints.InspectZip(archive).Name);
             var digest = Convert.ToHexStringLower(SHA256.HashData(archive));
             var db = Services.GetRequiredService<IPackageDatabase>();
             var blobs = Services.GetRequiredService<BlobStore>();
@@ -314,7 +316,10 @@ public sealed class McpProtocolTests
     {
         using var host = new Host();
         using var http = host.CreateClient();
-        await host.Publish("invalid-tag-fixture", extraFrontmatter: "metadata:\n  invalid: " + scalar + "\n");
+        // Admission now rejects this content. Seed a historical invalid row
+        // explicitly to retain independent MCP fail-closed read coverage.
+        await host.Publish("invalid-tag-fixture", extraFrontmatter: "metadata:\n  invalid: " + scalar + "\n",
+            legacyInvalidFixture: true);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var mcp = await Connect(http, timeout.Token);
         var uri = PackoryMcpCatalog.UriFor("1.0.0", "invalid-tag-fixture");

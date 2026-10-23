@@ -317,23 +317,19 @@ public static class OciEndpoints
         using (manifest)
         {
             var root = manifest.RootElement;
-            if (root.ValueKind != JsonValueKind.Object ||
+            if (root.ValueKind != JsonValueKind.Object || !OciDescriptors.UniqueProperties(root) ||
                 !root.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number ||
                 !schema.TryGetInt32(out var schemaVersion) || schemaVersion != 2 ||
                 (root.TryGetProperty("mediaType", out var declared) &&
                  (declared.ValueKind != JsonValueKind.String || declared.GetString() != media)))
                 return Error(400, "MANIFEST_INVALID", "Unsupported OCI schema or media type");
-            if (!ValidateDescriptors(root, repository, db))
+            if (!await ValidateDescriptors(root, media, repository, db, blobs, cfg, ctx.RequestAborted))
                 return Error(400, "MANIFEST_BLOB_UNKNOWN", "Manifest references invalid or unknown content");
             string? subject = null;
             if (root.TryGetProperty("subject", out var subjectNode))
             {
-                if (subjectNode.ValueKind != JsonValueKind.Object ||
-                    !subjectNode.TryGetProperty("digest", out var subjectDigest) ||
-                    subjectDigest.ValueKind != JsonValueKind.String ||
-                    !ValidDigest(subjectDigest.GetString() ?? ""))
+                if (!OciDescriptors.TryRead(subjectNode, out subject, out _, out _))
                     return Error(400, "DIGEST_INVALID", "Invalid subject digest");
-                subject = subjectDigest.GetString();
             }
             if (root.TryGetProperty("artifactType", out var artifact) && artifact.ValueKind != JsonValueKind.String)
                 return Error(400, "MANIFEST_INVALID", "Invalid artifact type");
@@ -364,25 +360,41 @@ public static class OciEndpoints
         }
     }
 
-    private static bool ValidateDescriptors(JsonElement root, string repository, IPackageDatabase db)
+    private static async Task<bool> ValidateDescriptors(JsonElement root, string media, string repository,
+        IPackageDatabase db, BlobStore blobs, Settings cfg, CancellationToken ct)
     {
+        var isIndex = media is IndexMedia or "application/vnd.docker.distribution.manifest.list.v2+json";
+        var isArtifact = media == "application/vnd.oci.artifact.manifest.v1+json";
+        var requiredArray = isIndex ? "manifests" : isArtifact ? "blobs" : "layers";
+        if (!root.TryGetProperty(requiredArray, out var required) || required.ValueKind != JsonValueKind.Array ||
+            required.GetArrayLength() > 4096 ||
+            (!isIndex && !isArtifact && !root.TryGetProperty("config", out _))) return false;
+        var verified = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in new[] { "config", "layers", "blobs", "manifests" })
         {
             if (!root.TryGetProperty(property, out var element)) continue;
-            if (property != "config" && element.ValueKind != JsonValueKind.Array) return false;
+            if (property != "config" && (element.ValueKind != JsonValueKind.Array || element.GetArrayLength() > 4096)) return false;
             var descriptors = property == "config" ? new[] { element } : element.EnumerateArray().ToArray();
             foreach (var descriptor in descriptors)
             {
-                if (descriptor.ValueKind != JsonValueKind.Object ||
-                    !descriptor.TryGetProperty("digest", out var dig) || dig.ValueKind != JsonValueKind.String)
-                    return false;
-                var digest = dig.GetString() ?? "";
-                if (!ValidDigest(digest)) return false;
+                if (!OciDescriptors.TryRead(descriptor, out var digest, out var size, out var declaredMedia)) return false;
+                string key;
                 if (property == "manifests")
                 {
-                    if (db.OciManifest(repository, digest) is null) return false;
+                    var manifest = db.OciManifest(repository, digest!);
+                    if (manifest is null || manifest.Size != size || manifest.MediaType != declaredMedia) return false;
+                    key = ManifestKey(digest!);
                 }
-                else if (!db.OciHasBlob(repository, digest)) return false;
+                else
+                {
+                    if (!db.OciHasBlob(repository, digest!)) return false;
+                    key = BlobKey(digest!);
+                }
+                if (!verified.Add(key)) continue;
+                if (!await ArtifactDigests.MatchesRemoteAsync(blobs, key, "sha256",
+                    Convert.FromHexString(digest![7..]), size, Math.Max(cfg.MaxArtifactBytes, cfg.MaxMetadataBytes), ct)) return false;
+                var path = blobs.Existing(key);
+                if (path is null || new FileInfo(path).Length != size || !await DigestMatches(path, digest!, ct)) return false;
             }
         }
         return true;

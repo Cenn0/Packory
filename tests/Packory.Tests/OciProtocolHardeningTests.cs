@@ -179,4 +179,39 @@ public sealed class OciProtocolHardeningTests
             new StringContent(json, Encoding.UTF8, "application/vnd.oci.image.manifest.v1+json"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Theory]
+    [InlineData("alternate-url")]
+    [InlineData("wrong-size")]
+    [InlineData("inline-mismatch")]
+    [InlineData("missing-layers")]
+    [InlineData("duplicate-field")]
+    public async Task GlobalManifestRejectsUnsafeOrInconsistentDescriptors(string mutation)
+    {
+        using var host = new Host();
+        using var client = host.Client();
+        byte[] bytes = Encoding.UTF8.GetBytes("synthetic content");
+        var digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
+        using var uploaded = await client.PostAsync("/v2/team/demo/blobs/uploads/?digest=" + digest,
+            new ByteArrayContent(bytes));
+        Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
+        var descriptor = new System.Text.Json.Nodes.JsonObject {
+            ["mediaType"] = "application/octet-stream", ["digest"] = digest, ["size"] = bytes.Length
+        };
+        if (mutation == "alternate-url") descriptor["urls"] = new System.Text.Json.Nodes.JsonArray("https://untrusted.example.invalid/payload");
+        if (mutation == "wrong-size") descriptor["size"] = bytes.Length + 1;
+        if (mutation == "inline-mismatch") descriptor["data"] = Convert.ToBase64String(Encoding.UTF8.GetBytes("different content"));
+        var manifest = new System.Text.Json.Nodes.JsonObject {
+            ["schemaVersion"] = 2, ["mediaType"] = "application/vnd.oci.image.manifest.v1+json",
+            ["config"] = descriptor, ["layers"] = new System.Text.Json.Nodes.JsonArray()
+        };
+        if (mutation == "missing-layers") manifest.Remove("layers");
+        var document = manifest.ToJsonString();
+        if (mutation == "duplicate-field") document = document.Replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"schemaVersion\":2");
+        using var response = await client.PutAsync("/v2/team/demo/manifests/invalid",
+            new StringContent(document, Encoding.UTF8, "application/vnd.oci.image.manifest.v1+json"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var absent = await client.GetAsync("/v2/team/demo/manifests/invalid");
+        Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
+    }
 }

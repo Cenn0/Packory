@@ -10,10 +10,17 @@ metadata. Every non-directory entry must decompress to its declared length;
 oversized or truncated streams fail closed. Duplicate and case-conflicting
 paths are rejected, together with traversal, unsafe Unix special-file
 types/symlinks, path controls and ambiguous separators. A `SKILL.md` must
-be UTF-8 and may not repeat the `name` or `description` frontmatter keys.
+be UTF-8. Admission and MCP discovery use the same bounded YAML parser:
+duplicate keys (including quoted spellings), invalid tags and malformed
+structures are rejected; folded descriptions are decoded as YAML text.
+Files cannot collide with explicit or implicit directories, including case
+and Unicode-normalization aliases. MCP snapshots accept the same 20 MiB
+total uncompressed budget as upload admission; decompression is bounded
+while reading, independently of central-directory length claims.
 
 **Compatibility:** Previously accepted ZIPs with case-distinct filenames
-or malformed/truncated bodies are now rejected on *new* uploads. Existing
+or malformed/truncated bodies, invalid YAML or file/directory aliases are
+now rejected on *new* uploads. Existing
 published ZIPs are not retrospectively rewritten, rescanned, approved or
 quarantined by this change.
 

@@ -73,6 +73,37 @@ public sealed class SkillArchiveSafetyTests
             SkillEndpoints.InspectZip(Zip(Entry("hello-world/SKILL.md", duplicateDescription))));
     }
 
+    [Theory]
+    [InlineData("name: hello-world\n\"name\": other\ndescription: Test")]
+    [InlineData("name: hello-world\ndescription: Test\n\"description\": Other")]
+    [InlineData("name: hello-world\ndescription: [invalid scalar]")]
+    [InlineData("name: hello-world\ndescription: Test\nmetadata: [unterminated")]
+    public void InvalidOrAmbiguousYamlIsRejectedBeforeStaging(string fields)
+    {
+        var markdown = "---\n" + fields + "\n---\n# Test\n";
+        Assert.Throws<InvalidDataException>(() =>
+            SkillEndpoints.InspectZip(Zip(Entry("hello-world/SKILL.md", markdown))));
+    }
+
+    [Fact]
+    public void FoldedYamlDescriptionUsesItsActualText()
+    {
+        const string markdown = "---\nname: hello-world\ndescription: >-\n  First line\n  second line\n---\n# Test\n";
+        Assert.Equal("First line second line",
+            SkillEndpoints.InspectZip(Zip(Entry("hello-world/SKILL.md", markdown))).Description);
+    }
+
+    [Theory]
+    [InlineData("hello-world/assets", "hello-world/assets/example.txt")]
+    [InlineData("hello-world/assets", "hello-world/assets/")]
+    [InlineData("hello-world/Assets", "hello-world/assets/example.txt")]
+    public void FilesCannotAliasExplicitOrImplicitDirectories(string first, string second)
+    {
+        var data = Zip(Entry("hello-world/SKILL.md", Markdown), Entry(first, "file"),
+            Entry(second, second.EndsWith('/') ? "" : "child"));
+        Assert.Throws<InvalidDataException>(() => SkillEndpoints.InspectZip(data));
+    }
+
     [Fact]
     public void InvalidUtf8ManifestIsNotSilentlyReplaced()
     {

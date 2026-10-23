@@ -38,12 +38,17 @@ public static class NuGetEndpoints
             if (settings.IsReservedNuget(id))
                 return versions.Count == 0 ? Results.NotFound() : Results.Json(new { versions = versions.OrderBy(v => v, StringComparer.Ordinal).ToArray() });
             var uri = settings.NugetUpstreamUrl.TrimEnd('/') + "/" + id + "/index.json";
+            var client = clients.CreateClient("upstream");
+            using var deadline = UpstreamDeadline.Start(client, ctx.RequestAborted);
             try
             {
-                using var response = await clients.CreateClient("upstream").GetAsync(uri, ctx.RequestAborted);
+                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    var bytes = await BlobStore.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ctx.RequestAborted), settings.MaxMetadataBytes, ctx.RequestAborted);
+                    if (response.Content.Headers.ContentLength > settings.MaxMetadataBytes)
+                        throw new PayloadTooLargeException();
+                    await using var body = await response.Content.ReadAsStreamAsync(deadline.Token);
+                    var bytes = await BlobStore.ReadBoundedAsync(body, settings.MaxMetadataBytes, deadline.Token);
                     using var doc = JsonDocument.Parse(bytes);
                     if (doc.RootElement.TryGetProperty("versions", out var collection) && collection.ValueKind == JsonValueKind.Array)
                         foreach (var v in collection.EnumerateArray())
@@ -52,9 +57,9 @@ public static class NuGetEndpoints
                 else if (response.StatusCode != System.Net.HttpStatusCode.NotFound && versions.Count == 0) return Results.StatusCode(502);
             }
             catch (HttpRequestException) when (versions.Count > 0) { }
-            catch (TaskCanceledException) when (versions.Count > 0 && !ctx.RequestAborted.IsCancellationRequested) { }
+            catch (OperationCanceledException) when (versions.Count > 0 && !ctx.RequestAborted.IsCancellationRequested) { }
             catch (HttpRequestException) { return Results.StatusCode(502); }
-            catch (TaskCanceledException) when (!ctx.RequestAborted.IsCancellationRequested) { return Results.StatusCode(504); }
+            catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested) { return Results.StatusCode(504); }
             return versions.Count == 0 ? Results.NotFound() : Results.Json(new { versions = versions.OrderBy(v => v, StringComparer.Ordinal).ToArray() });
         });
 
@@ -187,6 +192,8 @@ public static class NuGetEndpoints
         // A missing hosted release must never be substituted with a package from an upstream.
         if (origin == "hosted") throw new InvalidDataException("Hosted NuGet blob is missing");
         if (settings.IsReservedNuget(id)) return null;
+        using var deadline = UpstreamDeadline.Start(http, ct);
+        ct = deadline.Token;
         var url = settings.NugetUpstreamUrl.TrimEnd('/') + $"/{id}/{version}/{id}.{version}.nupkg";
         using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;

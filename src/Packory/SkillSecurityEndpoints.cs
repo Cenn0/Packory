@@ -176,7 +176,7 @@ public static class SkillSecurityEndpoints
         try { value = await ctx.Request.ReadFromJsonAsync<DecisionRequest>(ctx.RequestAborted); }
         catch (JsonException) { return null; }
         return value is not null &&
-            value.Sha256.Length == 64 &&
+            value.Sha256 is { Length: 64 } &&
             value.Sha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') &&
             value.Reason?.Length is >= 3 and <= 512 ? value : null;
     }

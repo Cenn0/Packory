@@ -302,7 +302,7 @@ public static class FeedOciEndpoints
         using (document)
         {
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || !UniqueProperties(root) ||
+            if (root.ValueKind != JsonValueKind.Object || !OciDescriptors.UniqueProperties(root) ||
                 !root.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number ||
                 !schema.TryGetInt32(out var version) || version != 2 ||
                 (root.TryGetProperty("mediaType", out var declared) &&
@@ -319,7 +319,7 @@ public static class FeedOciEndpoints
             string? subject = null;
             if (root.TryGetProperty("subject", out var subjectNode))
             {
-                if (!Descriptor(subjectNode, out subject, out _, out _))
+                if (!OciDescriptors.TryRead(subjectNode, out subject, out _, out _))
                     return Error(400, "MANIFEST_INVALID", "Invalid subject descriptor");
                 // OCI 1.1 requires acceptance before the subject exists. This is
                 // an inert association, never a lookup in any other repository.
@@ -358,7 +358,7 @@ public static class FeedOciEndpoints
             var descriptors = property == "config" ? new[] { element } : element.EnumerateArray().ToArray();
             foreach (var descriptor in descriptors)
             {
-                if (!Descriptor(descriptor, out var digest, out var size, out var declaredMedia)) return false;
+                if (!OciDescriptors.TryRead(descriptor, out var digest, out var size, out var declaredMedia)) return false;
                 var path = AssetPath(repository, digest!, property == "manifests");
                 var asset = db.GetFeedAsset(feed, "oci", path);
                 if (asset is null || asset.Size != size ||
@@ -366,55 +366,6 @@ public static class FeedOciEndpoints
                 if (verified.Add(path) && await VerifiedPath(asset, cfg, blobs, ct) is null) return false;
             }
         }
-        return true;
-    }
-
-    private static bool Descriptor(JsonElement node, out string? digest, out long size, out string? media)
-    {
-        digest = media = null;
-        size = 0;
-        if (node.ValueKind != JsonValueKind.Object ||
-            // Native OCI clients may try these URLs before their registry.
-            // This hosted profile never publishes alternate download origins.
-            node.TryGetProperty("urls", out _) ||
-            !node.TryGetProperty("digest", out var dg) || dg.ValueKind != JsonValueKind.String ||
-            !OciEndpoints.ValidDigest(dg.GetString() ?? "") ||
-            !node.TryGetProperty("size", out var length) || length.ValueKind != JsonValueKind.Number ||
-            !length.TryGetInt64(out size) || size < 0 ||
-            !node.TryGetProperty("mediaType", out var mt) || mt.ValueKind != JsonValueKind.String ||
-            !RawEndpoints.ValidMediaType(mt.GetString())) return false;
-        digest = dg.GetString();
-        media = mt.GetString();
-        if (node.TryGetProperty("data", out var embedded))
-        {
-            if (embedded.ValueKind != JsonValueKind.String) return false;
-            var encoded = embedded.GetString()!;
-            // The enclosing manifest is metadata-bounded. Reject impossible
-            // lengths before allocating the inline content, then verify its
-            // identity. Inline bytes never replace the same-feed ledger check.
-            var maximumDecoded = encoded.Length / 4L * 3;
-            if (encoded.Length % 4 != 0 || size > maximumDecoded || maximumDecoded - size > 2)
-                return false;
-            byte[] bytes;
-            try { bytes = Convert.FromBase64String(encoded); }
-            catch (FormatException) { return false; }
-            if (bytes.LongLength != size || Convert.ToBase64String(bytes) != encoded ||
-                "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes)) != digest)
-                return false;
-        }
-        return true;
-    }
-
-    private static bool UniqueProperties(JsonElement element)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in element.EnumerateObject())
-                if (!names.Add(property.Name) || !UniqueProperties(property.Value)) return false;
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-            foreach (var item in element.EnumerateArray()) if (!UniqueProperties(item)) return false;
         return true;
     }
 
@@ -438,7 +389,7 @@ public static class FeedOciEndpoints
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ctx.RequestAborted);
             var root = doc.RootElement;
             if (!root.TryGetProperty("subject", out var node) ||
-                !Descriptor(node, out var digest, out _, out _) || digest != subject) continue;
+                !OciDescriptors.TryRead(node, out var digest, out _, out _) || digest != subject) continue;
             string? type = null;
             if (root.TryGetProperty("artifactType", out var artifact)) type = artifact.GetString();
             else if (root.TryGetProperty("config", out var config) && config.TryGetProperty("mediaType", out var mt)) type = mt.GetString();

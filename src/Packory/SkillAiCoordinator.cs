@@ -8,7 +8,7 @@ namespace Packory;
 /// <summary>File-only bridge to an offline scanner. Never runs submitted code or shells in the API.</summary>
 public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, SkillSecurityStore security,
     BlobStore blobs, SkillAiDeployment deployment, SkillAiGateway gateway,
-    ILogger<SkillAiCoordinator> logger) : BackgroundService
+    ILogger<SkillAiCoordinator> logger, PostgresSingleWriterLease writerLease) : BackgroundService
 {
     public string Root => Path.Combine(Path.GetFullPath(settings.DataDirectory), "skill-ai");
     public string Incoming => Path.Combine(Root, "in");
@@ -19,16 +19,7 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
     public sealed record RelayRequest(string JobId, string RequestId, string Body);
     private static bool Id(string? id) => id is { Length: 32 } && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     internal static string BoundedFile(string path, int max)
-    {
-        var info = new FileInfo(path);
-        if (!info.Exists || info.LinkTarget is not null || info.Length > max) throw new InvalidDataException("Invalid AI exchange file.");
-        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var bytes = new byte[max + 1]; var length = 0;
-        while (length < bytes.Length)
-        { var count = input.Read(bytes, length, bytes.Length - length); if (count == 0) break; length += count; }
-        if (length > max) throw new InvalidDataException("Oversized AI exchange file.");
-        return new UTF8Encoding(false, true).GetString(bytes, 0, length);
-    }
+        => ScanExchange.ReadText(path, max);
     private static async Task WriteAsync(string path, object value, CancellationToken ct)
     {
         var temp = path + ".tmp";
@@ -62,6 +53,11 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
     internal async Task TickAsync(CancellationToken ct)
     {
         if (settings.RecoveryMaintenance || settings.InstanceRole == "reader" || !settings.SkillSecurityEnforced) return;
+        if (!writerLease.IsHeld())
+        {
+            foreach (var request in requests.Values) request.Cancel.Cancel();
+            return;
+        }
         var cfg = store.Configuration().Configuration;
         foreach (var item in requests.ToArray())
         {
@@ -185,7 +181,8 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
         catch (Exception ex)
         {
             var error = ex is InvalidOperationException && ex.Message == "budget_exceeded" ? "budget_exceeded" : "provider_or_policy_failure";
-            store.Finish(job.Id, error == "budget_exceeded" ? "BUDGET_EXCEEDED" : "FAILED", error);
+            if (writerLease.IsHeld())
+                store.Finish(job.Id, error == "budget_exceeded" ? "BUDGET_EXCEEDED" : "FAILED", error);
             if (reply is not null) await WriteAsync(reply, new { status = 503, body = "{\"error\":{\"message\":\"AI request unavailable\"}}" }, CancellationToken.None);
         }
         finally { File.Delete(path); }
@@ -196,9 +193,13 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
         {
             var body = "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK. This is a connection test, not a skill assessment.\"}]}";
             _ = await gateway.CompleteAsync(job, Guid.NewGuid().ToString("N"), body, ct);
-            store.Finish(job.Id, "COMPLETED", report: "{\"connectionTest\":true,\"skillAssessment\":false}");
+            if (writerLease.IsHeld())
+                store.Finish(job.Id, "COMPLETED", report: "{\"connectionTest\":true,\"skillAssessment\":false}");
         }
-        catch (Exception) { store.Finish(job.Id, "FAILED", "connection_test_failed"); }
+        catch (Exception)
+        {
+            if (writerLease.IsHeld()) store.Finish(job.Id, "FAILED", "connection_test_failed");
+        }
     }
     private void Cleanup(string id)
     {

@@ -340,7 +340,9 @@ app.Use(async (ctx, next) =>
         }
     }
     // A lost PostgreSQL lease must fail closed, never permit a second writer.
-    if (!readerInstance && (ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE") && !startupLease.IsHeld())
+    if (!readerInstance && ((ctx.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE") ||
+        ctx.Request.Path.StartsWithSegments("/nuget") || ctx.Request.Path.StartsWithSegments("/npm")) &&
+        !startupLease.IsHeld())
     {
         ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return;
@@ -374,7 +376,7 @@ app.Use(async (ctx, next) =>
     catch (PayloadTooLargeException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 413; }
     catch (StorageQuotaExceededException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 507; }
     catch (HttpRequestException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
-    catch (TaskCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
+    catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
     { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 504; }
     catch (System.Text.Json.JsonException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }
     catch (InvalidDataException) { if (!ctx.Response.HasStarted) ctx.Response.StatusCode = 502; }

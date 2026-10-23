@@ -11,11 +11,13 @@ namespace Packory;
 /// </summary>
 public sealed class SkillScanCoordinator(
     Settings settings, SkillSecurityStore store, IPackageDatabase database,
-    BlobStore blobs, ILogger<SkillScanCoordinator> logger, SkillAiStore? ai = null) : BackgroundService
+    BlobStore blobs, ILogger<SkillScanCoordinator> logger,
+    PostgresSingleWriterLease writerLease, SkillAiStore? ai = null) : BackgroundService
 {
     public string Root => Path.Combine(Path.GetFullPath(settings.DataDirectory), "skill-scans");
     public string Incoming => Path.Combine(Root, "in");
     public string Outgoing => Path.Combine(Root, "out");
+    private string? afterName, afterVersion;
 
     // A rescan must never accept a stale response from a prior attempt for
     // the same immutable bytes. UpdatedAt changes on QUEUED transitions.
@@ -42,11 +44,20 @@ public sealed class SkillScanCoordinator(
     internal async Task TickAsync(CancellationToken ct)
     {
         // Defense in depth for direct callers as well as the hosted dispatcher.
-        if (settings.RecoveryMaintenance) return;
+        if (settings.RecoveryMaintenance || settings.InstanceRole == "reader" ||
+            !settings.SkillSecurityEnforced || !writerLease.IsHeld()) return;
         // Complete results first; each result is matched to an immutable digest and job id.
-        foreach (var entry in store.List(1000))
+        var pending = store.PendingPage(afterName, afterVersion);
+        if (pending.Count == 0)
+        {
+            afterName = afterVersion = null;
+            pending = store.PendingPage(null, null);
+        }
+        foreach (var entry in pending)
         {
             ct.ThrowIfCancellationRequested();
+            afterName = entry.Name;
+            afterVersion = entry.Version;
             if (entry.State == "PUBLISHING")
             {
                 try
@@ -67,9 +78,9 @@ public sealed class SkillScanCoordinator(
             var answer = Path.Combine(Outgoing, id + ".json");
             if (File.Exists(answer))
             {
-                var text = File.ReadAllText(answer);
                 try
                 {
+                    var text = ScanExchange.ReadText(answer, 1024 * 1024);
                     var (state, risk, recommendation, report) = SkillScanResult.Parse(text, entry.Sha256);
                     if (store.SaveResult(entry.Name, entry.Version, entry.Sha256,
                         state, risk, recommendation, report))
@@ -78,7 +89,8 @@ public sealed class SkillScanCoordinator(
                         DeleteInput(id);
                     }
                 }
-                catch (Exception ex) when (ex is JsonException or InvalidDataException)
+                catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or
+                    UnauthorizedAccessException or DecoderFallbackException)
                 {
                     logger.LogWarning("Rejected malformed skill scan report; revision remains blocked.");
                     if (store.SaveResult(entry.Name, entry.Version, entry.Sha256,
@@ -128,8 +140,8 @@ public sealed class SkillScanCoordinator(
     public async Task<bool> ApproveAsync(string name, string version, string digest,
         string actor, string reason, CancellationToken ct)
     {
-        if (settings.RecoveryMaintenance)
-            throw new InvalidOperationException("Skill approval is disabled during offline recovery maintenance.");
+        if (settings.RecoveryMaintenance || settings.InstanceRole == "reader" || !writerLease.IsHeld())
+            throw new InvalidOperationException("Skill approval requires an active writer outside recovery maintenance.");
         if (ai is not null) await ai.PolicyGate.WaitAsync(ct);
         try
         {
@@ -144,6 +156,7 @@ public sealed class SkillScanCoordinator(
 
     private async Task FinishApprovalAsync(SkillSecurityStore.Revision rev, CancellationToken ct)
     {
+        if (!writerLease.IsHeld()) throw new InvalidOperationException("Writer lease unavailable.");
         if (rev.State != "PUBLISHING") return;
         var source = blobs.Existing(rev.StagingKey);
         if (source is null || HashFile(source) != rev.Sha256)
@@ -171,8 +184,11 @@ public sealed class SkillScanCoordinator(
             "APPROVED", "system", "Verified immutable artifact and catalog visibility");
     }
 
-    public static string HashFile(string file) =>
-        Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)));
+    public static string HashFile(string file)
+    {
+        using var stream = File.OpenRead(file);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
 }
 
 public static class SkillScanResult

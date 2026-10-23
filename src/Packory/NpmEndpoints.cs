@@ -59,32 +59,25 @@ public static class NpmEndpoints
                     packageManifest["dist"] is not JsonObject dist ||
                     dist["tarball"]?.GetValue<string>() is not { } tarball)
                     return Results.NotFound();
+                var expected = NpmTarballIntegrity.ParseExpected(
+                    Encoding.UTF8.GetString(raw), name, version, packument: true);
+                if (expected is null) return Results.StatusCode(502);
                 if (!Uri.TryCreate(tarball, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
                     uri.Host != new Uri(settings.NpmUpstreamUrl).Host || uri.Port != 443 ||
                     !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment))
                     return Results.StatusCode(502);
-                using var response = await clients.CreateClient("upstream").GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
+                var client = clients.CreateClient("upstream");
+                using var deadline = UpstreamDeadline.Start(client, ctx.RequestAborted);
+                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
                 if (response.StatusCode == HttpStatusCode.NotFound) return Results.NotFound();
                 response.EnsureSuccessStatusCode();
                 if (response.Content.Headers.ContentLength is { } contentLength && contentLength > settings.MaxArtifactBytes)
                     throw new PayloadTooLargeException();
-                await using var body = await response.Content.ReadAsStreamAsync(ctx.RequestAborted);
-                var bytes = await BlobStore.ReadBoundedAsync(body, settings.MaxArtifactBytes, ctx.RequestAborted);
-                if (dist["integrity"]?.GetValue<string>() is { } integrity && integrity.StartsWith("sha512-", StringComparison.Ordinal))
-                {
-                    if (!string.Equals(integrity[7..], Convert.ToBase64String(SHA512.HashData(bytes)), StringComparison.Ordinal))
-                        return Results.StatusCode(502);
-                }
-                else if (dist["shasum"]?.GetValue<string>() is { } checksum)
-                {
-                    if (!string.Equals(checksum, Convert.ToHexStringLower(SHA1.HashData(bytes)), StringComparison.OrdinalIgnoreCase))
-                        return Results.StatusCode(502);
-                }
-                else
-                {
-                    // No integrity claim from the upstream: do not publish unverified content.
+                await using var body = await response.Content.ReadAsStreamAsync(deadline.Token);
+                var bytes = await BlobStore.ReadBoundedAsync(body, settings.MaxArtifactBytes, deadline.Token);
+                var actual = expected.Algorithm == "sha512" ? SHA512.HashData(bytes) : SHA1.HashData(bytes);
+                if (!CryptographicOperations.FixedTimeEquals(actual, expected.Bytes))
                     return Results.StatusCode(502);
-                }
                 if (!await blobs.PutAsync(key, new MemoryStream(bytes, writable: false), settings.MaxArtifactBytes, ctx.RequestAborted))
                     throw new InvalidDataException("npm cache blob was concurrently replaced");
                 var description = json["versions"]?[version]?["description"]?.ToString() ?? json["description"]?.ToString() ?? "";
@@ -176,22 +169,23 @@ public static class NpmEndpoints
         var key = $"npm-metadata/{Names.HashName(name)}.json";
         var cached = blobs.Existing(key);
         var url = settings.NpmUpstreamUrl.TrimEnd('/') + "/" + Names.EscapedNpm(name);
+        using var deadline = UpstreamDeadline.Start(http, ct);
         try
         {
-            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.StatusCode == HttpStatusCode.NotFound) return cached is not null ? await File.ReadAllBytesAsync(cached, ct) : null;
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is { } length && length > settings.MaxMetadataBytes)
                 throw new PayloadTooLargeException();
-            await using var input = await response.Content.ReadAsStreamAsync(ct);
-            var bytes = await BlobStore.ReadBoundedAsync(input, settings.MaxMetadataBytes, ct);
+            await using var input = await response.Content.ReadAsStreamAsync(deadline.Token);
+            var bytes = await BlobStore.ReadBoundedAsync(input, settings.MaxMetadataBytes, deadline.Token);
             // Validate the received document before making it part of the offline cache.
             if (JsonNode.Parse(bytes) is not JsonObject) throw new InvalidDataException("Invalid upstream npm metadata");
             await blobs.ReplaceAsync(key, new MemoryStream(bytes, false), settings.MaxMetadataBytes, ct);
             return bytes;
         }
         catch (HttpRequestException) when (cached is not null) { return await File.ReadAllBytesAsync(cached, ct); }
-        catch (TaskCanceledException) when (cached is not null && !ct.IsCancellationRequested) { return await File.ReadAllBytesAsync(cached, ct); }
+        catch (OperationCanceledException) when (cached is not null && !ct.IsCancellationRequested) { return await File.ReadAllBytesAsync(cached, ct); }
     }
 
     public static async Task<JsonObject?> BuildPackument(string name, Settings settings, IPackageDatabase db, BlobStore blobs, HttpClient http, CancellationToken ct)
@@ -200,7 +194,7 @@ public static class NpmEndpoints
         byte[]? remote;
         try { remote = await FetchMetadata(name, settings, blobs, http, ct); }
         catch (HttpRequestException) when (hosted.Versions.Count > 0) { remote = null; }
-        catch (TaskCanceledException) when (hosted.Versions.Count > 0 && !ct.IsCancellationRequested) { remote = null; }
+        catch (OperationCanceledException) when (hosted.Versions.Count > 0 && !ct.IsCancellationRequested) { remote = null; }
         var doc = remote is null ? null : JsonNode.Parse(remote) as JsonObject;
         if (doc is null && hosted.Versions.Count == 0) return null;
         doc ??= new JsonObject { ["name"] = name, ["versions"] = new JsonObject(), ["dist-tags"] = new JsonObject() };

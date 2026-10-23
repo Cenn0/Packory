@@ -6,6 +6,17 @@ A restore only targets a **different, empty PostgreSQL database** and a **differ
 
 ## Requirements
 
+The optional AI feature adds four authoritative tables independently of the
+core schema number: `skill_ai_configuration`, `skill_ai_jobs`,
+`skill_ai_requests` and `skill_ai_audit`. New backups detect the complete
+set and fingerprint all four, including policy revisions, encrypted
+credentials and budget reservations. A partial set is rejected. Existing
+snapshots with no AI tables retain their older verification profile; they
+are not proof of AI policy/budget recovery. Restore compares the actual
+restored table fingerprints, so a dump containing unrecorded AI tables
+cannot pass as complete evidence. Keep the encryption keyring separately
+in the operator's secret backup; it is never exported into public evidence.
+
 - Packory writers stopped; independent operational confirmation of an offline window.
 - PostgreSQL client binaries **matching/compatible with server major version**, `pg_dump`, `pg_restore`; Python 3, `boto3`, `psycopg[binary]`.
 - Existing `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, `PGPASSWORD` environment variables loaded **outside Git and shell history**. The exact source database and restored target database must be separate.

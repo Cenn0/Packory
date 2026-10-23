@@ -12,6 +12,7 @@ Packory is a **self-hosted registry hub in active development**. Current hosted 
 | Versioned architecture decision | [ADR-001 V3 boundaries](adr/0001-v3-platform-boundaries.md) |
 | Tested native clients and deployment profiles | [Support matrix](support-matrix.md) |
 | Production blockers and real-provider recovery | [Release gates](release-gates.md) |
+| Architecture, security and correctness review with corrected defects and scoped test evidence | [23 October 2026 review](review-2026-10-23.md) |
 | Deployment, TLS, tokens and backups | [Operations](operations.md) |
 | **Current priorities, gates and execution order (22 October 2026)** | **[Roadmap V5](roadmap-v5.md)** |
 | Historical V3 engineering plan | [Roadmap V3](roadmap.md) |

@@ -109,6 +109,20 @@ reliable. Reader nodes must retain separate writable local cache roots.
 
 ### Secure baseline
 
+Legacy NuGet/npm upstream requests retain their configured HTTP timeout
+through streamed body reads (90 seconds by default). NuGet version indexes
+are streamed and metadata-bounded before parsing. Cached metadata/hosted
+fallback remains available under the existing adapter policy when an
+upstream body times out; a cold timeout returns 504. This is a cooperative
+I/O deadline, not a CPU-time or total request latency guarantee.
+
+On PostgreSQL writer-lease loss, mutation requests and legacy NuGet/npm
+mirror GETs return 503. Static and AI dispatchers stop admitting work; AI
+provider calls are cancelled and cannot reserve new requests without the
+lease. These checks do not fence an arbitrary already-running transaction
+or establish safe automatic failover. Stop the old process and workers
+before transferring ownership; active-active remains unsupported.
+
 1. Generate tokens using a cryptographically secure RNG; store them in a deployment secrets manager. Rotate by changing the environment and restarting the process. For an HTTP reverse proxy, enforce HTTPS for **all** authenticated reads and writes.
 2. Restrict egress from Packory to the HTTPS registry hosts, configure DNS/egress filtering, and ensure only trusted operators can change upstream URLs. npm metadata supplies tarball paths; the app enforces the configured upstream host, disables automatic redirects, and does not assess package reputation. Upstream endpoints that require cross-host redirects may not work in this MVP.
 3. Publish behind a reverse proxy with rate limiting, body-size limits, TLS, access logs that **redact Authorization, X-NuGet-ApiKey, URL credentials, and cookies**. Packory additionally applies an in-process publish rate limit, partitioned by known credential role so an unauthenticated flood cannot exhaust the admin/write bucket; this does not replace network-edge protections. Avoid proxy access logs that disclose sensitive query strings.
