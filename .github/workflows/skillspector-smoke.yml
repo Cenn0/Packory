@@ -143,10 +143,11 @@ jobs:
               "Malformed Skill ZIP unexpectedly obtained a scanner verdict")
           print("Pinned SkillSpector also detected risky text and rejected malformed ZIP without executing either")
           PY
-      - name: Test complete Compose import, scan, approval, MCP distribution and revocation
+      - name: Test Compose scan, approval, MCP distribution and scanner outage recovery
         shell: bash
         run: |
           set -euo pipefail
+          export COMPOSE_PROJECT_NAME="packory-scanner-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
           export PACKORY_READ_TOKEN="$(openssl rand -hex 32)"
           export PACKORY_WRITE_TOKEN="$(openssl rand -hex 32)"
