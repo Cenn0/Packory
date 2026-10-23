@@ -56,7 +56,8 @@ transitive dependencies and license/SBOM inventory.
    ```
 
    This Ollama subnet is an **example for a controlled Docker-only network**,
-   not a recommended general permission; restrict the CIDR to the specific
+   not a recommended general permission; the Ollama profile rejects public
+   IP destinations even when its hostname resolves externally; restrict the CIDR to the specific
    container or address range used by the deployment. `localhost` inside the
    API container is not the host machine. Do not expose a private local
    model/API endpoint beyond the networks you control. Allowlists are
