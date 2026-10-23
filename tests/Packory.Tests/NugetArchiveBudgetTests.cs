@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 using Packory;
+using Xunit;
 
 namespace Packory.Tests;
 
@@ -76,6 +77,7 @@ public sealed class NugetArchiveBudgetTests
         }
         Assert.True(found);
         using var input = new MemoryStream(bytes);
-        Assert.ThrowsAny<InvalidDataException>(() => NuGetEndpoints.ReadNuspec(input));
+        var error = Assert.Throws<InvalidDataException>(() => NuGetEndpoints.ReadNuspec(input));
+        Assert.Equal("Nuspec too large", error.Message);
     }
 }
