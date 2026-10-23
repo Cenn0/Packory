@@ -60,11 +60,13 @@ class ImagePublicationContractTests(unittest.TestCase):
                     # echo is command substitution, not formatting.
                     self.assertNotRegex(line, r"(?<!\\)`")
 
-    def test_anonymous_check_never_uses_push_credentials_or_claims_release(self):
+    def test_full_anonymous_delivery_is_required_before_moving_mutable_tags(self):
         section = step_block("Publish SHA and main tags to GitHub Container Registry")
-        self.assertIn('DOCKER_CONFIG="$anonymous_config" docker manifest inspect', section)
-        self.assertIn("Anonymous manifest access NOT verified", section)
+        self.assertIn('env -u GHCR_TOKEN python3 scripts/verify_container_delivery.py', section)
+        self.assertLess(section.index('scripts/verify_container_delivery.py'),
+                        section.index('docker tag "$image:build" "$image:main"'))
         self.assertIn("NOT independently approved production releases", section)
+        self.assertIn("container-delivery-${{ env.SOURCE_SHA }}", WORKFLOW)
 
 
 if __name__ == "__main__":
