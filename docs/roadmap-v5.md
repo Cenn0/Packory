@@ -178,7 +178,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
 | V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
 | V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |
-| V5-27 | Bounded feed/query-scoped REST keyset discovery added on both providers; quota, retention and MCP/UI discovery remain |
+| V5-27 | Bounded feed/query-scoped REST keyset discovery added on both providers; logical single-writer quotas and explicit indefinite retention implemented; MCP/UI discovery and physical-provider qualification remain |
 | V5-30 | Browser BFF and its security/E2E acceptance remain unimplemented |
 | V5-31 | Privileged dashboard depends on V5-30; current catalog UI does not satisfy it |
 | V5-32 | Existing static scan/approval does not verify publisher signatures or ownership |
@@ -240,3 +240,13 @@ and an unsupported platform/manifest fail closed. Deterministic transport and
 workflow tests cover failures independently of real registry observations.
 This verifies the declared single-platform delivery profile; it does not
 replace image runtime, source CI, reviewer or deployment/release acceptance.
+
+## Raw quota checkpoint — 23 October 2026
+
+V5-27 includes optional independent byte/count limits on committed private Raw
+assets, an exact-feed usage endpoint, concurrent-limit regression cases and
+HTTP-client quota acceptance. Both metadata providers calculate usage from the
+restored ledger; failed quota admissions do not write intents or blobs.
+Retention is explicitly indefinite, with no online delete or automatic GC.
+This does not complete UI/MCP parity, physical bucket accounting or production
+provider qualification. The single-writer boundary is unchanged.

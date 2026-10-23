@@ -354,3 +354,10 @@ contents. Schema V15 is forward-only: downgrade requires restoring a
 verified V14 backup with its matching data, not changing the version marker.
 SQLite offline and PostgreSQL/S3 snapshots include and validate the new
 `feed_npm_deprecations` ledger against exact feed-local immutable revisions.
+
+## Private Raw accounting
+
+The private Raw profile includes exact-feed `raw/usage` and optional independent
+byte/count quotas, enforced across concurrent single-writer publication.
+Immutable assets remain retained indefinitely; capacity pressure never causes
+online deletion. See [operations](operations.md#private-raw-feed-capacity-and-retention).

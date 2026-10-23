@@ -75,3 +75,7 @@ Do not infer a client's version from an `ubuntu-latest` runner image. Do not cla
 | Multiple active writers | No | **Not supported** | Consider only after performance evidence and fencing | **Do not deploy** |
 
 See [Release gates](release-gates.md) for provider and production evidence still required.
+
+Private Raw additionally provides committed-byte/count usage and optional
+per-feed limits, with concurrent writer and HTTP-client quota tests. This does
+not graduate physical S3 capacity, automatic retention/GC or UI/MCP discovery.

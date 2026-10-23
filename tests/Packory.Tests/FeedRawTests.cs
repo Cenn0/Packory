@@ -21,7 +21,7 @@ public sealed class FeedRawTests
     private const string Reader = "synthetic-global-reader-for-tests";
     private const string Writer = "synthetic-global-writer-for-tests";
 
-    private sealed class Host : WebApplicationFactory<Program>
+    private sealed class Host(long maxBytes = 0, long maxArtifacts = 0) : WebApplicationFactory<Program>
     {
         private readonly string _data = Path.Combine(Path.GetTempPath(),
             "packory-feed-raw-tests-" + Guid.NewGuid().ToString("N"));
@@ -46,7 +46,8 @@ public sealed class FeedRawTests
                     DataDirectory = _data, PublicBaseUrl = "http://localhost:8080",
                     AdminToken = Admin, ReadToken = Reader, WriteToken = Writer,
                     AnonymousRead = true, McpEnabled = false,
-                    MaxArtifactBytes = 1024 * 1024
+                    MaxArtifactBytes = 1024 * 1024,
+                    MaxRawFeedBytes = maxBytes, MaxRawFeedArtifacts = maxArtifacts
                 };
                 cfg.Validate();
                 services.AddSingleton(cfg);
@@ -107,6 +108,81 @@ public sealed class FeedRawTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return (document.RootElement.GetProperty("id").GetString()!,
             document.RootElement.GetProperty("token").GetString()!);
+    }
+
+    [Theory]
+    [InlineData(10, 0, 3)]
+    [InlineData(100, 2, 2)]
+    public async Task ConcurrentWritesRespectIndependentCommittedFeedQuotas(long maxBytes, long maxArtifacts, int admitted)
+    {
+        using var host = new Host(maxBytes, maxArtifacts);
+        using var client = host.CreateClient();
+        await CreateFeed(client, "quota-alpha");
+        await CreateFeed(client, "quota-beta");
+        var alpha = await Scoped(client, "write", "feed:quota-alpha:publish");
+        var reader = await Scoped(client, "read", "feed:quota-alpha:read");
+        var beta = await Scoped(client, "write", "feed:quota-beta:publish");
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 10).Select(index => Status(client,
+            HttpMethod.Put, "/feeds/quota-alpha/raw/item-" + index + "/1.0", alpha.Token, "abc"u8.ToArray())));
+        Assert.Equal(admitted, outcomes.Count(x => x == HttpStatusCode.Created));
+        Assert.Equal(10 - admitted, outcomes.Count(x => (int)x == 507));
+        Assert.Equal(HttpStatusCode.Created, await Status(client, HttpMethod.Put,
+            "/feeds/quota-beta/raw/independent/1.0", beta.Token, "abc"u8.ToArray()));
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        Assert.Equal(new RawFeedUsage(admitted, admitted * 3), db.RawFeedUsage("quota-alpha"));
+        Assert.Equal(new RawFeedUsage(1, 3), db.RawFeedUsage("quota-beta"));
+        Assert.Empty(db.PendingPublications());
+        var reopened = new Database(host.Services.GetRequiredService<Settings>());
+        reopened.Initialize();
+        Assert.Equal(new RawFeedUsage(admitted, admitted * 3), reopened.RawFeedUsage("quota-alpha"));
+        const string usageUrl = "/feeds/quota-alpha/raw/usage";
+        Assert.Equal(HttpStatusCode.Unauthorized, await Status(client, HttpMethod.Get, usageUrl));
+        Assert.Equal(HttpStatusCode.Forbidden, await Status(client, HttpMethod.Get, usageUrl, beta.Token));
+        Assert.Equal(HttpStatusCode.Forbidden, await Status(client, HttpMethod.Get, usageUrl, Reader));
+        using (var response = await client.SendAsync(Req(HttpMethod.Get, usageUrl, reader.Token)))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(admitted * 3, json.RootElement.GetProperty("bytes").GetInt64());
+            Assert.Equal(admitted, json.RootElement.GetProperty("artifacts").GetInt64());
+            Assert.Equal("retain-immutable-no-online-delete", json.RootElement.GetProperty("retention").GetString());
+        }
+        Assert.Equal(HttpStatusCode.OK, await Status(client, HttpMethod.Post,
+            "/api/v1/admin/feeds/quota-alpha/deactivate", Admin));
+        Assert.Equal(HttpStatusCode.NotFound, await Status(client, HttpMethod.Get, usageUrl, reader.Token));
+    }
+
+    [Fact]
+    public void QuotaMathAndConfigurationRejectNegativeAndOverflowInputs()
+    {
+        Assert.False(RawFeedQuota.Admit(new RawFeedUsage(1, long.MaxValue), 10,
+            new Settings { MaxRawFeedBytes = 10 }));
+        Assert.False(RawFeedQuota.Admit(new RawFeedUsage(-1, 0), 1, new Settings()));
+        Assert.False(RawFeedQuota.Admit(new RawFeedUsage(0, 0), 0, new Settings()));
+        Assert.True(RawFeedQuota.Admit(new RawFeedUsage(0, 0), 10, new Settings { MaxRawFeedBytes = 10 }));
+        Assert.False(RawFeedQuota.Admit(new RawFeedUsage(1, 10), 1, new Settings { MaxRawFeedBytes = 10 }));
+        Assert.Throws<InvalidOperationException>(() => new Settings { MaxRawFeedBytes = -1 }.Validate());
+        Assert.Throws<InvalidOperationException>(() => new Settings { MaxRawFeedArtifacts = -1 }.Validate());
+    }
+
+    [Fact]
+    public void PostgreSqlRawUsageIsBoundToExactFeedAndProtocol()
+    {
+        var connection = Environment.GetEnvironmentVariable("PACKORY_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connection)) return;
+        var db = new PostgresDatabase(new Settings { MetadataProvider = "postgresql", PostgresConnectionString = connection });
+        db.Initialize();
+        var id = "raw-quota-" + Guid.NewGuid().ToString("N")[..12];
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        Assert.True(db.TryCreateDraftFeed(new FeedDefinition(id, "raw", "hosted", "private", "Synthetic", false, at, at), "fixture"));
+        Assert.True(db.TrySetHostedFeedEnabled(id, "raw", true, "fixture"));
+        Assert.Equal(new RawFeedUsage(0, 0), db.RawFeedUsage(id));
+        foreach (var size in new long[] { 7, 13 })
+            Assert.True(db.PublishFeedAsset(new FeedAssetEntry(id, "raw", "item-" + size + "/1.0", "item-" + size, "1.0",
+                "application/octet-stream", new string('a', 64), size, at), "fixture"));
+        Assert.Equal(new RawFeedUsage(2, 20), db.RawFeedUsage(id));
+        Assert.Equal(new RawFeedUsage(0, 0), db.RawFeedUsage("missing-feed"));
     }
 
     [Fact]

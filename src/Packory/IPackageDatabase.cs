@@ -26,6 +26,7 @@ public interface IPackageDatabase
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
     IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null);
+    RawFeedUsage RawFeedUsage(string feedId);
     IReadOnlyList<FeedAssetEntry> RawFeedPage(string feedId, string? after, string prefix, int limit);
     // Mutable private Cargo sparse-index state; archive bytes remain immutable.
     bool? FeedCargoYanked(string feedId, string name, string version);

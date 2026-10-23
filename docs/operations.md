@@ -31,6 +31,8 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_DENIED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes blocked for both read and publish |
 | `PACKORY_OIDC_AUTHORITY` | *(unset)* | HTTPS authority / issuer URL for optional JWT validation |
 | `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
+| `PACKORY_MAX_RAW_FEED_BYTES` | `0` (disabled) | Logical committed-byte limit independently applied to every private Raw feed; 0–1 TiB. |
+| `PACKORY_MAX_RAW_FEED_ARTIFACTS` | `0` (disabled) | Committed asset-count limit independently applied to every private Raw feed; 0–100,000,000. |
 | `PACKORY_MAX_BLOB_STORAGE_BYTES` | `0` (unlimited) | Optional single-process filesystem blob capacity; writes fail HTTP 507 if exceeded. Not a S3 quota. |
 | `PACKORY_PUBLISH_REQUESTS_PER_MINUTE` | `60` | Maximum attempts per minute in each credential-role partition (admin, write, read, unauthenticated). Range 1–10000; 429 when exceeded |
 | `PACKORY_ADMIN_TOKEN` | *(unset)* | Required to enable admin/write access |
@@ -458,3 +460,29 @@ log or persistent monitoring history, and are not cross-instance totals. The
 observation endpoint's current request may be included in active requests.
 Choose alert thresholds and validate them on the actual deployment; this
 instrumentation does not establish capacity, SLO, RPO/RTO or an incident drill.
+
+## Private Raw feed capacity and retention
+
+The optional Raw byte/count settings apply independently to every private Raw
+feed, on both metadata providers and both blob backends. Limits are checked
+before creating an intent or uploading bytes, under a single-writer per-feed
+lock that spans the final ledger commit. Concurrent publications cannot each
+consume the same remaining capacity. Exceeding either limit returns HTTP 507;
+an existing immutable revision still returns 409. Zero disables that limit.
+Existing assets remain readable after an operator lowers the limit below usage.
+
+`GET /feeds/{feedId}/raw/usage` returns committed counts/bytes and configured
+limits under the exact feed read grant, with no global or anonymous fallback.
+Accounting is reconstructed from the immutable metadata ledger after restart
+and restore; no separate usage counter can drift. It excludes pending/orphaned
+bytes, other protocols and global Raw. This logical quota is not physical
+bucket accounting, an S3 capacity limit or distributed multi-writer fencing.
+Monitor orphan/recovery storage and configure physical capacity separately.
+Uploads with an actual body length different from Content-Length cannot commit.
+
+Retention is indefinite immutable storage: no online delete/expiry/eviction,
+version replacement or automatic quota-driven GC. Deactivating a feed does not
+free capacity. Any offline operator removal requires coherent metadata/blob
+backup and recovery procedures; quotas never silently remove pinned data.
+Content still follows the bounded Raw name/version/media-type and byte-integrity
+profile; it is never executed or interpreted as a native package format.

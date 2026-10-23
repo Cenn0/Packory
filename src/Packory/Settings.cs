@@ -54,6 +54,11 @@ public sealed class Settings
     // This does not provide a distributed S3 usage quota.
     public long MaxBlobStorageBytes { get; set; }
 
+    // Logical committed bytes/count independently enforced for every private Raw feed.
+    // Zero disables each limit; not a physical bucket or multi-writer quota.
+    public long MaxRawFeedBytes { get; set; }
+    public long MaxRawFeedArtifacts { get; set; }
+
     public int PublishRequestsPerMinute { get; set; } = 60;
     public int MaxMetadataBytes { get; set; } = 16 * 1024 * 1024;
     // Optional OIDC resource-server authentication; configure both fields or neither.
@@ -89,6 +94,9 @@ public sealed class Settings
 
     public void Validate()
     {
+        if (MaxRawFeedBytes is < 0 or > 1_099_511_627_776L ||
+            MaxRawFeedArtifacts is < 0 or > 100_000_000)
+            throw new InvalidOperationException("Invalid private Raw feed quota.");
         if (ValidationEnabled)
         {
             // Validate all operator-provided selectors before an MCP tool can be registered.
