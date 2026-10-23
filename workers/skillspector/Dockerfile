@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 RUN useradd --uid 1654 --no-create-home --home-dir /tmp scanner
 RUN mkdir -p /work/in /work/out && chown -R 1654:1654 /work/in /work/out
 RUN pip install --no-cache-dir 'skillspector @ git+https://github.com/NVIDIA/SkillSpector.git@091a509b3d6ba8ff5be528966e1f43c2e68cf214'
-COPY --chown=scanner:scanner worker.py /opt/packory/worker.py
+COPY --chown=scanner:scanner worker.py ai_worker.py /opt/packory/
 USER 1654:1654
 WORKDIR /tmp
 ENTRYPOINT ["python", "/opt/packory/worker.py"]

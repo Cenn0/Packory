@@ -65,6 +65,7 @@ $('token').addEventListener('input', event => {
   $('feedback').textContent = 'Credentials changed. Refreshing requires the current token.';
   $('security-status').textContent = 'Credentials changed. Refresh security records with the current token.';
   for (const id of ['security-pending', 'security-review', 'security-quarantine', 'security-approved']) $(id).textContent = '—';
+  invalidateSkillAi();
   mcpView.requestId++; mcpView.cursor = null;
   $('mcp-table').replaceChildren(); $('mcp-more').hidden = true;
   $('mcp-status').textContent = 'Credentials changed. Search again to refresh server metadata.';
@@ -218,7 +219,8 @@ async function showSkillSecurity(item) {
       actions.append(rescan);
     }
     detail.append(actions);
-    detail.append(element('h4', 'Scan report (untrusted text)'));
+    await appendSkillAiReview(item, detail, requestId, token);
+    detail.append(element('h4', 'Scan report (untrusted text)'));;
     const output = element('pre', response.report ? JSON.stringify(response.report, null, 2) : 'No completed report available.', 'report-preview');
     output.tabIndex = 0;
     detail.append(output);
@@ -316,3 +318,261 @@ $('mcp-filter').addEventListener('submit', event => {
 $('mcp-more').addEventListener('click', () => loadMcpServers(true));
 $('token').addEventListener('change', () => loadMcpServers());
 loadMcpServers();
+
+
+// Optional SkillSpector inference. This UI never stores credentials or renders
+// scanner/LLM output as HTML. All mutation authority remains on the server.
+const aiView = { configuration: null, endpoints: [], requestId: 0 };
+const aiJson = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+function invalidateSkillAi() {
+  aiView.requestId++;
+  aiView.configuration = null;
+  aiView.endpoints = [];
+  $('skill-ai-panel').hidden = true;
+  $('ai-settings').reset();
+  $('ai-key').value = '';
+  for (const id of ['ai-jobs', 'ai-job-detail', 'ai-audit']) $(id).replaceChildren();
+  $('ai-job-detail').hidden = true;
+  $('ai-status').textContent = '';
+  $('ai-usage').textContent = '';
+}
+function aiValidReason(value) { return value && value.trim().length >= 3 && value.length <= 512; }
+function aiId() {
+  if (!globalThis.crypto || !crypto.randomUUID) throw new Error('Secure browser context required for unique request IDs.');
+  return crypto.randomUUID().replaceAll('-', '');
+}
+function aiNumber(id, minimum, maximum) {
+  const value = Number($(id).value);
+  if (!Number.isFinite(value) || value < minimum || value > maximum) throw new Error('Invalid limit: ' + id);
+  return value;
+}
+function aiConfigurationFromForm(previous) {
+  const enabled = $('ai-enabled').checked;
+  const budget = aiNumber('ai-budget', 0, 1000000);
+  const config = {
+    ...previous, enabled, endpointId: $('ai-endpoint').value,
+    model: $('ai-model').value.trim(), trigger: $('ai-trigger').value,
+    requireForApproval: enabled && $('ai-required').checked,
+    externalTransmissionApproved: $('ai-transmission').checked,
+    timeoutSeconds: aiNumber('ai-timeout', 15, 600),
+    maxConcurrentScans: aiNumber('ai-concurrent', 1, 4),
+    maxRequestsPerScan: aiNumber('ai-requests', 1, 64),
+    maxPromptBytes: aiNumber('ai-prompt-bytes', 1024, 131072),
+    maxOutputTokens: aiNumber('ai-output-tokens', 64, 16384),
+    monthlyBudgetMicroUsd: Math.round(budget * 1000000),
+    inputUsdPerMillionTokens: aiNumber('ai-input-rate', 0, 1000),
+    outputUsdPerMillionTokens: aiNumber('ai-output-rate', 0, 1000),
+    outputLanguage: $('ai-language').value
+  };
+  if (!Number.isInteger(config.timeoutSeconds) || !Number.isInteger(config.maxConcurrentScans) ||
+      !Number.isInteger(config.maxRequestsPerScan) || !Number.isInteger(config.maxPromptBytes) ||
+      !Number.isInteger(config.maxOutputTokens)) throw new Error('Scan limits must be integers.');
+  return config;
+}
+function populateAiForm(result) {
+  const config = result.configuration;
+  aiView.configuration = config;
+  aiView.endpoints = result.endpoints || [];
+  const endpointSelect = $('ai-endpoint');
+  endpointSelect.replaceChildren();
+  for (const e of aiView.endpoints) {
+    const option = element('option', e.id + ' · ' + e.provider + ' · ' + e.baseUrl);
+    option.value = e.id; endpointSelect.append(option);
+  }
+  $('ai-enabled').checked = config.enabled;
+  endpointSelect.value = config.endpointId;
+  $('ai-model').value = config.model;
+  $('ai-trigger').value = config.trigger;
+  $('ai-required').checked = config.requireForApproval;
+  $('ai-transmission').checked = config.externalTransmissionApproved;
+  $('ai-timeout').value = String(config.timeoutSeconds);
+  $('ai-concurrent').value = String(config.maxConcurrentScans);
+  $('ai-requests').value = String(config.maxRequestsPerScan);
+  $('ai-prompt-bytes').value = String(config.maxPromptBytes);
+  $('ai-output-tokens').value = String(config.maxOutputTokens);
+  $('ai-budget').value = String(config.monthlyBudgetMicroUsd / 1000000);
+  $('ai-input-rate').value = String(config.inputUsdPerMillionTokens);
+  $('ai-output-rate').value = String(config.outputUsdPerMillionTokens);
+  $('ai-language').value = config.outputLanguage;
+  $('ai-key').value = '';
+  $('ai-clear-key').checked = false;
+  $('ai-reason').value = '';
+  $('ai-provider-info').textContent = 'Allowed endpoints are deployment-managed. Saved key: ' +
+    (result.hasApiKey ? 'configured (not retrievable).' : 'none.') +
+    ' Rate inputs bound admission estimates, not the provider invoice.';
+  const usage = result.usage || {};
+  $('ai-usage').textContent = 'Period ' + (usage.month || '—') + ' · Reserved $' +
+    (Number(usage.reservedMicroUsd || 0) / 1000000).toFixed(6) + ' · Requests ' +
+    (usage.requests ?? 0) + ' · Missing provider usage ' + (usage.requestsWithMissingUsage ?? 0);
+}
+async function loadSkillAi() {
+  const requestId = ++aiView.requestId;
+  const token = state.token;
+  if (!token) { invalidateSkillAi(); return; }
+  $('skill-ai-panel').hidden = false;
+  $('ai-status').textContent = 'Loading AI configuration…';
+  try {
+    const result = await request('/api/admin/skill-ai/settings');
+    if (requestId !== aiView.requestId || state.token !== token) return;
+    populateAiForm(result);
+    $('ai-status').textContent = result.configuration.enabled
+      ? 'AI enabled; human approval and the offline scan still apply.'
+      : 'AI is disabled by default. Static scanning continues without model inference.';
+    await loadSkillAiJobs();
+  } catch (error) {
+    if (requestId === aiView.requestId && state.token === token)
+      $('ai-status').textContent = 'AI administration unavailable: ' + error.message;
+  }
+}
+async function loadSkillAiJobs() {
+  const requestId = aiView.requestId;
+  const token = state.token;
+  if (!aiView.configuration || !token) return;
+  const list = $('ai-jobs'), audit = $('ai-audit');
+  try {
+    const [jobs, history] = await Promise.all([
+      request('/api/admin/skill-ai/assessments'), request('/api/admin/skill-ai/audit')
+    ]);
+    if (requestId !== aiView.requestId || state.token !== token) return;
+    list.replaceChildren(); audit.replaceChildren();
+    const items = jobs.items || [];
+    if (!items.length) list.append(element('p', 'No AI assessments yet.', 'muted'));
+    for (const job of items) {
+      const row = element('div', '', 'ai-job-row');
+      row.append(element('span', (job.kind === 'probe' ? 'Connection test' : job.name + '@' + job.version) +
+        ' · ' + job.state + ' · ' + job.createdAt));
+      const view = element('button', 'View result'); view.type = 'button';
+      view.addEventListener('click', () => showSkillAiJob(job.id)); row.append(view);
+      if (job.state === 'QUEUED' || job.state === 'RUNNING') {
+        const cancel = element('button', 'Cancel'); cancel.type = 'button';
+        cancel.addEventListener('click', () => cancelSkillAiJob(job.id)); row.append(cancel);
+      }
+      list.append(row);
+    }
+    for (const action of (history.items || []).slice(0, 25))
+      audit.append(element('p', action.action + ' · revision ' + action.revision + ' · ' + action.reason, 'muted'));
+  } catch (error) {
+    if (requestId === aiView.requestId && state.token === token)
+      $('ai-status').textContent = 'Could not read AI activity: ' + error.message;
+  }
+}
+async function showSkillAiJob(id, target = $('ai-job-detail')) {
+  const token = state.token;
+  const requestId = aiView.requestId;
+  target.hidden = false; target.replaceChildren(element('p', 'Loading AI report…'));
+  try {
+    const result = await request('/api/admin/skill-ai/jobs/' + encodeURIComponent(id));
+    if (state.token !== token || requestId !== aiView.requestId) return;
+    target.replaceChildren();
+    const job = result.job;
+    target.append(element('p', job.state + ' · ' + job.kind + ' · ' + (job.errorCode || 'No error') +
+      ' · Risk ' + (job.riskScore ?? 'unavailable') + ' · Model ' +
+      (job.configuration?.model || 'unavailable')));
+    target.append(element('p', 'SHA-256: ' + (job.sha256 || 'connection test') +
+      ' · Config revision ' + job.revision + ' · Scanner ' + job.scannerVersion, 'muted'));
+    const output = element('pre', result.report ? JSON.stringify(result.report, null, 2) :
+      'No completed model report. A queued/failed job is not a clean result.', 'report-preview');
+    output.tabIndex = 0; target.append(output);
+  } catch (error) {
+    if (state.token === token && requestId === aiView.requestId)
+      target.replaceChildren(element('p', 'AI report unavailable: ' + error.message));
+  }
+}
+async function cancelSkillAiJob(id) {
+  const reason = window.prompt('Reason for cancelling this AI job:');
+  if (reason === null) return;
+  if (!aiValidReason(reason)) { $('ai-status').textContent = '3–512 characters required.'; return; }
+  const token = state.token;
+  try {
+    await request('/api/admin/skill-ai/jobs/' + encodeURIComponent(id) + '/cancel', aiJson({ reason }));
+    if (state.token === token) { $('ai-status').textContent = 'AI job cancelled.'; await loadSkillAiJobs(); }
+  } catch (error) { if (state.token === token) $('ai-status').textContent = 'Cancel failed: ' + error.message; }
+}
+async function appendSkillAiReview(item, target, requestId, token) {
+  if (!aiView.configuration || !state.token) return;
+  target.append(element('h4', 'Optional AI analysis (separate from static scan)'));
+  const content = element('div', '', 'ai-review-results'); target.append(content);
+  if (aiView.configuration.enabled && ['NEEDS_REVIEW', 'QUARANTINED', 'APPROVED', 'REVOKED'].includes(item.state)) {
+    const run = element('button', 'Queue AI assessment'); run.type = 'button';
+    run.addEventListener('click', async () => {
+      const reason = window.prompt('Document the reason for this AI assessment:');
+      if (reason === null) return;
+      if (!aiValidReason(reason)) { content.textContent = '3–512 characters required.'; return; }
+      const selectedToken = state.token;
+      try {
+        const result = await request('/api/admin/skill-ai/assessments', aiJson({
+          name: item.name, version: item.version, sha256: item.sha256, requestId: aiId(), reason
+        }));
+        if (state.token !== selectedToken || securityDetailRequest !== requestId) return;
+        content.textContent = 'AI scan queued: ' + result.id + '. Refresh job results to inspect findings.';
+        await loadSkillAiJobs();
+      } catch (error) {
+        if (state.token === selectedToken && securityDetailRequest === requestId)
+          content.textContent = 'Cannot start AI analysis: ' + error.message;
+      }
+    });
+    content.append(run);
+  }
+  try {
+    const result = await request('/api/admin/skill-ai/assessments?name=' +
+      encodeURIComponent(item.name) + '&version=' + encodeURIComponent(item.version));
+    if (state.token !== token || securityDetailRequest !== requestId) return;
+    const results = result.items || [];
+    if (!results.length) content.append(element('p', 'No AI analysis for this revision.', 'muted'));
+    for (const job of results.slice(0, 10)) {
+      const row = element('div', '', 'ai-job-row');
+      row.append(element('span', job.state + ' · Model ' + (job.configuration?.model || 'unknown') +
+        ' · revision ' + job.revision + (job.riskScore === null ? '' : ' · Risk ' + job.riskScore)));
+      const view = element('button', 'Read AI report'); view.type = 'button';
+      view.addEventListener('click', () => showSkillAiJob(job.id, content));
+      row.append(view); content.append(row);
+    }
+  } catch (error) {
+    if (state.token === token && securityDetailRequest === requestId)
+      content.append(element('p', 'AI history unavailable: ' + error.message, 'muted'));
+  }
+}
+$('ai-settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const previous = aiView.configuration;
+  if (!previous) return;
+  const reason = $('ai-reason').value;
+  if (!aiValidReason(reason)) { $('ai-status').textContent = 'An audit reason of 3–512 characters is required.'; return; }
+  const token = state.token;
+  $('ai-save').disabled = true;
+  try {
+    const config = aiConfigurationFromForm(previous);
+    if ($('ai-clear-key').checked && $('ai-key').value)
+      throw new Error('Clear key and new key are mutually exclusive.');
+    const result = await request('/api/admin/skill-ai/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configuration: config, apiKey: $('ai-key').value || null,
+        clearApiKey: $('ai-clear-key').checked, reason })
+    });
+    if (state.token !== token) return;
+    // Populate from a fresh read to restore effective credentials/usage and revision.
+    $('ai-key').value = '';
+    $('ai-status').textContent = 'Configuration saved at revision ' + result.configuration.revision +
+      '. Running jobs from previous revisions were cancelled.';
+    await loadSkillAi();
+  } catch (error) { if (state.token === token) $('ai-status').textContent = 'Save failed: ' + error.message; }
+  finally { $('ai-save').disabled = false; }
+});
+$('ai-probe').addEventListener('click', async () => {
+  const reason = window.prompt('Audit reason for testing the configured AI provider:');
+  if (reason === null) return;
+  if (!aiValidReason(reason)) { $('ai-status').textContent = '3–512 characters required.'; return; }
+  const token = state.token;
+  try {
+    const job = await request('/api/admin/skill-ai/probe', aiJson({ requestId: aiId(), reason }));
+    if (state.token === token) {
+      $('ai-status').textContent = 'Provider connection test queued: ' + job.id +
+        '. Refresh assessment jobs to see the result.';
+      await loadSkillAiJobs();
+    }
+  } catch (error) { if (state.token === token) $('ai-status').textContent = 'Probe failed: ' + error.message; }
+});
+$('ai-reload').addEventListener('click', loadSkillAi);
+$('ai-jobs-reload').addEventListener('click', loadSkillAiJobs);
+$('token').addEventListener('change', loadSkillAi);
+loadSkillAi();
