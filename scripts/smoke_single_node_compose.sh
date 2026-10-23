@@ -105,7 +105,7 @@ test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-st
 # *copy helper*; the Packory service itself always runs as non-root.
 compose stop packory >/dev/null
 mkdir "$WORK/exported"
-docker run --rm --user 0:0 --entrypoint /bin/sh \
+docker run --rm --network none --security-opt no-new-privileges --user 0:0 --entrypoint /bin/sh \
   -v "${PROJECT}_packory-data:/source:ro" \
   -v "$WORK/exported:/destination" packory:ci \
   -c 'cp -a /source/. /destination/' >/dev/null
@@ -122,7 +122,7 @@ python3 scripts/offline_backup.py restore --source "$WORK/backup" \
 # Import the verified bytes into a different, newly created named volume.
 # Compose must not reinterpret that volume as the original application data.
 docker volume create "$RESTORE_VOLUME" >/dev/null
-docker run --rm --user 0:0 --entrypoint /bin/sh \
+docker run --rm --network none --security-opt no-new-privileges --user 0:0 --entrypoint /bin/sh \
   -v "$WORK/restored:/source:ro" -v "$RESTORE_VOLUME:/destination" \
   packory:ci -c 'cp -a /source/. /destination/' >/dev/null
 cat >"$WORK/restore-images.yaml" <<YAML
