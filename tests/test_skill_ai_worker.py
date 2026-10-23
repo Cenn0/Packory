@@ -124,6 +124,60 @@ class AiWorkerTests(unittest.TestCase):
             ai.process(self.manifest)
         self.assertFalse(self.result.exists())
 
+    def test_loopback_relay_requires_job_capability_and_bounds_requests(self):
+        import threading
+        import urllib.error
+        import urllib.request
+        with ai.Relay(self.job, self.manifest) as relay:
+            thread = threading.Thread(target=relay.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{relay.server_address[1]}/v1/chat/completions"
+            body = b'{"messages":[{"role":"user","content":"inert synthetic text"}]}'
+            def send(token, endpoint=base):
+                return urllib.request.urlopen(urllib.request.Request(
+                    endpoint, data=body, method="POST",
+                    headers={"Content-Type": "application/json", "Authorization": "Bearer " + token}),
+                    timeout=8)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as wrong:
+                    send("wrong-token")
+                self.assertEqual(503, wrong.exception.code)
+                self.assertEqual([], list(self.output.glob("*.request.json")))
+                with self.assertRaises(urllib.error.HTTPError) as wrong_path:
+                    send(relay.token, base.replace("/chat/completions", "/responses"))
+                self.assertEqual(503, wrong_path.exception.code)
+                observed = {}
+                def client():
+                    try:
+                        with send(relay.token) as response:
+                            observed["body"] = json.loads(response.read().decode())
+                            observed["status"] = response.status
+                    except Exception as error:
+                        observed["error"] = error
+                call = threading.Thread(target=client, daemon=True)
+                call.start()
+                for _ in range(100):
+                    request_files = list(self.output.glob("*.request.json"))
+                    if request_files:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(1, len(request_files))
+                exchange = json.loads(request_files[0].read_text())
+                self.assertEqual(self.job_id, exchange["jobId"])
+                self.assertEqual(body.decode(), exchange["body"])
+                self.assertNotIn(relay.token, request_files[0].read_text())
+                ai.atomic_write(self.input / (self.job_id + "." + exchange["requestId"] + ".response.json"),
+                                {"status": 200, "body": '{"choices":[{"message":{"content":"OK"}}]}'})
+                call.join(timeout=5)
+                self.assertFalse(call.is_alive())
+                self.assertNotIn("error", observed)
+                self.assertEqual(200, observed["status"])
+                self.assertEqual("OK", observed["body"]["choices"][0]["message"]["content"])
+            finally:
+                relay.shutdown()
+                thread.join(timeout=3)
+
+
 
 if __name__ == "__main__":
     unittest.main()
