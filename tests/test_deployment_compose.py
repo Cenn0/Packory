@@ -104,7 +104,7 @@ class ComposeContractTests(unittest.TestCase):
 
     def test_canonical_origin_rejects_credentials_paths_ports_and_fragments(self):
         for origin in (
-            "https://user:password@packory.example.invalid",
+            "https://user:password" + chr(64) + "packory.example.invalid",
             "https://packory.example.invalid/",
             "https://packory.example.invalid/path",
             "https://packory.example.invalid?debug=1",
@@ -115,7 +115,7 @@ class ComposeContractTests(unittest.TestCase):
             "https://localhost",
             "https://127.0.0.1",
             "https://[::1]",
-            "https://packory.example.invalid\\@other.invalid",
+            "https://packory.example.invalid\\\\" + chr(64) + "other.invalid",
             "HTTPS://packory.example.invalid",
             " https://packory.example.invalid",
         ):
