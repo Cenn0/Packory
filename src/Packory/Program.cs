@@ -14,17 +14,12 @@ using System.Text.Json.Nodes;
 var builder = WebApplication.CreateBuilder(args);
 var settings = new Settings();
 builder.Configuration.GetSection("Packory").Bind(settings);
-// Explicit environment overrides avoid ever requiring secrets in checked-in JSON.
-static string? TokenFromEnv(string name)
-{
-    var value = Environment.GetEnvironmentVariable(name);
-    return string.IsNullOrWhiteSpace(value) ? null : value;
-}
+// Operator-selected absolute secret files never expose their contents in the environment.
 settings.OidcAuthority = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUTHORITY") ?? settings.OidcAuthority;
 settings.OidcAudience = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUDIENCE") ?? settings.OidcAudience;
-settings.AdminToken = TokenFromEnv("PACKORY_ADMIN_TOKEN") ?? settings.AdminToken;
-settings.ReadToken = TokenFromEnv("PACKORY_READ_TOKEN") ?? settings.ReadToken;
-settings.WriteToken = TokenFromEnv("PACKORY_WRITE_TOKEN") ?? settings.WriteToken;
+settings.AdminToken = RuntimeSecretFiles.Resolve("PACKORY_ADMIN_TOKEN", settings.AdminToken, blankEnvironmentMeansUnset: true);
+settings.ReadToken = RuntimeSecretFiles.Resolve("PACKORY_READ_TOKEN", settings.ReadToken, blankEnvironmentMeansUnset: true);
+settings.WriteToken = RuntimeSecretFiles.Resolve("PACKORY_WRITE_TOKEN", settings.WriteToken, blankEnvironmentMeansUnset: true);
 if (Environment.GetEnvironmentVariable("PACKORY_WRITE_NAMESPACES") is { } grants)
     settings.WriteNamespaces = grants.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_OIDC_REQUIRE_NAMESPACE_GRANTS"), out var requireGrants))
@@ -37,11 +32,11 @@ settings.S3Endpoint = Environment.GetEnvironmentVariable("PACKORY_S3_ENDPOINT") 
 settings.S3Bucket = Environment.GetEnvironmentVariable("PACKORY_S3_BUCKET") ?? settings.S3Bucket;
 settings.S3Region = Environment.GetEnvironmentVariable("PACKORY_S3_REGION") ?? settings.S3Region;
 settings.S3KeyPrefix = Environment.GetEnvironmentVariable("PACKORY_S3_KEY_PREFIX") ?? settings.S3KeyPrefix;
-settings.S3AccessKey = Environment.GetEnvironmentVariable("PACKORY_S3_ACCESS_KEY") ?? settings.S3AccessKey;
-settings.S3SecretKey = Environment.GetEnvironmentVariable("PACKORY_S3_SECRET_KEY") ?? settings.S3SecretKey;
+settings.S3AccessKey = RuntimeSecretFiles.Resolve("PACKORY_S3_ACCESS_KEY", settings.S3AccessKey);
+settings.S3SecretKey = RuntimeSecretFiles.Resolve("PACKORY_S3_SECRET_KEY", settings.S3SecretKey);
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_S3_ALLOW_LOOPBACK_HTTP"), out var s3Loopback))
     settings.S3AllowLoopbackHttp = s3Loopback;
-settings.PostgresConnectionString = Environment.GetEnvironmentVariable("PACKORY_POSTGRES_CONNECTION_STRING") ?? settings.PostgresConnectionString;
+settings.PostgresConnectionString = RuntimeSecretFiles.Resolve("PACKORY_POSTGRES_CONNECTION_STRING", settings.PostgresConnectionString);
 settings.PublicBaseUrl = Environment.GetEnvironmentVariable("PACKORY_PUBLIC_BASE_URL") ?? settings.PublicBaseUrl;
 settings.NugetUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NUGET_UPSTREAM_URL") ?? settings.NugetUpstreamUrl;
 settings.NpmUpstreamUrl = Environment.GetEnvironmentVariable("PACKORY_NPM_UPSTREAM_URL") ?? settings.NpmUpstreamUrl;

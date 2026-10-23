@@ -43,6 +43,58 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 
 All defined tokens must be unique, at least 32 characters. **Unset tokens mean no permission of that type is available**; the service will not silently enable writes. Runtime settings can also be set via the `Packory` JSON section, but do not persist real secrets there.
 
+### Mounted runtime secrets (opt-in Docker profile)
+
+For the six supported sensitive settings below, configure either the normal
+environment/JSON setting **or** the corresponding `_FILE` environment variable.
+The latter must name one explicit **absolute** path to a mounted, readable regular
+UTF-8 file. Paths are resolved once during process startup; changing a file does
+**not** rotate an active credential until Packory is restarted.
+
+| Direct variable | File variable |
+| --- | --- |
+| `PACKORY_ADMIN_TOKEN` | `PACKORY_ADMIN_TOKEN_FILE` |
+| `PACKORY_READ_TOKEN` | `PACKORY_READ_TOKEN_FILE` |
+| `PACKORY_WRITE_TOKEN` | `PACKORY_WRITE_TOKEN_FILE` |
+| `PACKORY_POSTGRES_CONNECTION_STRING` | `PACKORY_POSTGRES_CONNECTION_STRING_FILE` |
+| `PACKORY_S3_ACCESS_KEY` | `PACKORY_S3_ACCESS_KEY_FILE` |
+| `PACKORY_S3_SECRET_KEY` | `PACKORY_S3_SECRET_KEY_FILE` |
+
+An explicitly present direct environment value (including an empty string), or
+a nonempty value bound through the `Packory` configuration section, **conflicts**
+with the matching `_FILE` setting and fails startup. Nonexistent, unreadable,
+relative, directory, symlink, empty, larger than 16 KiB, invalid UTF-8 and
+multi-line files also fail startup using messages that include the setting
+name but **not** the path or secret contents. Exactly one terminal LF or CRLF
+is removed, with no other trimming; spaces are preserved. API token length,
+uniqueness and S3 static key-pair validation are unchanged.
+
+`compose.secrets.yaml` is a separate loopback-only development example using
+Compose **file-sourced secrets**, not plaintext environment values:
+
+```bash
+# Create three separate, operator-protected files OUTSIDE the repository.
+# Set these host paths in your own shell or ignored .env; never commit their values.
+export PACKORY_ADMIN_TOKEN_SOURCE=/absolute/private/path/admin-token
+export PACKORY_READ_TOKEN_SOURCE=/absolute/private/path/read-token
+export PACKORY_WRITE_TOKEN_SOURCE=/absolute/private/path/write-token
+docker compose -f compose.secrets.yaml config --quiet
+docker compose -f compose.secrets.yaml up -d
+```
+
+Secret sources are mounted read-only at `/run/secrets/...`; the application
+image runs as its configured non-root `APP_UID`. Verify readability by
+that UID before relying on a deployment. With file-sourced Compose secrets,
+host-file ownership/mode controls and effective container mount permissions
+are platform-dependent; do **not** assume Compose's `uid`, `gid` or `mode`
+options can enforce host bind-mount permissions. Keep originals restricted on
+the host, protect backup/snapshot scope, exclude secrets from data-volume
+backups, container images and Git, and never include their bytes in logs or
+bug reports. Rotation requires replacing the source safely and recreating
+the Packory container under an authorized maintenance procedure. This reduces
+environment/config exposure; it does not protect against a privileged host
+administrator or process memory inspection.
+
 ### Limited multi-instance topology: one writer plus read-only replicas
 
 After completing the PostgreSQL/S3 recovery procedure, Packory supports an
