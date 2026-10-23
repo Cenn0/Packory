@@ -82,6 +82,8 @@ jobs:
           docker compose -f compose.yaml -f compose.skill-ai.yaml config --quiet
       - name: Validate private ingress profile and proxy authorization boundaries
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
+      - name: Validate synthetic single-node evidence ledger
+        run: python3 -m unittest discover -s tests -p test_single_node_acceptance.py -v
       - name: Validate dashboard JavaScript
         run: node --check src/Packory/wwwroot/app.js
       - name: Verify dashboard ecosystem parity with implemented catalog
