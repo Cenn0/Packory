@@ -26,7 +26,11 @@ class Api:
             }
             self.jobs[number] = [{"id": number * 100 + index, "run_id": number,
                                   "head_sha": SHA, "name": name,
-                                  "status": "completed", "conclusion": "success"}
+                                  "status": "completed", "conclusion": "success",
+                                  "steps": [{"number": step_number, "name": step_name,
+                                             "status": "completed", "conclusion": "success"}
+                                            for step_number, step_name in enumerate(
+                                                sorted(gate.REQUIRED_STEPS[name]), 1)]}
                                  for index, name in enumerate(sorted(names), 1)]
         self.reread_change = {}
 
@@ -44,6 +48,7 @@ class Api:
 class QualificationTests(unittest.TestCase):
     def test_workflow_gate_has_all_required_event_triggers_and_no_path_skips(self):
         root = Path(__file__).resolve().parents[1]
+        self.assertEqual(set(gate.REQUIRED_STEPS), set().union(*gate.REQUIRED.values()))
         for filename in gate.REQUIRED:
             text = (root / ".github/workflows" / filename).read_text()
             with self.subTest(workflow=filename):
@@ -51,6 +56,9 @@ class QualificationTests(unittest.TestCase):
                 self.assertIn("  push:", text)
                 self.assertIn("branches: [main]", text)
                 self.assertNotIn("    paths:", text)
+                for job in gate.REQUIRED[filename]:
+                    for step in gate.REQUIRED_STEPS[job]:
+                        self.assertIn("      - name: " + step, text)
         ci = (root / ".github/workflows/ci.yml").read_text()
         self.assertIn("name: Complete qualification", ci)
         self.assertIn("needs: [privacy, test, maven, dashboard, container]", ci)
@@ -62,6 +70,8 @@ class QualificationTests(unittest.TestCase):
         api.runs["s3.yml"]["actor"] = {"private-identity": "must-never-export"}
         result = gate.qualify(api, SHA, "push")
         self.assertEqual(8, len(result["workflows"]))
+        self.assertEqual("packory.ci-qualification/2", result["schema"])
+        self.assertTrue(all(item["validatedSteps"] for item in result["workflows"]))
         self.assertFalse(result["productionRecommended"])
         self.assertFalse(result["independentApprovalVerified"])
         self.assertNotIn("must-never-export", json.dumps(result))
@@ -111,6 +121,26 @@ class QualificationTests(unittest.TestCase):
         api.jobs[api.runs["native-matrix.yml"]["id"]].pop()
         with self.assertRaises(gate.Blocked):
             gate.qualify(api, SHA, "push")
+
+    def test_required_operation_steps_must_have_one_successful_execution(self):
+        for mode in ("missing", "duplicate", "skipped", "failure", "running", "invalid-number"):
+            with self.subTest(mode=mode):
+                api = Api()
+                step_list = api.jobs[api.runs["skillspector-smoke.yml"]["id"]][0]["steps"]
+                if mode == "missing":
+                    step_list.pop(0)
+                elif mode == "duplicate":
+                    step_list.append(copy.deepcopy(step_list[0]) | {"number": 99})
+                elif mode == "skipped":
+                    step_list[0]["conclusion"] = "skipped"
+                elif mode == "failure":
+                    step_list[0]["conclusion"] = "failure"
+                elif mode == "running":
+                    step_list[0]["status"] = "in_progress"
+                else:
+                    step_list[0]["number"] = True
+                with self.assertRaises(gate.Blocked):
+                    gate.qualify(api, SHA, "push")
 
     def test_rerun_during_read_invalidates_old_green(self):
         for change in ({"run_attempt": 3}, {"status": "queued"}, {"conclusion": "failure"}):

@@ -348,3 +348,14 @@ This extends issue #133 and V5-15 with a runnable fail-closed case. It does not
 qualify scanner recovery on the installed MyCloud service, scanner detection
 coverage, host boot, capacity, Nginx, earlier-image upgrades or release gates.
 Check the exact-head CI run before recording the case as passed.
+
+## CI step evidence for V5-03 — 23 October 2026
+
+The exact-revision qualification index now checks the named core operation
+steps inside each required external workflow job, as well as job success. Its
+sanitized v2 artifact records the required step names and numbers with the
+workflow run/attempt/job IDs. Missing, skipped, failed, duplicate and running
+steps do not qualify. This narrows a gap where a successful job could omit a
+key acceptance step. The index still does not contain provider identities,
+native-client outcome records, independent approval or a production release
+decision; those V5-03 acceptance fields remain open.
