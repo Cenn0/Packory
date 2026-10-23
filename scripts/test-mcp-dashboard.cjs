@@ -306,6 +306,7 @@ async function tokenScenario(h) {
   await h.page.locator('#token').press('Tab');
   await h.ready('new', true);
   await h.text('ai-status', 'AI is disabled');
+  await h.text('ai-jobs', 'new-skill');
   const fresh = h.calls.slice(boundary);
   assert.deepEqual(fresh.map(call => call.kind).sort(),
     ['ai-audit', 'ai-jobs', 'ai-settings', 'catalog', 'mcp', 'security', 'skills']);
