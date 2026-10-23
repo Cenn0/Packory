@@ -375,6 +375,7 @@ async function skillAiScenario(h) {
   await h.page.locator('#ai-reason').fill('Synthetic opt in');
   const oldCount = h.calls.length;
   await h.page.locator('#ai-save').click();
+  await h.page.waitForFunction(() => document.getElementById('ai-key').value === '');
   await h.text('ai-status', 'AI is disabled');
   const put = h.calls.slice(oldCount).find(call => call.kind === 'ai-settings-save');
   assert.ok(put, 'AI settings must be sent to backend');
