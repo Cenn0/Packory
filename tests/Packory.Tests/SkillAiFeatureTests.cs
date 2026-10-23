@@ -69,7 +69,7 @@ public sealed class SkillAiFeatureTests : IDisposable
         var raw = "{\"model\":\"malicious-model\",\"messages\":[{\"role\":\"user\",\"content\":\"untrusted skill text\"}]}";
         var validated = JsonNode.Parse(SkillAiGateway.ValidateRequest(raw, cfg, Local))!;
         Assert.Equal("approved-model", validated["model"]!.GetValue<string>());
-        Assert.Equal(false, validated["stream"]!.GetValue<bool>());
+        Assert.False(validated["stream"]!.GetValue<bool>());
         Assert.Equal(4096, validated["max_tokens"]!.GetValue<int>());
         var injection = "{\"messages\":[{\"role\":\"user\",\"content\":\"inert\"}],\"tool_choice\":\"required\",\"tools\":[{\"type\":\"web_search\"}]}";
         Assert.Throws<InvalidDataException>(() => SkillAiGateway.ValidateRequest(injection, cfg, Local));
