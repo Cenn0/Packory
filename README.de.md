@@ -89,6 +89,8 @@ Hier startet nur die Anwendung. Für den Offline-SkillSpector-Worker den Docker-
 
 **Private Hosted-Feeds (E0):** Für alle acht Pakettypen sind isolierte native Routen mit expliziter Aktivierung und genauen Grants `feed:{id}:read` bzw. `feed:{id}:publish` umgesetzt. Private Anfragen greifen nicht auf globale oder Upstream-Pakete zurück. Der [E0-Abnahmenachweis](docs/e0-acceptance.md) gilt für die dort dokumentierten Testversionen und Provider, **nicht** als allgemeine Interoperabilitäts- oder Produktionsfreigabe. Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche stehen noch aus.
 
+**Grenzen veränderlicher Metadaten:** Feed-begrenzte Dist-Tags sind für privates npm dauerhaft gespeichert und Änderungen werden auditiert. Unpublish bleibt deaktiviert. Cargo bietet feed-begrenzte Yank-/Unyank-Zustände (V14), jedoch keine vollständige Owner-Verwaltung oder allgemeine crates.io-Kompatibilitätszusage.
+
 ### Lokale Paketquelle ausprobieren
 
 ```bash
