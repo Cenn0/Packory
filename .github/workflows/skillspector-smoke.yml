@@ -14,6 +14,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify networkless AI relay and manifest contracts
+        run: |
+          python3 -m py_compile workers/skillspector/ai_worker.py
+          python3 -m unittest discover -s tests -p test_skill_ai_worker.py -v
       - name: Build pinned offline scanner image
         run: docker build -t packory-skillspector:smoke workers/skillspector
       - name: Scan a synthetic benign Skill in a networkless runtime
