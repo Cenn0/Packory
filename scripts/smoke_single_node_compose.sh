@@ -35,6 +35,13 @@ for role in admin read write; do
   openssl rand -hex 32 >"$WORK/$role"
   # Render the curl credential while this runner still owns the secret source.
   printf 'header = "Authorization: Bearer %s"\n' "$(cat "$WORK/$role")" >"$WORK/$role.curl"
+done
+# Generate native client configs while these disposable synthetic secrets are
+# still readable by the runner; the container itself gets separate root-owned
+# group-readable bind mounts only after preparation.
+source "$ROOT/scripts/smoke_single_node_native.sh"
+native_prepare
+for role in admin read write; do
   chmod 0640 "$WORK/$role"
   sudo chown 0:1654 "$WORK/$role"
 done
@@ -72,8 +79,6 @@ code() {
 }
 ARTIFACT="$BASE/raw/packory.compose.smoke/1.0.0"
 
-source "$ROOT/scripts/smoke_single_node_native.sh"
-native_prepare
 compose up -d --no-deps packory >/dev/null
 ready
 test "$(code "$BASE/api/packages")" = "401"
