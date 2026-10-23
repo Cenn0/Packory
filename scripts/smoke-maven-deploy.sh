@@ -6,6 +6,7 @@ set +x
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/maven-bootstrap.sh"
 WORK="$(mktemp -d)"
 BASE="http://127.0.0.1:18103"
 TOOLS="${PACKORY_MAVEN_TOOL_CACHE:-$WORK/tools}"
@@ -162,15 +163,15 @@ public final class Bootstrap { public static String value() { return "tooling on
 JAVA
 primed=false
 for attempt in 1 2 3; do
-  if timeout 240 "$MVN" -B -C -q --no-transfer-progress -s "$WORK/bootstrap-settings.xml" \
+  if timeout 240 "$MVN" -U -B -C -q --no-transfer-progress -s "$WORK/bootstrap-settings.xml" \
     -Dmaven.repo.local="$PRIME" -f "$WORK/bootstrap/pom.xml" \
     clean deploy "-DaltDeploymentRepository=tooling::file://$WORK/bootstrap-repository" \
     org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help \
     >"$WORK/maven-bootstrap.log" 2>&1; then primed=true; break; fi
-  if ! grep -Eqi 'Connection reset|Read timed out|Connection timed out|Temporary failure|Network is unreachable|502 Bad Gateway|503 Service Unavailable' "$WORK/maven-bootstrap.log"; then
+  if ! packory_maven_transient "$WORK/maven-bootstrap.log"; then
     echo "Maven bootstrap failed with a non-network error" >&2; exit 1
   fi
-  if [ "$attempt" -lt 3 ]; then sleep "$attempt"; fi
+  if [ "$attempt" -lt 3 ]; then packory_maven_backoff "$attempt"; fi
 done
 test "$primed" = true || { echo "Public Maven tooling unavailable" >&2; exit 1; }
 test ! -e "$PRIME/com/packory/e2"

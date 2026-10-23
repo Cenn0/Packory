@@ -4,6 +4,7 @@
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/maven-bootstrap.sh"
 WORK="$(mktemp -d)"
 BASE="http://127.0.0.1:18092"
 ADMIN="$(openssl rand -hex 32)"
@@ -74,18 +75,18 @@ PY
 # Only transient public tooling bootstrap failures are retried.
 primed=false
 for attempt in 1 2 3; do
-  if mvn -B -q --no-transfer-progress -s "$WORK/bootstrap-settings.xml" \
+  if mvn -U -B -q --no-transfer-progress -s "$WORK/bootstrap-settings.xml" \
     -Dmaven.repo.local="$WORK/m2-prime" \
     org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help \
     >"$WORK/maven-prime.log" 2>&1; then
     primed=true
     break
   fi
-  if ! grep -Eiq 'Connection reset|Read timed out|Connection timed out|Temporary failure|Network is unreachable|502 Bad Gateway|503 Service Unavailable' "$WORK/maven-prime.log"; then
+  if ! packory_maven_transient "$WORK/maven-prime.log"; then
     echo "Maven bootstrap failed with a non-network error" >&2
     exit 1
   fi
-  if test "$attempt" -lt 3; then sleep "$attempt"; fi
+  if test "$attempt" -lt 3; then packory_maven_backoff "$attempt"; fi
 done
 test "$primed" = true || { echo "Maven public plugin bootstrap unavailable" >&2; exit 1; }
 PACKORY_DATA_DIRECTORY="$WORK/data" \

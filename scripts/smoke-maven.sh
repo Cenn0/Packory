@@ -4,6 +4,7 @@
 # the native Maven deploy plugin. Mutable maven-metadata.xml PUT is unsupported.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/maven-bootstrap.sh"
 WORK="$(mktemp -d)"
 TOKEN="$(openssl rand -hex 32)"
 BASE="http://127.0.0.1:18085"
@@ -37,21 +38,20 @@ echo "Maven native smoke: priming pinned dependency consumer"
 # upstream transport faults, never plugin/build/validation failures.
 primed=false
 for attempt in 1 2 3; do
-  if mvn -B -q --no-transfer-progress -Dmaven.repo.local="$WORK/m2" \
+  if mvn -U -B -q --no-transfer-progress -Dmaven.repo.local="$WORK/m2" \
     org.apache.maven.plugins:maven-dependency-plugin:3.7.1:help \
     >"$WORK/maven-prime.log" 2>&1; then
     primed=true
     break
   fi
-  if ! grep -Eiq 'Connection reset|Read timed out|Connection timed out|Temporary failure|Network is unreachable|502 Bad Gateway|503 Service Unavailable' \
-    "$WORK/maven-prime.log"; then
+  if ! packory_maven_transient "$WORK/maven-prime.log"; then
     echo "Maven plugin priming failed with a non-network error; no retry" >&2
     grep -Ei 'error|fail|exception' "$WORK/maven-prime.log" | tail -n 12 >&2 || true
     exit 1
   fi
   if test "$attempt" -lt 3; then
     echo "Maven Central transient transfer failure; retry attempt $((attempt + 1))/3" >&2
-    sleep "$attempt"
+    packory_maven_backoff "$attempt"
   fi
 done
 if [ "$primed" != true ]; then
