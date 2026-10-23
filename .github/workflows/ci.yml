@@ -190,6 +190,10 @@ jobs:
         run: docker compose -f compose.ghcr.yaml config --quiet
       - name: Build self-hosted image
         run: docker build -t packory:ci .
+      - name: Exercise disposable file-secret single-node container lifecycle
+        run: |
+          bash -n scripts/smoke_single_node_compose.sh
+          bash scripts/smoke_single_node_compose.sh
   qualification:
     name: Complete qualification
     needs: [privacy, test, maven, dashboard, container]
