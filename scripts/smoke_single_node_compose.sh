@@ -174,7 +174,7 @@ restore_into_fresh_project() {
   python3 scripts/offline_backup.py restore --source "$WORK/backup" \
     --destination "$WORK/$suffix" --offline-confirmed
   # Create the destination volumes and container without starting any writer.
-  compose create --no-deps packory >/dev/null
+  compose create --no-build --pull never packory >/dev/null
   cid="$(compose ps --all --quiet packory)"
   test "$(docker inspect --format '{{.State.Status}}' "$cid")" = created
   target_volume="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$cid")"
