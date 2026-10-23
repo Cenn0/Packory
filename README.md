@@ -1,31 +1,34 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banner-dark.svg">
-  <img src="docs/branding/banner-light.svg" alt="Packory — One hub. Endless possibilities. NuGet, npm and agent skills." width="1200">
+  <img src="docs/branding/banner-light.svg" alt="Packory — one hub for packages, artifacts and agent skills" width="1200">
 </picture>
 
 # Packory
 
-**Brand and UI design:** [Logo + light/dark templates](docs/branding/README.md) (design concepts only).
-
-**Language:** **English** · [Deutsch](README.de.md)
+**One self-hosted hub for packages, artifacts and AI agent skills.**
 
 [![CI](https://github.com/Cenn0/Packory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cenn0/Packory/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512bd4)](src/Packory/Packory.csproj)
 
-**Explore:** [Quick start](#quick-start) · [Capabilities](#implemented-capabilities) · [Architecture](#architecture-overview) · [Docs](docs/README.md) · [Current Roadmap V5](docs/roadmap-v5.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Go hosted registry](docs/go-proxy.md) · [Support matrix](docs/support-matrix.md) · [Security](SECURITY.md)
+**English** · [Deutsch](README.de.md)
 
-**A self-hosted distribution hub for developer packages and AI agent skills.**
+[Get started](#get-started) · [What it supports](#capabilities) · [Architecture](#architecture-at-a-glance) · [Documentation](docs/README.md) · [Current status](docs/project-status.md) · [Roadmap](docs/roadmap-v5.md)
 
+Packory brings native package endpoints, private hosted feeds, an indexed artifact catalog, reviewed Agent Skills and MCP discovery into one application with a web dashboard. It is built as a **.NET 10 modular monolith**: no message broker, Kubernetes cluster or microservice deployment is needed for local evaluation.
 
-Packory combines native package-registry endpoints, an indexed artifact catalog and a small web dashboard. The current implementation is an **ASP.NET Core / .NET 10 modular monolith**. SQLite and filesystem storage remain the default; PostgreSQL metadata storage and S3-compatible object storage are optional. No broker or Kubernetes cluster is required. Milestone-1 hardening includes single-process artifact locks, reserved private namespaces, startup storage reconciliation, **transactional audit records for successful hosted publishing**, and role-partitioned publish rate limiting.
+> **Development status — 23 October 2026:** Core flows are implemented and tested in *specific* client/storage combinations; Packory is **not generally production-qualified**. The [support matrix](docs/support-matrix.md) separates implemented behavior from tested interoperability. [Release gates](docs/release-gates.md) describe what is still missing.
 
-> **Status: active development with documented functional profiles.** Registry adapters and optional backends have bounded test coverage; full protocol interoperability, migration recovery and multi-node guarantees remain incomplete. The catalog lists packages already hosted or cached by Packory, not the complete upstream registries. See the [support matrix](docs/support-matrix.md) for each implemented and tested scope.
+## Why Packory?
 
-**E0 private hosted feeds are implemented for NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw.** Each active feed has its own native routes, exact read/publish grants and immutable artifact identity; private requests never fall back to global packages or upstreams. All eight local native profiles, selected PostgreSQL/Moto native parity, private offline restore and the complete local test suites have passed. All eight GitHub workflows passed on the implementation commit; the complete acceptance record is in [E0 acceptance](docs/e0-acceptance.md). Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
+| One hub, several ecosystems | Native workflows, not just file uploads | Skills with an explicit review boundary |
+| --- | --- | --- |
+| Discover locally hosted and cached developer artifacts in a single catalog. | Protocol-specific registry routes retain their own wire formats, permissions and constraints. | Stage versioned Skills, run offline static inspection and approve before distribution under the enforcing policy. |
+| [Catalog and APIs](docs/api.md) | [Protocol support](docs/support-matrix.md) | [Skill security](docs/mcp-security-integration.md) |
 
-## Quick start
+## Get started
 
-Requires Docker Compose. For local evaluation:
+**Requirements:** Docker Engine with Compose and OpenSSL. This configuration is intended for **local evaluation**.
 
 ```bash
 git clone https://github.com/Cenn0/Packory.git
@@ -34,9 +37,12 @@ export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
 docker compose up -d --build
 ```
 
-Open **http://localhost:8080/**. The token enables administrative actions; do not commit it or paste it into issues. The example Compose configuration binds to `127.0.0.1:8080` and persists data in the `packory-data` volume.
+Open **http://localhost:8080/**. The default Compose mapping binds to `127.0.0.1:8080` and uses persistent Docker volumes. Keep the generated admin token outside Git, screenshots, issues and logs.
 
-To run directly with the .NET 10 SDK instead:
+<details>
+<summary>Run without Docker or use prebuilt development images</summary>
+
+With the **.NET 10 SDK**:
 
 ```bash
 export PACKORY_ADMIN_TOKEN="$(openssl rand -hex 32)"
@@ -44,111 +50,85 @@ export PACKORY_PUBLIC_BASE_URL=http://localhost:8080
 dotnet run --project src/Packory --urls http://localhost:8080
 ```
 
-To run the prebuilt, automatically published development containers without
-local builds, see [GHCR images and deployment](docs/container-images.md).
+To use **GHCR development images** instead of local builds, follow [container images and deployment](docs/container-images.md). Image publication follows qualified `main` CI, but does not automatically deploy to your server.
 
-See [operations](docs/operations.md) before enabling network access or choosing a permanent data directory.
+</details>
 
-## Implemented capabilities
+For a network-accessible or long-running deployment, read the [operations guide](docs/operations.md) first. Local HTTP examples are **not** a recommended internet-facing configuration.
 
-| Area | Implemented scope |
-| --- | --- |
-| **NuGet V3** | Service index, package/version downloads, read-through caching from nuget.org, registration metadata and basic hosted publishing; experimental private hosted NuGet feeds with separate tokens and immutable SHA-512 |
-| **npm** | Legacy metadata/tarball caching plus private hosted scoped/unscoped publish, packuments, publication tags and verified tarballs; native install/ci |
-| **OCI (experimental)** | Legacy and private hosted Distribution v2 blobs, durable chunk uploads, manifests, mutable tags and referrers; private repositories use `/v2/feeds/{id}/` |
-| **Cargo & PyPI (experimental)** | Legacy and private hosted Cargo sparse registries/native publish; PyPI Simple HTML/JSON and Twine upload with immutable distribution files |
-| **Maven (experimental)** | Global and private native Maven deploy, immutable release/timestamped SNAPSHOT files, exact metadata and checksums; Maven/Gradle transitive consumption; no upstream proxy |
-| **Go modules (hosted experimental)** | Global and private authenticated import/native GOPROXY reads; immutable module triplets and canonical `h1:` content hashes; no upstream mirror or external checksum-database trust |
-| **Raw / Generic (experimental)** | Global and private immutable HTTP upload/download with SHA-256 metadata and ranged reads; private per-feed logical quotas and usage; generic bytes, without a package-manager protocol |
-| **Agent Skills** | Staged versioned ZIP imports; offline static SkillSpector assessment; explicit reviewer approval before REST/MCP discovery or download under the enforcing policy; revocation and rescan |
-| **Optional AI Skill review (experimental)** | Operator-opt-in SkillSpector LLM assessment through a separate networkless worker, approved endpoints, audited settings in the Security Center and manual approval; see [setup and limits](docs/skill-ai.md). Not a safety certificate. |
-| **Static Skill quality** | Deterministic documentation findings, improvement suggestions and coverage for immutable published Skills through MCP, REST and dashboard; separate from safety and behavior checks |
-| **Packory MCP** | Authenticated read-only Streamable HTTP `/mcp` tools, resources, prompts and Skills Extension; paginated global artifact/version discovery including Maven and Raw |
-| **MCP Registry catalog** | Stage/review/revoke immutable inert remote/package `server.json` metadata; three `/v0.1` read routes, MCP discovery tools and paginated dashboard; no remote execution or publisher ownership verification |
-| **Dashboard/API** | Searchable catalog of cached/hosted artifacts, MCP server discovery, Skill quality inspection and liveness/readiness endpoints |
-| **Access** | Static read/write/admin tokens and optional OIDC JWT validation with explicit `packory.read`, `packory.write` and `packory.admin` scopes; no browser SSO/BFF |
-| **Storage** | SQLite + filesystem by default; optional PostgreSQL metadata and S3-compatible blob backends for fresh single-node installations |
-
-**Private hosted profile:** create a disabled draft, explicitly activate it as an administrator and issue an exact `feed:{id}:read` or `feed:{id}:publish` managed grant. Most roots are `/feeds/{id}/{protocol}/`; OCI preserves its native `/v2/` prefix at `/v2/feeds/{id}/{repository}/`. Legacy roots remain available, with OCI repository prefix `feeds/` reserved for private routing. See [feed lifecycle, client setup and protocol limits](docs/feeds.md).
-
-Private npm includes a durable scoped mutable dist-tag API; audited per-version deprecation management is available through the Packory API. Native `npm deprecate` and clearing warnings are implemented with atomic audited overlays and stale-packument rejection. Unpublish is disabled. A pinned npm 11.9.0 / pnpm 10.20.0 / Yarn Classic 1.22.22 private lockfile matrix is included; modern Yarn and broader client/provider qualification remain open. Private Cargo has an experimental, audited, scoped yank/unyank API (schema V14); owner controls and upstream proxy remain open. Private PyPI accepts a bounded canonical PEP 440 version profile without epochs; native evidence covers wheels and rejects direct dependency URLs. Maven supports native release and timestamped SNAPSHOT deployment plus ordinary Maven/Gradle dependency consumption; multi-file atomic publication and proxying remain open. Go requires HTTPS for native GOAUTH credentials and has no upstream mirror or checksum-database verification. The [support matrix](docs/support-matrix.md) records exact tested clients and remaining scope.
-
-### Use Packory as a registry
-
-NuGet service index: `http://localhost:8080/nuget/v3/index.json`.
+### Try a registry
 
 ```bash
-# HTTP is appropriate only for local development.
+# NuGet V3 service index (local HTTP evaluation only)
 dotnet nuget add source http://localhost:8080/nuget/v3/index.json \
   --name packory --allow-insecure-connections
 
-# Use the local npm registry for one command.
+# Resolve a package through Packory's npm endpoint
 npm install --registry=http://localhost:8080/npm/ lodash
 ```
 
-Publish operations require an appropriate token. [API examples](docs/api.md) explain NuGet push, npm publishing and agent-skill ZIP imports without placing credentials in tracked files. With skill security enforcement enabled, imports are **staged and unavailable for distribution until an authorized approval**. Offline static SkillSpector inspection is an input to human review, **not proof that a skill is safe to execute**. The [MCP and SkillSpector implementation](docs/mcp-security-integration.md) and [20 October delivery checkpoint](docs/roadmap-status-2026-10-20.md) describe the runtime contract and remaining work.
+Publishing requires an authorized token. For private feeds, an administrator creates and activates a feed and grants an exact `feed:{id}:read` or `feed:{id}:publish` permission. Private hosted requests **do not** fall back to public upstreams. See [feed setup](docs/feeds.md) and [API examples](docs/api.md).
 
-### MCP discovery and Skill quality
+## Capabilities
 
-Connect an authorized MCP client to `/mcp` to search global artifacts, traverse package versions and read published Skills. Native C# SDK tests cover protocol revisions **2025-06-18, 2025-11-25 and 2026-07-28**. Opaque cursors support complete catalog, Skill and directory traversal beyond the former 100-row catalog limit, including Maven and Raw artifacts. Private feed records remain outside the global MCP catalog. The [MCP Registry catalog](docs/mcp-registry-catalog.md) separately exposes reviewed inert remote and package server descriptors through the three `/v0.1` read routes, Packory's management API and the dashboard.
+| Area | Available today | Important boundary |
+| --- | --- | --- |
+| **NuGet · npm** | Hosted registries and bounded read-through caching from trusted public origins; private feeds | Not complete protocol parity |
+| **Cargo · PyPI** | Hosted native publish/consume profiles, including isolated private feeds | Limited client/version and metadata coverage |
+| **OCI · Helm** | Hosted images/charts, blobs, manifests, resumable uploads and scoped references | Not a full OCI/Kubernetes conformance claim |
+| **Maven · Gradle** | Hosted release and timestamped SNAPSHOT deployment/consumption | No upstream proxy or multi-file atomic publishing |
+| **Go modules** | Hosted GOPROXY reads and authenticated imports | No upstream mirror or public checksum-database trust |
+| **Raw / Generic** | Immutable files, digest metadata, ranged downloads and private logical quotas | HTTP artifact storage, **not** a package-manager protocol |
+| **Agent Skills** | ZIP staging, offline SkillSpector review, approval/revocation and static quality reports | Approval and static findings do not certify safe execution |
+| **Optional AI Skill review** | Operator-configured, opt-in additional LLM assessment and audited policy | Experimental; external data transfer; human approval remains mandatory |
+| **MCP** | Authenticated read-only `/mcp` discovery, tools, resources and Skills extension; reviewed inert Registry metadata | No private-feed MCP discovery, gateway execution or publisher identity proof |
+| **Identity & storage** | Static/managed tokens, optional OIDC JWT validation; SQLite/filesystem or PostgreSQL/S3 | No browser SSO/BFF, active-active writers or verified real-provider DR |
 
-Use **`assess_skill_quality(name, version)`**, `GET /api/v1/skills/{name}/{version}/quality`, or **Assess quality** in the dashboard for static documentation checks. The report contains independent findings, concrete suggestions, exact source digests and incomplete-coverage indicators. It checks frontmatter, instruction text and recognized local Markdown references without running imported code or contacting external services. A completed report can contain defects; it does not certify safety, publisher identity or functional correctness. See [Static Skill quality](docs/skill-quality.md) for the profile, limits and authorization rules.
+These are **scoped implementations**, not upstream vendor certifications. Exact clients, test evidence, API contracts and limitations: [support matrix](docs/support-matrix.md) · [MCP roadmap](docs/mcp-roadmap.md) · [AI review setup](docs/skill-ai.md).
 
-The [MCP delivery roadmap](docs/mcp-roadmap.md) separates the delivered functions from publisher ownership proof, signature verification, upstream synchronization, broader manifests, additional SDK conformance and per-feed discovery. Behavioral agent/connector testing and an external MCP gateway require their own isolated execution boundaries and acceptance tests.
-
-## Architecture overview
+## Architecture at a glance
 
 ```mermaid
 flowchart LR
-  C["NuGet, npm, Cargo, PyPI, OCI, Maven, Go, Raw clients"] --> App["Packory ASP.NET Core"]
-  Dashboard["Browser dashboard and REST clients"] --> App
-  MCP["MCP clients"] --> ReadOnly["Read-only /mcp API"]
-  ReadOnly --> App
+  Clients["Package clients"] --> App["Packory · ASP.NET Core"]
+  UI["Dashboard / REST"] --> App
+  MCP["MCP clients"] --> App
   OIDC["Optional OIDC issuer"] -.-> App
-  App --> Protocol["Native registry adapters"]
-  App --> Catalog["Catalog, policies and reviews"]
-  Protocol --> DB[("SQLite or PostgreSQL metadata")]
-  Catalog --> DB
-  Protocol --> Blob[("Filesystem or S3 blobs")]
-  Catalog --> Blob
-  Protocol -. "Configured HTTPS origins" .-> Upstream["nuget.org and npmjs.org"]
-  Catalog --> Queue["Staged skill scan volumes"]
-  Queue --> Scanner["Offline SkillSpector sidecar"]
-  Scanner --> Result["Scan result volume"]
-  Result --> Catalog
+  App --> Adapters["Native protocol adapters"]
+  App --> Policy["Catalog · access · Skill review"]
+  Adapters --> DB[("SQLite / PostgreSQL")]
+  Policy --> DB
+  Adapters --> Blobs[("Filesystem / S3")]
+  Policy --> Blobs
+  Adapters -. "Legacy NuGet/npm mirrors" .-> Upstream["Allowlisted upstreams"]
+  Policy <--> Worker["Offline SkillSpector worker"]
 ```
 
-Each adapter keeps its own native protocol while sharing authorization, persistence and recovery. Schema V15 retains private immutable artifact rows and separate OCI tags/Maven metadata, and adds durable npm tag and Cargo yank pointers; npm/Cargo/PyPI commit protocol metadata and original package bytes in one verified immutable bundle. In-process coordination and hosted-publish auditing are not multi-node or distributed ACID guarantees. See [architecture](docs/architecture.md).
+**One application, protocol-specific adapters and shared infrastructure.** PostgreSQL/S3 can be configured as optional backends. A tightly limited reader profile exists, but **multiple active writers are not supported**; blob and database writes do not form a distributed ACID transaction. See [architecture](docs/architecture.md), [operations](docs/operations.md) and [recovery/release gates](docs/release-gates.md).
 
-## Limitations and security
+## Security and operational limits
 
-- NuGet and npm support useful registry flows, but **not full protocol parity**. Verify your exact client/version/workflow before relying on Packory.
-- Search covers locally indexed artifacts. Fresh upstream metadata and uncached downloads may require connectivity.
-- Static tokens are not individual user accounts. **OIDC JWT validation is implemented but browser SSO/BFF, per-package permissions, individual actor attribution, a comprehensive/immutable audit trail and high availability are not implemented.** The admin-only log records successful hosted publishes and selected management events, including feed lifecycle changes; it does not cover every request or denied attempt.
-- Reserved NuGet ID prefixes and npm scopes can prevent configured private namespaces from falling back to public upstreams. This is **not** a comprehensive package-policy or malware-scanning solution. Signature enforcement, cache eviction and automatic license compliance are also absent.
-- Private hosted feeds have independent grants and storage identities. Proxy/group routing, private Skills, feed-scoped MCP discovery, cross-protocol per-feed capacity accounting and browser permission management remain open.
-- **Native adapters have bounded functional profiles.** PostgreSQL and S3 are selectable backends. Automatic SQLite-to-PostgreSQL/filesystem-to-S3 migration and distributed DB/blob transactions are absent. A constrained PostgreSQL/S3 read-only multi-instance profile is tested; **multiple active writers are not supported**.
+- **Local catalog, not federation:** search only includes artifacts already hosted or cached by Packory.
+- **No implicit trust:** SkillSpector and optional AI results inform human review; they cannot prove a package or Skill safe. MCP Registry descriptors are metadata, not executable verified services.
+- **Credentials and network:** protect tokens with a secret manager; require HTTPS, least privilege, explicit proxy limits and controlled upstream egress for shared deployments. Private feed grants are separate from global access.
+- **Recovery is not complete qualification:** coordinate metadata and blob backups, rehearse isolated restores and review provider-specific limitations. Do not infer real S3 correctness from Moto tests.
+- **No broad production or HA claim:** browser SSO/BFF, distributed fencing, independent security/supply-chain evidence and operational acceptance remain open.
 
-Per-role in-process publish throttling complements, but **does not replace, proxy-level rate limits**. Single-process locks do **not** provide multi-node consistency. Startup reconciliation can detect or quarantine selected inconsistent artifacts; it does not replace verified backups. The default Docker port is loopback-only. For any shared deployment, use HTTPS and explicit access controls; keep tokens in a secrets manager, review logging and upstream network access, and back up **the selected metadata database and artifact storage consistently**. Do not execute untrusted skills or packages on the server. See [security and operations](docs/operations.md).
+Read [security policy](SECURITY.md), [operations](docs/operations.md), [current project status](docs/project-status.md) and [release gates](docs/release-gates.md) before deployment decisions.
 
-## Build and test
+## Develop and contribute
 
 ```bash
 dotnet restore Packory.slnx
-dotnet build Packory.slnx -c Release --no-restore
+dotnet build Packory.slnx -c Release --no-restore -warnaserror
 dotnet test Packory.slnx -c Release --no-build
 node --check src/Packory/wwwroot/app.js
-# Requires the .NET 10 SDK, npm/Node.js, curl and OpenSSL:
-bash scripts/smoke-hosted.sh
-bash scripts/smoke-ecosystems.sh
+python3 scripts/check_public_docs.py
+python3 scripts/check_public_privacy.py
 ```
 
-[CI](.github/workflows/ci.yml) runs builds, deterministic integration tests and a [native-client hosted smoke test](scripts/smoke-hosted.sh): a real `dotnet nuget push` followed by an isolated `dotnet restore/build`, plus a scoped `npm publish` followed by `npm install` and fresh-cache `npm ci`. Test credentials are generated temporarily and never committed. CI also exercises native Cargo publish/consume, a pip installation with a hosted transitive dependency, and one Docker OCI push/pull scenario using a local scratch image. A [separate live mirror workflow](.github/workflows/smoke-live.yml) checks upstream registry behavior; passing one native hosted scenario does not imply comprehensive protocol support.
+Native-client and provider smoke tests have additional prerequisites; follow [CI qualification](docs/ci-qualification.md) rather than treating a local build as full acceptance.
 
-The private-feed harness adds two feeds containing different bytes under identical coordinates, exact credential denials, isolated client caches and restart checks where specified. [E0 acceptance](docs/e0-acceptance.md) maps every adapter to its tests and commands, records local native/provider/restore results separately from final CI acceptance, and lists the exact client versions observed.
+**Next:** [Documentation hub](docs/README.md) · [Contributing](CONTRIBUTING.md) · [Current roadmap](docs/roadmap-v5.md) · [Branding assets](docs/branding/README.md)
 
-## Documentation and contributions
-
-[Documentation index](docs/README.md) · [MCP roadmap](docs/mcp-roadmap.md) · [Skill quality](docs/skill-quality.md) · [Go hosted registry](docs/go-proxy.md) · [Cargo & PyPI](docs/cargo-pypi.md) · [OCI](docs/oci.md) · [OIDC / Keycloak](docs/oidc-keycloak.md) · [PostgreSQL](docs/operations.md#postgresql-metadata-backend) · [S3](docs/s3.md) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Operations](docs/operations.md) · [Current Roadmap V5](docs/roadmap-v5.md) · [Roadmap V3](docs/roadmap.md) · [Roadmap V4](docs/roadmap-v4.md) · [Support matrix](docs/support-matrix.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
-
-Licensed under [Apache-2.0](LICENSE). Contributions and public bug reports are welcome; report security vulnerabilities using the private channel described in the security policy.
+Packory is open source under the [Apache-2.0 license](LICENSE). Public reports must contain no personal data, private artifacts or secrets; security disclosures use the private process in [SECURITY.md](SECURITY.md).
