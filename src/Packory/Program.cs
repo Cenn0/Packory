@@ -104,6 +104,17 @@ if (settings.OidcEnabled)
             options.Audience = settings.OidcAudience;
             options.RequireHttpsMetadata = true;
             options.MapInboundClaims = false;
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = context =>
+                {
+                    // Bind native API authorization to a genuinely validated
+                    // JwtBearer principal, not a future browser cookie identity.
+                    if (context.Principal is { } principal)
+                        Access.RecordValidatedJwt(context.HttpContext, principal);
+                    return Task.CompletedTask;
+                }
+            };
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,

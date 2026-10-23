@@ -205,7 +205,11 @@ public sealed class ValidationEvidenceTests
         using var fixture = new Fixture();
         var ctx = new DefaultHttpContext();
         if (scopes is not null)
+        {
             ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("scope", scopes)], "signed-jwt"));
+            ctx.Request.Headers.Authorization = "Bearer synthetic-validation-fixture";
+            Access.RecordValidatedJwt(ctx, ctx.User);
+        }
         Assert.Equal(expected, Access.HasValidationMcpAccess(ctx, fixture.Settings));
         fixture.Settings.ValidationEnabled = false;
         Assert.False(Access.HasValidationMcpAccess(ctx, fixture.Settings));

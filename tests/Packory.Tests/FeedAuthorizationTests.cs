@@ -22,10 +22,14 @@ public sealed class FeedAuthorizationTests
     {
         var claims = new List<Claim> { new("scope", scope) };
         claims.AddRange(grants.Select(grant => new Claim("packory_feed", grant)));
-        return new DefaultHttpContext
+        var context = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "synthetic-authenticated-principal"))
         };
+        context.Request.Headers.Authorization = "Bearer synthetic-jwt-claims-fixture";
+        // Unit-only injection: actual runtime marker is set only after JWT verification.
+        Access.RecordValidatedJwt(context, context.User);
+        return context;
     }
 
     private static int? Status(IResult? result) => result is IStatusCodeHttpResult code ? code.StatusCode : null;
