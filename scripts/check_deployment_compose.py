@@ -20,9 +20,9 @@ def canonical_https_origin(value):
     if not isinstance(value, str) or len(value) > 2048:
         return False
     label = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
-    hostname = rf"(?:{label})(?:\\.(?:{label}))*"
+    hostname = rf"(?:{label})(?:\.(?:{label}))*"
     match = re.fullmatch(
-        rf"https://(?P<host>{hostname}|\\[[0-9a-f:.]+\\])(?::(?P<port>[0-9]{{1,5}}))?",
+        rf"https://(?P<host>{hostname}|\[[0-9a-f:.]+\])(?::(?P<port>[0-9]{{1,5}}))?",
         value,
     )
     if match is None:
@@ -41,7 +41,7 @@ def canonical_https_origin(value):
 
 def pinned_image(value, name):
     return isinstance(value, str) and re.fullmatch(
-        rf"ghcr\\.io/cenn0/{re.escape(name)}@sha256:[0-9a-f]{{64}}", value
+        rf"ghcr\.io/cenn0/{re.escape(name)}@sha256:[0-9a-f]{{64}}", value
     ) is not None
 
 
