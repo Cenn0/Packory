@@ -55,7 +55,7 @@ jobs:
           PY
       - name: Verify generated source archive digest and narrow qualification claim
         run: python3 scripts/verify_source_evidence.py --evidence-dir "$RUNNER_TEMP/packory-source-evidence" --expected-sha "$SOURCE_SHA"
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: source-evidence-${{ env.SOURCE_SHA }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/packory-source-evidence/
