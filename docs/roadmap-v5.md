@@ -351,11 +351,11 @@ Check the exact-head CI run before recording the case as passed.
 
 ## CI step evidence for V5-03 — 23 October 2026
 
-The exact-revision qualification index now checks the named core operation
-steps inside each required external workflow job, as well as job success. Its
-sanitized v2 artifact records the required step names and numbers with the
-workflow run/attempt/job IDs. Missing, skipped, failed, duplicate and running
-steps do not qualify. This narrows a gap where a successful job could omit a
-key acceptance step. The index still does not contain provider identities,
-native-client outcome records, independent approval or a production release
-decision; those V5-03 acceptance fields remain open.
+The exact-revision qualification index now checks the reported status of named
+core steps inside each required external workflow job, as well as job success.
+Its sanitized v2 artifact records names and numbers with the workflow
+run/attempt/job IDs. Missing, skipped, failed, duplicate and running named
+steps do not qualify. A PR can retain a name while replacing the underlying
+command, so these status observations do not prove that the intended operations
+ran. Independent workflow/gate/script review, provider identities, native-client
+outcome records and approval remain V5-03 release evidence gates.

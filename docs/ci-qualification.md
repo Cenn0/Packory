@@ -119,9 +119,9 @@ their pinned versions and operation outcomes still require the harness record.
 Each successful job uploads a seven-day `ci-qualification-<SHA>-<attempt>`
 artifact with schema `packory.ci-qualification/2`. It contains only source
 SHA, event, fixed workflow filenames, run/attempt/job IDs, a fixed allowlist
-of required step names/numbers that actually completed successfully, and
+of required step names/numbers reported successful by GitHub Actions, and
 canonical public workflow URLs. A green job with a missing, skipped, failed,
-duplicate or still-running required operation step now fails qualification.
+duplicate or still-running named step now fails qualification.
 It deliberately excludes API response bodies, account details, runner
 names/labels, endpoints, configuration, logs and credentials.
 
@@ -139,7 +139,10 @@ semantics are documented in GitHub's official [workflow runs](https://docs.githu
 and [attempt jobs](https://docs.github.com/en/rest/actions/workflow-jobs) references.
 
 This index proves a bounded observation of Actions results and named step
-completion. It is not signed
+status. A PR can change a workflow step's command while retaining its name;
+the index cannot verify that the intended test actually ran. Workflow files,
+the gate and invoked scripts therefore require independent source review before
+their results are used for a release decision. This index is not signed
 provenance, a client-version inventory, independent approval, an immutable
 history or operational evidence. A later rerun can change status. A successful
 job can contain intentionally unexercised operations; consult its actual

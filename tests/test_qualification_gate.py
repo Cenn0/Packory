@@ -71,7 +71,7 @@ class QualificationTests(unittest.TestCase):
         result = gate.qualify(api, SHA, "push")
         self.assertEqual(8, len(result["workflows"]))
         self.assertEqual("packory.ci-qualification/2", result["schema"])
-        self.assertTrue(all(item["validatedSteps"] for item in result["workflows"]))
+        self.assertTrue(all(item["observedSuccessfulSteps"] for item in result["workflows"]))
         self.assertFalse(result["productionRecommended"])
         self.assertFalse(result["independentApprovalVerified"])
         self.assertNotIn("must-never-export", json.dumps(result))
@@ -122,7 +122,7 @@ class QualificationTests(unittest.TestCase):
         with self.assertRaises(gate.Blocked):
             gate.qualify(api, SHA, "push")
 
-    def test_required_operation_steps_must_have_one_successful_execution(self):
+    def test_required_named_steps_must_have_one_successful_status(self):
         for mode in ("missing", "duplicate", "skipped", "failure", "running", "invalid-number"):
             with self.subTest(mode=mode):
                 api = Api()

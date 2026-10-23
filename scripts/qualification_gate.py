@@ -133,7 +133,7 @@ def qualify(read, sha, event):
             raise Blocked("missing_required_job:" + filename)
         if len({j["id"] for j in jobs}) != len(jobs):
             raise Blocked("duplicate_job_identity")
-        validated_steps = []
+        observed_steps = []
         for job in jobs:
             if (not positive_int(job["id"]) or job["run_id"] != run_id or
                     job["head_sha"] != sha or job["status"] != "completed" or
@@ -152,8 +152,10 @@ def qualify(read, sha, event):
                 if len(matches) != 1 or matches[0].get("status") != "completed" or \
                         matches[0].get("conclusion") != "success":
                     raise Blocked("required_step_not_successful:" + filename)
-                validated_steps.append({"jobId": job["id"], "number": matches[0]["number"],
-                                        "name": required})
+                # A successful named step is only an Actions status observation.
+                # PR-controlled workflow text can change what the step executes.
+                observed_steps.append({"jobId": job["id"], "number": matches[0]["number"],
+                                       "name": required})
         # Re-read after the job inventory: a newly queued rerun invalidates it.
         current = read(f"/actions/runs/{run_id}")
         if (current["run_attempt"] != attempt or current["head_sha"] != sha or
@@ -161,8 +163,8 @@ def qualify(read, sha, event):
             raise Pending("workflow_changed_during_verification")
         evidence.append({"workflow": filename, "runId": run_id, "attempt": attempt,
                          "jobs": sorted(j["id"] for j in jobs),
-                         "validatedSteps": sorted(validated_steps,
-                                                  key=lambda step: (step["jobId"], step["number"])),
+                         "observedSuccessfulSteps": sorted(
+                             observed_steps, key=lambda step: (step["jobId"], step["number"])),
                          "url": f"https://github.com/{REPOSITORY}/actions/runs/{run_id}"})
     if pending:
         raise Pending("required_workflow_missing_or_running")
