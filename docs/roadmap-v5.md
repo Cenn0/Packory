@@ -285,3 +285,20 @@ AI backup fingerprints, writer-lease admission and hosted OCI descriptors.
 These are verified corrections within V5-12/V5-13/V5-20/V5-21/V5-24/V5-32/V5-35a,
 not closure of those broader workstreams or of any external release gate.
 The review records exact local evidence and unexecuted provider/container checks.
+
+## Single-node HTTPS and offline container recovery tranche — 23 October 2026
+
+V5-03/V5-12/V5-15 and issue #133 gain an executable CI subset: native NuGet/npm
+publish/consume over certificate-validated Kestrel HTTPS, wrong-root/name TLS
+negatives, source-container recreation, stopped-writer full SQLite/filesystem
+backup and verified restore into a distinct Compose data volume. Fresh-cache
+native downloads compare original bytes; npm lockfile origin and SHA-512 must
+match. A second isolated restore discards a post-backup revision, qualifying
+only same-image/schema point-in-time rollback. Docker daemon, Compose and
+OpenSSL versions are now recorded separately from client versions.
+
+This is additional runnable acceptance, **not closure** of the three workstreams
+or issue #133. Check exact-head CI results; the complete host-boot, scanner,
+capacity/fault, prior-release migration, real-provider and independent release
+criteria remain open. No browser BFF, new ecosystem adapter, stable release or
+production deployment is introduced. See [the precise automated scope](single-node-qualification.md).
