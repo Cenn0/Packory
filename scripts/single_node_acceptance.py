@@ -32,8 +32,14 @@ CASES = (
     "disk_full_or_quota", "scanner_failure", "upstream_outage",
 )
 STATES = ("passed", "failed", "skipped", "not_run")
-REASONS = ("not_executed", "missing_tool", "unavailable_provider",
-           "unsafe_to_run", "operator_not_authorized", "assertion_failed", "timeout")
+# A status cannot be explained by a reason that contradicts execution.
+# In particular, "not_run" must never be confused with an executed failure.
+STATUS_REASONS = {
+    "failed": frozenset(("assertion_failed", "timeout")),
+    "skipped": frozenset(("missing_tool", "unavailable_provider",
+                          "unsafe_to_run", "operator_not_authorized")),
+    "not_run": frozenset(("not_executed",)),
+}
 
 
 class EvidenceError(ValueError):
@@ -112,6 +118,8 @@ def validate(data):
         raise EvidenceError("Source SHA and both declared image revisions must match.")
     if any(not digest(source["image_digests"][kind]) for kind in ("app", "scanner")):
         raise EvidenceError("Both immutable image digests are required.")
+    if source["image_digests"]["app"] == source["image_digests"]["scanner"]:
+        raise EvidenceError("App and scanner must have distinct immutable image digests.")
 
     clients = data["clients"]
     exact_keys(clients, CLIENTS, "client versions")
@@ -156,8 +164,8 @@ def validate(data):
         if state == "passed":
             if reason is not None:
                 raise EvidenceError("Passing case must not include a failure/skip reason.")
-        elif reason not in REASONS:
-            raise EvidenceError("Unexecuted/failed cases require a controlled reason code.")
+        elif reason not in STATUS_REASONS[state]:
+            raise EvidenceError("Non-passing case requires a reason compatible with its status.")
         outcomes[case_id] = state
 
     if set(outcomes) != set(CASES):
