@@ -50,8 +50,15 @@ are not an authorization boundary against hostile privileged containers.
 6. Place [the nginx reference](../deploy/nginx/packory.conf.example) in
    a controlled Nginx `http` context and replace the synthetic FQDN and
    certificate paths. TLS must be terminated and validated at this proxy;
-   do not use `http://` for remote native clients. Keep a default TLS
-   virtual host that **rejects unmatched Host/SNI names**.
+   do not use `http://` for remote native clients. The Nginx example
+   **rejects unknown/missing TLS SNI** via `ssl_reject_handshake` and returns
+   HTTP 421 for a mismatched Host. This directive requires **Nginx 1.19.4+**;
+   verify the actual proxy version and perform `nginx -t` using operator-owned
+   test certificates before activating the configuration. Where an ingress
+   already owns the port-443 default server, merge its deny policy rather than
+   adding a conflicting second `default_server`. Nginx Proxy Manager must
+   be configured and independently checked for equivalent behavior.
+   Reference: [official Nginx TLS documentation](https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_reject_handshake).
 
 Nginx limits in the example are explicit starting bounds, **not** universal
 production SLOs: body 256 MiB (the application may reject smaller/larger
