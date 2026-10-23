@@ -112,6 +112,7 @@ public sealed class ValidationTests
                     "Bearer"));
             var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = principal };
             context.Request.Headers.Authorization = "Bearer mock-test-credential";
+            Access.RecordValidatedJwt(context, context.User);
             return context;
         }
         var cfg = new Settings
@@ -189,6 +190,7 @@ public sealed class ValidationTests
             User = new System.Security.Claims.ClaimsPrincipal(identity)
         };
         ctx.Request.Headers.Authorization = "Bearer dummy-jwt-for-claims-test";
+        Access.RecordValidatedJwt(ctx, ctx.User);
         Assert.Null(Access.Require(ctx, cfg, write: true));
         Assert.Null(Access.RequireNamespace(ctx, cfg, "npm", "@trusted/library"));
         Assert.NotNull(Access.RequireNamespace(ctx, cfg, "npm", "@other/library"));
@@ -301,6 +303,8 @@ public sealed class ValidationTests
             new System.Security.Claims.Claim("packory_feed", "alpha-feed:read")
         }, "signed-test-fixture");
         context.User = new System.Security.Claims.ClaimsPrincipal(identity);
+        context.Request.Headers.Authorization = "Bearer synthetic-feed-jwt";
+        Access.RecordValidatedJwt(context, context.User);
         Assert.Null(Access.RequireFeed(context, cfg, "alpha-feed"));
         Assert.NotNull(Access.RequireFeed(context, cfg, "alpha-feed", publish: true));
         Assert.NotNull(Access.RequireFeed(context, cfg, "beta-feed"));
@@ -313,6 +317,7 @@ public sealed class ValidationTests
             {
                 new System.Security.Claims.Claim("scope", "openid")
             }, "signed-test-fixture"));
+        Access.RecordValidatedJwt(context, context.User);
         Assert.NotNull(Access.RequireFeed(context, cfg, "alpha-feed"));
     }
 

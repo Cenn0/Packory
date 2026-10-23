@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -13,6 +14,34 @@ public static class Access
     private const string RoleKey = "packory.role";
     private const string ManagedNamespaceKey = "packory.managed-namespace";
     private const string ManagedIdKey = "packory.managed-id";
+    private const string ValidatedJwtKey = "packory.jwt-bearer-principal";
+
+    /// <summary>
+    /// Called only by JwtBearerEvents.OnTokenValidated after cryptographic
+    /// signature, issuer, audience and lifetime verification. A browser cookie
+    /// is never an API bearer principal.
+    /// </summary>
+    public static void RecordValidatedJwt(HttpContext context, ClaimsPrincipal verified)
+    {
+        if (verified.Identity?.IsAuthenticated == true &&
+            context.Request.Headers.Authorization.ToString()
+                .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            context.Items[ValidatedJwtKey] = verified;
+    }
+
+    private static ClaimsPrincipal? ValidatedBearer(HttpContext context, Settings settings)
+    {
+        if (!settings.OidcEnabled ||
+            !context.Request.Headers.Authorization.ToString()
+                .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ||
+            !context.Items.TryGetValue(ValidatedJwtKey, out var candidate) ||
+            candidate is not ClaimsPrincipal verified ||
+            verified.Identity?.IsAuthenticated != true)
+            return null;
+        // Use only claims from the validated JWT, NOT HttpContext.User, which
+        // another authentication scheme may replace with a cookie principal.
+        return verified;
+    }
 
     public static IResult? Require(HttpContext context, Settings settings, bool write = false)
     {
@@ -65,8 +94,8 @@ public static class Access
         var candidates = new List<string>();
         if (context.Items[ManagedNamespaceKey] is string grant && ValidFeedGrant(grant))
             candidates.Add(grant.Split(':')[1]);
-        if (settings.OidcEnabled && context.User.Identity?.IsAuthenticated == true)
-            candidates.AddRange(context.User.FindAll("packory_feed")
+        if (ValidatedBearer(context, settings) is { } jwt)
+            candidates.AddRange(jwt.FindAll("packory_feed")
                 .Select(claim => claim.Value.Split(':')[0]).Where(FeedDefinition.ValidId));
         var db = context.RequestServices.GetRequiredService<IPackageDatabase>();
         return candidates.Any(id => db.Feed(id) is
@@ -110,9 +139,9 @@ public static class Access
     // and the additional, dedicated validation scope.
     public static bool HasValidationMcpAccess(HttpContext? context, Settings settings)
     {
-        if (!settings.ValidationEnabled || !settings.OidcEnabled ||
-            context?.User.Identity?.IsAuthenticated != true) return false;
-        var scopes = context.User.FindAll("scope").Concat(context.User.FindAll("scp"))
+        var verified = context is null ? null : ValidatedBearer(context, settings);
+        if (!settings.ValidationEnabled || verified is null) return false;
+        var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
             .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .ToHashSet(StringComparer.Ordinal);
         return scopes.Contains("packory.validation.read") &&
@@ -141,10 +170,11 @@ public static class Access
 
     private static string? OidcCredentialRole(HttpContext context, Settings settings)
     {
-        if (!settings.OidcEnabled || context.User.Identity?.IsAuthenticated != true) return null;
+        var verified = ValidatedBearer(context, settings);
+        if (verified is null) return null;
         // No blanket access based only on being logged in: require an explicit
-        // Packory scope from the access token. Never store subject/email claims.
-        var scopes = context.User.FindAll("scope").Concat(context.User.FindAll("scp"))
+        // Packory scope from the verified JWT. Never store subject/email claims.
+        var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
             .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .ToHashSet(StringComparer.Ordinal);
         if (scopes.Contains("packory.admin")) return "oidc-admin";
@@ -170,8 +200,9 @@ public static class Access
             "write-token" => settings.WriteNamespaces,
             "managed-write" when context.Items[ManagedNamespaceKey] is string grant =>
                 new[] { grant },
-            "oidc-write" when context.User.Identity?.IsAuthenticated == true =>
-                context.User.FindAll("packory_namespace").Select(x => x.Value),
+            "oidc-write" =>
+                ValidatedBearer(context, settings)?.FindAll("packory_namespace").Select(x => x.Value)
+                    ?? Enumerable.Empty<string>(),
             _ => []
         };
         return grants.Any(grant => MatchesNamespace(grant, kind, name))
@@ -218,12 +249,12 @@ public static class Access
                      StringComparison.Ordinal))))
                 return null;
         }
-        if (settings.OidcEnabled && ctx.User.Identity?.IsAuthenticated == true &&
-            role is "oidc-read" or "oidc-write")
+        if (role is ("oidc-read" or "oidc-write") &&
+            ValidatedBearer(ctx, settings) is { } verified)
         {
             var required = feedId + ":" + (publish ? "publish" : "read");
             if ((!publish || role == "oidc-write") &&
-                ctx.User.FindAll("packory_feed").Any(c =>
+                verified.FindAll("packory_feed").Any(c =>
                     string.Equals(c.Value, required, StringComparison.Ordinal) ||
                     (!publish && string.Equals(c.Value, feedId + ":publish",
                         StringComparison.Ordinal))))

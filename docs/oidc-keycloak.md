@@ -50,7 +50,18 @@ not `sub`, email, access token or other personal claims.
 
 **Not yet implemented:** interactive authorization-code/PKCE browser login, BFF
 sessions, local user management, token renewal UI, per-package owner grants and
-full Keycloak integration tests. The current JWT layer is an API resource-server
+full Keycloak integration tests.
+
+**Native API/JWT scheme isolation:** Packory accepts Packory scope and feed claims
+only from a principal recorded by the `JwtBearer` validation callback for an
+explicit `Authorization: Bearer` request. An authenticated browser cookie or
+an arbitrary authenticated `HttpContext.User` does not confer read, write,
+administrative, per-feed, namespace or validation rights, even when it carries
+similarly named claims. This preserves an important **precondition** for a
+future browser BFF; it does not add browser sessions, CSRF defenses or
+interactive login. Unit tests use deliberately synthetic principals; actual
+JWT signature/issuer/audience handling is separately tested by the signed
+Keycloak workflow. The current JWT layer is an API resource-server
 integration, **not a complete Keycloak SSO dashboard**. Native Cargo also
 supports its protocol's bare Authorization token when it is one of Packory's
 static credentials.
