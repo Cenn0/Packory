@@ -9,7 +9,9 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-PRIMARY = "readme.md" if (ROOT / "readme.md").is_file() else "README.md"
+# Path.exists() is case-insensitive on Windows. Preserve the checked-out name
+# so the expected language link is identical on Windows and Linux.
+PRIMARY = "README.md" if "README.md" in {p.name for p in ROOT.iterdir()} else "readme.md"
 INDEX = "docs/INDEX.md" if (ROOT / "docs/INDEX.md").is_file() else "docs/README.md"
 FILES = [PRIMARY, "README.de.md", INDEX]
 FILES += [p.relative_to(ROOT).as_posix()

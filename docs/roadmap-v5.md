@@ -209,6 +209,26 @@ individual green runs cannot substitute for integrated-branch qualification.
 
 **No artificial schedule:** no dates, percent complete or estimates are asserted without assigned capacity and measured throughput. Prioritize completion of the limited supported single-writer core over expanding the unchecked protocol inventory.
 
+## Protected-main enforcement checkpoint — 23 October 2026
+
+V5-01 now has an actual active main ruleset requiring the GitHub Actions
+`Complete qualification` context, with strict current-main policy and no
+bypass actors for that check. Existing review/deletion/non-fast-forward
+rules remain unchanged. A separate administrator read established that no
+legacy branch-protection rule supplements these repository rulesets.
+The intentionally red [PR #148](https://github.com/Cenn0/Packory/pull/148)
+was rejected by the ordinary merge API specifically because the required
+check failed, and was closed without merging. See [the exact evidence and
+positive-proof requirement](ci-qualification.md#protected-main-administrative-acceptance-checkpoint-issue-76).
+Independent approval and release qualification remain separate obligations.
+
+Dependency PRs #145–#147 were reviewed and merged. All 16 checks on each
+original PR head passed. Their combined source built without warnings and
+passed 708 Linux .NET tests, with 17 external-provider cases explicitly
+skipped. A scoped four-file security review found no reportable issue;
+this is not an exhaustive audit of external dependency implementations.
+No real S3 provider has been selected for this work, so V5-10/11 remain open.
+
 ## Subsequent implementation tranche
 
 Five functional packages extend V5-03 (redacted client/OS inventories),
