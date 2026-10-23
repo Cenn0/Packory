@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Real Docker application smoke in disposable CI resources only.
-# Tests file-mounted credentials and immutable Raw data across recreation;
-# deliberately does NOT test TLS, scanner behavior, host boot or full restore.
+# Tests file-mounted credentials, native NuGet/npm and immutable Raw data
+# across recreation; does NOT test TLS, scanner, host boot or full restore.
 set -euo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-for tool in docker openssl curl cmp sha256sum sudo; do
+for tool in docker openssl curl cmp sha256sum sudo dotnet npm node; do
   command -v "$tool" >/dev/null
 done
 
@@ -72,6 +72,8 @@ code() {
 }
 ARTIFACT="$BASE/raw/packory.compose.smoke/1.0.0"
 
+source "$ROOT/scripts/smoke_single_node_native.sh"
+native_prepare
 compose up -d --no-deps packory >/dev/null
 ready
 test "$(code "$BASE/api/packages")" = "401"
@@ -84,6 +86,10 @@ test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-st
 curl --noproxy '*' -fsS --max-time 10 -K "$WORK/read.curl" "$ARTIFACT" -o "$WORK/download-1"
 cmp "$WORK/payload" "$WORK/download-1"
 
+# Publish and consume using real .NET and npm clients with fresh caches.
+native_publish
+native_consume before
+
 # The second container is created against the same isolated named volume.
 # Re-running the immutable PUT must be a conflict, not a silent overwrite.
 compose up -d --no-deps --force-recreate packory >/dev/null
@@ -94,4 +100,5 @@ test "$(sha256sum "$WORK/download-2" | cut -d' ' -f1)" = "$SHA"
 test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-stream' \
   --data-binary "@$WORK/payload" "$ARTIFACT")" = "409"
 
-printf 'CI-only Docker file-secret, auth, immutable Raw and recreation smoke passed.\n'
+native_consume after
+printf 'CI-only Docker file-secret, native NuGet/npm, immutable Raw and recreation smoke passed.\n'
