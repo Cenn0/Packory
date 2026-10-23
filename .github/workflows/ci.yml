@@ -102,7 +102,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/client_environment.py --sha "$SOURCE_SHA" --output "$RUNNER_TEMP/client-environment.json"
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: client-environment-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/client-environment.json
@@ -205,7 +205,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/client_environment.py --sha "$SOURCE_SHA" --output "$RUNNER_TEMP/container-client-environment.json"
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: container-client-environment-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/container-client-environment.json
@@ -237,7 +237,7 @@ jobs:
           python3 scripts/qualification_gate.py --sha "$SOURCE_SHA"
           --event "$SOURCE_EVENT" --wait-seconds 1800
           --output "$RUNNER_TEMP/ci-qualification.json"
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-qualification-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ci-qualification.json
