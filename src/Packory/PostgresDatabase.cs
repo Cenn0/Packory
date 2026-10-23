@@ -567,6 +567,12 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public RawFeedUsage RawFeedUsage(string feedId)
+    {
+        using var db = Open();
+        return RawFeedQuota.Read(db, feedId);
+    }
+
     public IReadOnlyList<FeedAssetEntry> RawFeedPage(string feedId, string? after, string prefix, int limit)
     {
         if (!FeedDefinition.ValidId(feedId) || limit is < 1 or > 101)

@@ -28,7 +28,7 @@ public static class RegistryCapabilities
         new("go", "Go GOPROXY hosted", true, false, false, true, "native-client-tested",
             "Packory-specific import and Go native consumer; isolated hosted feeds; no mirror, pseudo-versions or full ZIP parity"),
         new("raw", "Packory generic byte API", true, false, false, true, "experimental",
-            "Global and private hosted immutable assets; not a native package protocol"),
+            "Global and private hosted immutable assets; private logical byte/count quotas and usage; indefinite retention without online deletion; not a native package protocol"),
         new("skill", "Versioned Agent Skill ZIP import", true, false, false, false, "experimental",
             "Requires approval; static analysis cannot prove runtime safety")
     ];

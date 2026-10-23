@@ -54,6 +54,12 @@ if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NUGET_PREFIXES") is { } d
     settings.DeniedNugetPrefixes = deniedNuget.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 if (Environment.GetEnvironmentVariable("PACKORY_DENIED_NPM_SCOPES") is { } deniedNpm)
     settings.DeniedNpmScopes = deniedNpm.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+if (Environment.GetEnvironmentVariable("PACKORY_MAX_RAW_FEED_BYTES") is { } rawBytes)
+    settings.MaxRawFeedBytes = long.TryParse(rawBytes, out var rawByteLimit)
+        ? rawByteLimit : throw new InvalidOperationException("Invalid PACKORY_MAX_RAW_FEED_BYTES.");
+if (Environment.GetEnvironmentVariable("PACKORY_MAX_RAW_FEED_ARTIFACTS") is { } rawCount)
+    settings.MaxRawFeedArtifacts = long.TryParse(rawCount, out var rawCountLimit)
+        ? rawCountLimit : throw new InvalidOperationException("Invalid PACKORY_MAX_RAW_FEED_ARTIFACTS.");
 if (Environment.GetEnvironmentVariable("PACKORY_MAX_BLOB_STORAGE_BYTES") is { } maxBlobStorage)
     settings.MaxBlobStorageBytes = long.TryParse(maxBlobStorage, out var parsedBlobCapacity)
         ? parsedBlobCapacity : throw new InvalidOperationException("Invalid PACKORY_MAX_BLOB_STORAGE_BYTES.");

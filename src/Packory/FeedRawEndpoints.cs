@@ -21,6 +21,18 @@ public static class FeedRawEndpoints
 
     public static void Map(WebApplication app)
     {
+        app.MapGet("/feeds/{feedId}/raw/usage", (
+            string feedId, Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "private, no-store";
+            if (Access.RequireFeed(ctx, cfg, feedId) is { } denied) return denied;
+            if (!Active(db, feedId)) return Results.NotFound();
+            var usage = db.RawFeedUsage(feedId);
+            return Results.Json(new { feedId, usage.Artifacts, usage.Bytes,
+                maxBytes = cfg.MaxRawFeedBytes, maxArtifacts = cfg.MaxRawFeedArtifacts,
+                accounting = "committed-private-raw-assets", retention = "retain-immutable-no-online-delete" });
+        });
+
         app.MapGet("/feeds/{feedId}/raw/", (
             string feedId, string? prefix, string? cursor, int? limit,
             Settings cfg, IPackageDatabase db, HttpContext ctx) =>
@@ -81,10 +93,16 @@ public static class FeedRawEndpoints
 
             var path = FeedAssetEntry.RawPath(name, version);
             var key = BlobKey(feedId, name, version);
-            using var lease = await locks.AcquireAsync("feed-raw", feedId + "/" + name,
-                version, ctx.RequestAborted);
+            // One feed lock covers quota check, blob persistence and ledger commit.
+            // Do not nest striped artifact locks: hash collisions could deadlock.
+            using var lease = await locks.AcquireAsync("feed-raw-quota", feedId,
+                "", ctx.RequestAborted);
             if (db.GetFeedAsset(feedId, "raw", path) is not null || blobs.Contains(key))
                 return Results.Conflict(new { error = "Immutable private raw artifact exists" });
+
+            if ((cfg.MaxRawFeedBytes != 0 || cfg.MaxRawFeedArtifacts != 0) &&
+                !RawFeedQuota.Admit(db.RawFeedUsage(feedId), ctx.Request.ContentLength.Value, cfg))
+                return Results.Json(new { error = "Private Raw feed quota exceeded" }, statusCode: 507);
 
             db.BeginPublication(key, "feed-raw", feedId + "|" + name, version);
             try
@@ -95,6 +113,8 @@ public static class FeedRawEndpoints
                 var stored = blobs.Existing(key) ??
                     throw new InvalidDataException("Private raw blob not available after persistence.");
                 var size = new FileInfo(stored).Length;
+                if (size != ctx.Request.ContentLength.Value)
+                    return Results.BadRequest(new { error = "Raw body length differs from Content-Length" });
                 if (size <= 0 || size > cfg.MaxArtifactBytes)
                     throw new InvalidDataException("Invalid private raw blob length.");
                 await using var stream = new FileStream(stored, FileMode.Open, FileAccess.Read,

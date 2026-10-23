@@ -151,3 +151,8 @@ Die privaten Feed-Tests ergänzen zwei Feeds mit gleichen Koordinaten und versch
 [Dokumentationsindex](docs/README.md) · [MCP-Roadmap](docs/mcp-roadmap.md) · [Skill-Qualität](docs/skill-quality.md) · [Go-Modulregistry](docs/go-proxy.md) · [Maven](docs/maven.md) · [Raw / Generic](docs/raw-registry.md) · [Support-Matrix](docs/support-matrix.md) · [Roadmap V4](docs/roadmap-v4.md) · [Aktuelle Roadmap V5](docs/roadmap-v5.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Roadmap](docs/roadmap.md) · [Mitwirken](CONTRIBUTING.md) · [Sicherheitsrichtlinie](SECURITY.md)
 
 Lizenziert unter [Apache-2.0](LICENSE). Beiträge und öffentliche Fehlermeldungen sind willkommen. Sicherheitslücken über den vertraulichen Meldeweg der Sicherheitsrichtlinie melden.
+
+Private Raw-Feeds unterstützen optionale, getrennte Byte- und Mengenlimits
+sowie eine Feed-autorisierte Nutzungsabfrage. Diese Grenzen zählen bestätigte
+Raw-Artefakte; physische S3-Kapazität und andere Protokolle sind nicht erfasst.
+Die Aufbewahrung bleibt unbegrenzt und unveränderlich, ohne Online-Löschung.

@@ -25,6 +25,7 @@ PACKORY_DATA_DIRECTORY="$WORK/data" \
 PACKORY_PUBLIC_BASE_URL="$BASE" \
 PACKORY_ADMIN_TOKEN="$ADMIN" \
 PACKORY_ANONYMOUS_READ=true \
+PACKORY_MAX_RAW_FEED_ARTIFACTS=1 \
 ASPNETCORE_URLS="$BASE" \
 dotnet "$ROOT/src/Packory/bin/Release/net10.0/Packory.dll" >"$WORK/server.log" 2>&1 &
 PID="$!"
@@ -72,6 +73,19 @@ test "$(code -H "Authorization: Bearer $ALPHA_W" \
   -H "Content-Type: application/octet-stream" \
   --data-binary "@$WORK/beta" -X PUT "$A")" = 409
 
+test "$(code -H "Authorization: Bearer $ALPHA_W" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@$WORK/alpha" -X PUT "$BASE/feeds/alpha-feed/raw/over-quota/1.0.0")" = 507
+curl --fail-with-body -sS -H "Authorization: Bearer $ALPHA_R" \
+  "$BASE/feeds/alpha-feed/raw/usage" >"$WORK/usage.json"
+python3 - "$WORK/usage.json" "$WORK/alpha" <<'CHECK'
+import json,sys
+from pathlib import Path
+usage=json.loads(Path(sys.argv[1]).read_text())
+assert usage['artifacts'] == 1 and usage['bytes'] == Path(sys.argv[2]).stat().st_size
+assert usage['maxArtifacts'] == 1
+CHECK
+
 curl --fail-with-body -sS -H "Authorization: Bearer $ALPHA_R" "$A" -o "$WORK/a-read"
 curl --fail-with-body -sS -H "Authorization: Bearer $BETA_R" "$B" -o "$WORK/b-read"
 cmp "$WORK/alpha" "$WORK/a-read"
@@ -85,4 +99,4 @@ test "$(code -H "Authorization: Bearer $ALPHA_R" -I "$A")" = 200
 admin_post "/api/v1/admin/feeds/alpha-feed/deactivate" '' >/dev/null
 test "$(code -H "Authorization: Bearer $ALPHA_R" "$A")" = 404
 test "$(code -H "Authorization: Bearer $BETA_R" "$B")" = 200
-echo "E0 private Raw: two-feed immutable bytes, exact authorization, legacy non-leak and disabled-feed checks passed."
+echo "E0 private Raw: two-feed immutable bytes, exact authorization, legacy non-leak, independent quotas and disabled-feed checks passed."

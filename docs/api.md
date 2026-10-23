@@ -263,3 +263,11 @@ full packument includes `_rev`; a metadata-only PUT must echo it and preserve
 every field except per-version `deprecated`. One atomic transaction applies
 all changed versions and their audit events; stale updates return 409. Missing
 attachments never authorize a new version or arbitrary manifest/tag changes.
+
+### Private Raw usage and quotas
+
+`GET /feeds/{feedId}/raw/usage` requires the exact active private Raw feed read
+grant and returns `feedId`, `artifacts`, `bytes`, `maxBytes`, `maxArtifacts`,
+`accounting` and `retention`. Zero limits are disabled. Quota-limited PUTs return
+507 before storage mutation. Existing immutable coordinates remain 409. See
+[capacity and retention](operations.md#private-raw-feed-capacity-and-retention).
