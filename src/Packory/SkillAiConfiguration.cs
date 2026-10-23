@@ -45,7 +45,7 @@ public sealed class SkillAiDeployment
         foreach (var endpoint in Endpoints)
         {
             if (!Regex.IsMatch(endpoint.Id, "^[a-z][a-z0-9-]{0,47}$", RegexOptions.CultureInvariant) ||
-                endpoint.Provider is not ("openai" or "openai-compatible" or "ollama" or "anthropic" or "azure-openai") ||
+                endpoint.Provider is not ("openai" or "openai-compatible" or "ollama" or "anthropic") ||
                 !System.Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out var uri) ||
                 uri.Scheme is not ("https" or "http") || uri.UserInfo.Length != 0 ||
                 uri.Query.Length != 0 || uri.Fragment.Length != 0 || uri.HostNameType == UriHostNameType.Unknown ||
