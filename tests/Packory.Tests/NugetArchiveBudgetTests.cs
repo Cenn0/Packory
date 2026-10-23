@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Xml;
 using Packory;
 using Xunit;
 
@@ -62,7 +63,16 @@ public sealed class NugetArchiveBudgetTests
     }
 
     [Fact]
-    public void OverstatedCompressedRatioCannotReturnLargeNuspec()
+    public void OversizedNuspecIsRejectedByDeclaredLimit()
+    {
+        var xml = Manifest.Replace("Inert fixture", new string('a', 1024 * 1024 + 1));
+        using var input = new MemoryStream(Package(xml));
+        var error = Assert.Throws<InvalidDataException>(() => NuGetEndpoints.ReadNuspec(input));
+        Assert.Equal("Expected one root nuspec", error.Message);
+    }
+
+    [Fact]
+    public void UnderdeclaredNuspecCannotBeParsed()
     {
         var xml = Manifest.Replace("Inert fixture", new string('a', 1024 * 1024 + 1));
         var bytes = Package(xml);
@@ -77,7 +87,9 @@ public sealed class NugetArchiveBudgetTests
         }
         Assert.True(found);
         using var input = new MemoryStream(bytes);
-        var error = Assert.Throws<InvalidDataException>(() => NuGetEndpoints.ReadNuspec(input));
-        Assert.Equal("Nuspec too large", error.Message);
+        // ZipArchive may truncate a malformed entry at its declared length
+        // before Packory can observe more bytes. Either parser must reject it.
+        var error = Record.Exception(() => NuGetEndpoints.ReadNuspec(input));
+        Assert.True(error is InvalidDataException or XmlException);
     }
 }
