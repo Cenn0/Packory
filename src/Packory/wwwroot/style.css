@@ -56,3 +56,24 @@
 .skill-row button{padding:7px 10px;cursor:pointer}
 #mcp-more{margin-top:14px;cursor:pointer}
 @media(max-width:680px){.quality-panel{padding:16px}.quality-finding{padding:12px}}
+
+
+/* Optional AI administration: readable on mobile and no remote assets. */
+.skill-ai-panel{border-top:1px solid #325477;padding-top:20px;margin-top:25px;overflow-wrap:anywhere}
+.skill-ai-panel[hidden],.ai-job-detail[hidden]{display:none}
+.skill-ai-panel .section-head{gap:12px;margin-bottom:10px}
+.ai-config-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:15px}
+.ai-config-grid label,.skill-ai-panel form>label{display:flex;flex-direction:column;gap:6px;color:#d6e6fa;font-size:14px}
+.ai-config-grid input,.ai-config-grid select,.skill-ai-panel form>label input{
+  width:100%;min-width:0;padding:10px;border-radius:8px;border:1px solid #42617e;
+  color:#e8f0fc;background:#13253b;min-height:41px
+}
+.ai-config-grid .ai-check{flex-direction:row;align-items:center;gap:9px;line-height:1.5}
+.ai-config-grid .ai-check input{width:auto;min-height:auto;accent-color:#73b8f2}
+.ai-config-grid input:focus-visible,.ai-config-grid select:focus-visible,.skill-ai-panel button:focus-visible{outline:2px solid #91d3ff;outline-offset:2px}
+.ai-job-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid #29425c}
+.ai-job-row span{flex:1 1 270px;min-width:0;overflow-wrap:anywhere}
+.ai-job-detail,.ai-review-results{min-width:0;padding:12px;border:1px solid #325477;border-radius:9px;background:#0e1c2e}
+.ai-audit{max-height:220px;overflow:auto}
+.ai-audit p{margin:5px 0;font-size:12px}
+@media(max-width:680px){.ai-config-grid{grid-template-columns:1fr}.skill-ai-panel{padding-top:15px}}
