@@ -142,6 +142,24 @@ public sealed class FeedNpmTests
     }
 
     [Fact]
+    public async Task PublicationRejectsNonStringAndUnboundedDeprecationWarnings()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var grant = await Create(client, "npm-warning");
+        foreach (var warning in new JsonNode?[] { null, JsonValue.Create(3), new JsonObject(),
+            JsonValue.Create("line\ncontrol"), JsonValue.Create(new string('x', 2049)) })
+        {
+            var document = Document(Archive());
+            document["versions"]!["1.0.0"]!["deprecated"] = warning;
+            Assert.Equal(HttpStatusCode.BadRequest, await Publish(client, "npm-warning", grant.Write, document));
+        }
+        var valid = Document(Archive());
+        valid["versions"]!["1.0.0"]!["deprecated"] = "Use a newer release";
+        Assert.Equal(HttpStatusCode.Created, await Publish(client, "npm-warning", grant.Write, valid));
+    }
+
+    [Fact]
     public async Task NativeDeprecationIsAtomicRejectsStaleMetadataAndPreservesBundles()
     {
         using var host = new Host();

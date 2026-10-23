@@ -172,7 +172,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-15 | Bounded .NET request/duration/denial instruments and admin process totals implemented; deployment load, alerts, rotations, incident and SLO measurements remain |
 | V5-16 | Blocked on applicable independent release acceptance; no tagged release authorized by a green CI index |
 | V5-20 | Existing NuGet profile; remaining symbols/unlisting/trust/client matrix unchanged |
-| V5-21 | Durable scoped tags and V15 per-version deprecation management implemented; native deprecate/clear with atomic CAS overlays implemented; broader clients and provenance remain |
+| V5-21 | Durable scoped tags and V15 per-version deprecation management implemented; native deprecate/clear with atomic CAS overlays and pinned npm/pnpm/Yarn Classic lockfile CI added; modern Yarn, provenance and profile graduation remain |
 | V5-22 | Private V14 Cargo yank/unyank integrated; allowlisted mirror, broader clients and graduation evidence remain |
 | V5-23 | Private wheel PEP 658/714 sidecars implemented with exact-byte and authorization tests; broader versions/distributions/yank/proxy remain |
 | V5-24 | Existing hosted OCI profile; bearer issuer, broader clients and complete delete/GC qualification remain |
@@ -250,3 +250,18 @@ restored ledger; failed quota admissions do not write intents or blobs.
 Retention is explicitly indefinite, with no online delete or automatic GC.
 This does not complete UI/MCP parity, physical bucket accounting or production
 provider qualification. The single-writer boundary is unchanged.
+
+## Native consumer matrix checkpoint — 23 October 2026
+
+V5-21 adds a mandatory exact-source native-matrix job for npm 11.9.0, pnpm
+10.20.0 and Yarn Classic 1.22.22. It checks isolated transitive bytes, origin
+and integrity lock records, fresh-store locked reinstalls after restart and
+explicit lock-mismatch failure against an existing alternate release. The
+qualification gate requires this job by name; omission cannot silently pass.
+Modern Yarn, a wider client/provider matrix, provenance and full production
+acceptance remain open.
+
+The consumer-matrix review also rejects malformed `deprecated` fields during
+publication and immutable-metadata reads, with a regression for null/non-string,
+control-containing and oversized values. No schema change or payload rewriting
+is introduced. Separate security review remains deferred to the user.

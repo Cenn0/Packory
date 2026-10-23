@@ -176,6 +176,102 @@ for flavor in alpha beta; do
   node -e 'if (require(process.argv[1]) !== process.argv[2]) process.exit(1)' \
     "$WORK/$flavor/consumer/node_modules/@packory-private/demo" "$flavor"
 done
+# Optional independently pinned consumers: run in the native-client CI matrix.
+# Yarn here explicitly means Classic 1.x, not the separate modern Yarn protocol profile.
+if [[ "${PACKORY_SMOKE_ALTERNATE_CLIENTS:-0}" == 1 ]]; then
+  : "${PACKORY_PNPM_CLI:?Path to pinned pnpm CLI required}"
+  : "${PACKORY_YARN_CLI:?Path to pinned Yarn Classic CLI required}"
+  test "$(npm --version)" = 11.9.0
+  test "$(node "$PACKORY_PNPM_CLI" --version)" = 10.20.0
+  test "$(node "$PACKORY_YARN_CLI" --version)" = 1.22.22
+  # A real existing 2.0.0 makes the frozen-lock negative independent of 404/network failures.
+  for flavor in alpha beta; do
+    node - "$WORK/$flavor/demo/package.json" <<'VERSION'
+const fs = require('node:fs');
+const file = process.argv[2];
+const value = JSON.parse(fs.readFileSync(file));
+value.version = '2.0.0';
+fs.writeFileSync(file, JSON.stringify(value));
+VERSION
+    (
+      cd "$WORK/$flavor/demo"
+      npm publish --registry="$BASE/feeds/npm-$flavor/npm/" \
+        --userconfig="$WORK/$flavor-write.npmrc" --globalconfig="$WORK/empty.npmrc" \
+        --cache="$WORK/$flavor/publish-2-cache" --tag next --access restricted \
+        --provenance=false --ignore-scripts --fetch-retries=0 --loglevel error \
+        >"$WORK/$flavor-publish-2.log" 2>&1
+    )
+  done
+  for manager in pnpm yarn; do
+    for flavor in alpha beta; do
+      consumer="$WORK/$manager-$flavor"
+      mkdir -p "$consumer"
+      cp "$WORK/$flavor/consumer/package.json" "$consumer/package.json"
+      cp "$WORK/$flavor-read.npmrc" "$consumer/.npmrc"
+      printf 'always-auth=true\nlockfile-include-tarball-url=true\n' >>"$consumer/.npmrc"
+      install_alternate() {
+        local frozen="$1" cache="$2"
+        if [[ "$manager" == pnpm ]]; then
+          local mode=--no-frozen-lockfile
+          [[ "$frozen" == true ]] && mode=--frozen-lockfile
+          CI=true NPM_CONFIG_USERCONFIG="$WORK/empty-user.npmrc" NPM_CONFIG_GLOBALCONFIG="$WORK/empty.npmrc" \
+          node "$PACKORY_PNPM_CLI" install "$mode" --ignore-scripts \
+            --store-dir="$cache" --cache-dir="$cache-metadata" --reporter=append-only \
+            --fetch-retries=0
+        else
+          local mode=()
+          [[ "$frozen" == true ]] && mode=(--frozen-lockfile)
+          # The fixture registry is loopback-only; Yarn Classic otherwise forces
+          # configured proxies even for NO_PROXY. No public package origins are admitted.
+          CI=true NPM_CONFIG_USERCONFIG="$WORK/empty-user.npmrc" NPM_CONFIG_GLOBALCONFIG="$WORK/empty.npmrc" \
+          node -e 'for (const key of Object.keys(process.env)) if (/proxy/i.test(key)) delete process.env[key]; require(process.argv[1]);' \
+            "$PACKORY_YARN_CLI" install "${mode[@]}" --ignore-scripts --non-interactive \
+            --registry="$BASE/feeds/npm-$flavor/npm/" --cache-folder="$cache" \
+            --network-timeout=15000 --no-progress
+        fi
+      }
+      echo "Testing private $manager $flavor cold/locked installs."
+      (
+        cd "$consumer"
+        install_alternate false "$WORK/$manager-$flavor-cold" >"$WORK/$manager-$flavor-install.log" 2>&1
+        if [[ "$manager" == pnpm ]]; then lock=pnpm-lock.yaml; else lock=yarn.lock; fi
+        python3 - "$lock" "$BASE/feeds/npm-$flavor/npm/" <<'LOCK'
+from pathlib import Path
+import hashlib,re,sys
+path=Path(sys.argv[1]); text=path.read_text()
+urls=re.findall(r'https?://[^\s"\']+',text)
+assert len(urls) >= 2 and all(url.startswith(sys.argv[2]) for url in urls)
+assert '@packory-private/demo' in text and '@packory-private/dep' in text
+assert text.count('sha512-') >= 2
+Path('lock.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest())
+LOCK
+        node -e 'if (require(process.argv[1]) !== process.argv[2]) process.exit(1)' \
+          "$consumer/node_modules/@packory-private/demo" "$flavor"
+        rm -rf "$consumer/node_modules"
+        install_alternate true "$WORK/$manager-$flavor-fresh" >"$WORK/$manager-$flavor-locked.log" 2>&1
+        python3 - "$lock" <<'LOCK'
+from pathlib import Path
+import hashlib,sys
+assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == Path('lock.sha256').read_text()
+LOCK
+        node -e 'if (require(process.argv[1]) !== process.argv[2]) process.exit(1)' \
+          "$consumer/node_modules/@packory-private/demo" "$flavor"
+        # Frozen installs must reject a manifest that no longer matches the lock.
+        node -e 'const fs=require("node:fs");const p=JSON.parse(fs.readFileSync("package.json"));p.dependencies["@packory-private/demo"]="2.0.0";fs.writeFileSync("package.json",JSON.stringify(p));'
+        if install_alternate true "$WORK/$manager-$flavor-mismatch" >"$WORK/$manager-$flavor-mismatch.log" 2>&1; then
+          echo "Frozen $manager install accepted mismatched manifest" >&2; exit 1
+        fi
+        grep -Eq 'ERR_PNPM_OUTDATED_LOCKFILE|lockfile needs to be updated' "$WORK/$manager-$flavor-mismatch.log"
+        python3 - "$lock" <<'LOCK'
+from pathlib import Path
+import hashlib,sys
+assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == Path('lock.sha256').read_text()
+LOCK
+      )
+    done
+  done
+  echo 'pnpm 10.20.0 and Yarn Classic 1.22.22: dual-feed transitive cold/locked fresh-cache installs and frozen mismatch denials passed.'
+fi
 admin_post /api/v1/admin/feeds/npm-alpha/deactivate '' >/dev/null
 negative 404 "$WORK/alpha-read.npmrc" disabled
 curl --noproxy 127.0.0.1 -fsS -H "Authorization: Bearer $B_READ" \

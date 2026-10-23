@@ -36,3 +36,31 @@ jobs:
           dotnet build Packory.slnx -c Release --no-restore -warnaserror
       - name: Real hosted Cargo and pip workflows
         run: bash scripts/smoke-ecosystems.sh
+
+  npm-clients:
+    name: npm pnpm Yarn Classic private lockfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Install pinned alternate package clients without lifecycle scripts
+        run: npm install --prefix "$RUNNER_TEMP/packory-npm-clients" --ignore-scripts --no-audit --no-fund npm@11.9.0 pnpm@10.20.0 yarn@1.22.22
+      - name: Compile hosted registry
+        run: dotnet build src/Packory/Packory.csproj -c Release -warnaserror
+      - name: Verify isolated private native consumers and locked fresh-cache installs
+        env:
+          PACKORY_SMOKE_ALTERNATE_CLIENTS: '1'
+          PACKORY_PNPM_CLI: ${{ runner.temp }}/packory-npm-clients/node_modules/pnpm/bin/pnpm.cjs
+          PACKORY_YARN_CLI: ${{ runner.temp }}/packory-npm-clients/node_modules/yarn/bin/yarn.js
+        run: |
+          export PATH="$RUNNER_TEMP/packory-npm-clients/node_modules/.bin:$PATH"
+          bash scripts/smoke-feed-npm.sh

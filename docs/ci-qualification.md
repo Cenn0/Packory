@@ -7,7 +7,7 @@ following independent workflows for the **same source commit and event**:
 | --- | --- |
 | `keycloak.yml` | Signed Keycloak JWT |
 | `mcp-typescript.yml` | Independent TypeScript SDK HTTP conformance |
-| `native-matrix.yml` | Both Cargo/pip Python 3.12 and 3.13 profiles |
+| `native-matrix.yml` | Both Cargo/pip Python 3.12 and 3.13 profiles plus npm/pnpm/Yarn Classic lockfiles |
 | `postgres.yml` | PostgreSQL integration |
 | `public-docs.yml` | Documentation checks, without path-filter skips |
 | `s3.yml` | S3/Moto integration and coordinated restore tests |
