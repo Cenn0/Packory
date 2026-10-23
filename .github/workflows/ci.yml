@@ -80,6 +80,8 @@ jobs:
           PACKORY_SKILL_AI_ENDPOINTS_PATH=/tmp/packory-ai-endpoints-placeholder.json \
           PACKORY_SKILL_AI_KEYRING_PATH=/tmp/packory-ai-keyring-placeholder.json \
           docker compose -f compose.yaml -f compose.skill-ai.yaml config --quiet
+      - name: Validate private ingress profile and proxy authorization boundaries
+        run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
       - name: Validate synthetic single-node evidence ledger
         run: python3 -m unittest discover -s tests -p test_single_node_acceptance.py -v
       - name: Validate dashboard JavaScript

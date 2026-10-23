@@ -36,6 +36,46 @@ in addition to checking that the CI source is still current main. Manual CI
 dispatch inspects existing main-push qualification; it cannot manufacture
 independent provider runs for an arbitrary untested branch.
 
+## Protected main: administrative acceptance checkpoint (issue #76)
+
+**Observed 23 October 2026:** The two readable active rulesets on
+`refs/heads/main` are [main-1](https://github.com/Cenn0/Packory/rules/25258491)
+and [main-2](https://github.com/Cenn0/Packory/rules/25258492).
+The first protects against deletion/non-fast-forward updates; the second
+configures pull-request approvals with explicit bypass capabilities.
+**Neither readable ruleset currently declares `required_status_checks`.**
+The legacy branch-protection REST read returned HTTP 403 to the installed
+integration, so other effective protection cannot be excluded. Successful
+CI runs or a rule named "approval" **do not** prove status-check enforcement.
+
+An authorized repository administrator must, in a controlled test:
+
+1. Inspect **all effective** repository/organization rulesets and legacy
+   protection and audit the intended automation and emergency bypass access.
+   Do not publish identities, permission tokens or private administration logs.
+2. Require the stable **`Complete qualification`** job context on `main`.
+   It must run on **every PR**, with all eight independent workflow jobs
+   represented by [the exact source gate](../scripts/qualification_gate.py).
+   Avoid requiring a conditional/renamed job that can remain pending forever.
+   Consider independent required contexts only where their PR triggering
+   behavior is guaranteed; merely marking a workflow as required is not
+   evidence that it executes.
+3. Use an isolated, non-sensitive synthetic pull request with an intentionally
+   failed check and verify merge is blocked for the intended automation
+   identity **without an unrestricted bypass**. Restore the fixture branch
+   without changing production data.
+4. Repeat with the same test change and a green check, then verify the
+   merge eligibility policy. Independently test the deletion/non-fast-forward
+   prohibitions and record only redacted results, timestamp, rule IDs,
+   source SHA and non-sensitive check names.
+5. Review whether approvals are actually independent and current, especially
+   after new commits. Store approval/testing evidence with [release gates](release-gates.md).
+
+Until all five are witnessed, issue #76 remains **open and not verified**.
+This limitation applies even when the current integration reports green
+build, native-client, privacy and storage checks. The integration cannot
+change the repository's administrative rules through its available actions.
+
 ## Evidence index
 
 The main integration job additionally uploads a seven-day

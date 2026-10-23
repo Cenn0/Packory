@@ -1,6 +1,6 @@
 # Packory runtime architecture
 
-Status: **modular monolith with eight private hosted package adapters; optional PostgreSQL, S3 and OIDC** · 21 October 2026. The E0 hosted package foundation is accepted; its exact implementation and CI evidence are recorded in [E0 acceptance](e0-acceptance.md).
+Status: **modular monolith with eight private hosted package adapters; optional PostgreSQL, S3 and OIDC**. Updated navigation: 23 October 2026. The bounded E0 hosted-feed evidence is recorded in [E0 acceptance](e0-acceptance.md); see the [current project status](project-status.md), [support matrix](support-matrix.md) and [23 October correctness/security review](review-2026-10-23.md). This architecture describes the current runtime, not a production certification.
 
 ## Decision
 
@@ -60,7 +60,7 @@ SQLite remains the default **single-instance** profile; PostgreSQL metadata and 
 
 `origin` in the unified catalog is `hosted` or `mirror`. Upstream packages enter the catalog after artifact download, not merely after metadata lookup. Hosted npm versions enter after successful upload. Skills are staged and become discoverable only when the active release policy allows them; MCP artifact pagination applies that approval predicate before the database page limit. Search is not federated across remote registries.
 
-### Private artifact visibility and schema V11
+### Private artifact visibility and schema V15
 
 The current schema is **V15**. V15 adds audited per-feed npm deprecation overlays without rewriting published bundles. V12 admits group-level Maven plugin metadata; V13 adds feed-local npm dist-tag pointers; V14 adds feed-local Cargo yank state. Mutable pointers are transactionally audited and restored separately from immutable package bytes. Its additive `maven_metadata` table stores exact publisher XML and digests under `(scope,path)` with atomic metadata/audit updates. Existing private ledgers remain unchanged. `feed_assets` stores immutable native identities as `(feed_id, kind, path)`, along with name/version, media type, SHA-256 and length. It covers Raw, Maven, Go, npm, Cargo, PyPI and OCI. `feed_nuget_versions` retains the existing NuGet SHA-512 identity. `feed_oci_tags` stores feed/repository/tag pointers separately from immutable manifest records. The V10 migration preserves prior private rows and keys; it does not migrate global coordinates into feeds.
 
@@ -74,7 +74,7 @@ MCP Registry publisher verification, source synchronization and durable multi-pr
 
 PostgreSQL and S3 are selectable providers. A PostgreSQL **single-writer advisory lease**, durable publication intent journal and explicit S3 orphan quarantine are implemented and emulator-tested, but this does **not** establish partition fencing, a coordinated DB/object-store transaction, migration tooling or a verified real-provider restore. Private namespace reservations suppress public upstream metadata and file fallback. Each new ecosystem needs its own client-contract tests, mirror retention semantics, credential strategy, and security review. A distributed service topology has no demonstrated benefit at this scale; defer it until performance/SLO data supports the cost.
 
-See [Roadmap](roadmap.md) for implementation sequence and [Operations](operations.md) for deployment risk controls.
+See [current Roadmap V5](roadmap-v5.md) for implementation sequence and [Operations](operations.md) for deployment risk controls; [Roadmap V3](roadmap.md) is retained as historical planning.
 
 
 ## Experimental global Maven adapter (V4 E2 partial)

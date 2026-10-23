@@ -11,6 +11,8 @@ Packory is a self-hosted distribution platform in **active development**. Docume
 | **Build and run locally with Docker Compose** | [README Docker quick start](../README.md#docker-quick-start) |
 | **Pull the development containers instead of building** | [GHCR images, tags and deployment](container-images.md) |
 | Set up TLS, access, configuration and backups | [Operations](operations.md) |
+| Configure a private TLS ingress (reference only) | [Reverse-proxy guide](reverse-proxy.md) |
+| Verify a disposable single-node installation | [Single-node qualification protocol](single-node-qualification.md) |
 | Configure native clients and isolated private feeds | [Feeds](feeds.md) · [API reference](api.md) |
 | Check exactly what was tested | [Protocol and deployment support matrix](support-matrix.md) |
 | Understand the deployed application | [Architecture](architecture.md) |
