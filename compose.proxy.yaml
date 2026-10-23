@@ -1,0 +1,70 @@
+# Dedicated shared TLS ingress reference (not a production certification).
+# Depends on the file-backed settings in PR #134 / issue #132.
+# Provide two independently checked immutable image digests; never use a mutable :main tag.
+services:
+  packory:
+    image: ${PACKORY_APP_IMAGE:?Set an approved ghcr.io/cenn0/packory@sha256 image}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - ingress
+    environment:
+      PACKORY_DATA_DIRECTORY: /data
+      PACKORY_PUBLIC_BASE_URL: ${PACKORY_PUBLIC_BASE_URL:?Set canonical https origin without trailing path}
+      PACKORY_ANONYMOUS_READ: "false"
+      PACKORY_OCI_AUTHENTICATED_PING: "true"
+      PACKORY_MCP_ENABLED: "true"
+      PACKORY_SKILL_SECURITY_ENFORCED: "true"
+      PACKORY_ADMIN_TOKEN_FILE: /run/secrets/packory_admin_token
+      PACKORY_READ_TOKEN_FILE: /run/secrets/packory_read_token
+      PACKORY_WRITE_TOKEN_FILE: /run/secrets/packory_write_token
+    secrets:
+      - packory_admin_token
+      - packory_read_token
+      - packory_write_token
+    volumes:
+      - packory-data:/data
+      - skill-scans-in:/data/skill-scans/in
+      - skill-scans-out:/data/skill-scans/out
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  skillspector:
+    image: ${PACKORY_SKILLSPECTOR_IMAGE:?Set matching approved packory-skillspector@sha256 image}
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    user: "1654:1654"
+    volumes:
+      - skill-scans-in:/work/in:ro
+      - skill-scans-out:/work/out
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+
+secrets:
+  packory_admin_token:
+    file: ${PACKORY_ADMIN_TOKEN_SOURCE:?Set absolute host admin-token file}
+  packory_read_token:
+    file: ${PACKORY_READ_TOKEN_SOURCE:?Set absolute host read-token file}
+  packory_write_token:
+    file: ${PACKORY_WRITE_TOKEN_SOURCE:?Set absolute host write-token file}
+
+networks:
+  ingress:
+    external: true
+    name: ${PACKORY_INGRESS_NETWORK:?Name a dedicated pre-created private ingress Docker network}
+
+volumes:
+  packory-data:
+  skill-scans-in:
+  skill-scans-out:
