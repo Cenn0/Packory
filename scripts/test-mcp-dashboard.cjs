@@ -59,6 +59,29 @@ function defaultReply(call) {
     case 'detail': return { skill, report: { fixture: `${prefix}-report`, untrustedText: hostile }, history: [] };
     case 'quality': return qualityReport();
     case 'mcp': return { items: [serverRecord(`${prefix}-server`)], nextCursor: call.cursor ? null : 'fixture-next-page' };
+    case 'ai-settings': return { configuration: { revision: 0, enabled: false,
+      endpointId: 'openai', model: '', trigger: 'manual', requireForApproval: false,
+      externalTransmissionApproved: false, timeoutSeconds: 180, maxConcurrentScans: 1,
+      maxRequestsPerScan: 16, maxPromptBytes: 32768, maxOutputTokens: 4096,
+      monthlyBudgetMicroUsd: 10000000, inputUsdPerMillionTokens: 0,
+      outputUsdPerMillionTokens: 0, outputLanguage: 'English' },
+      hasApiKey: false, endpoints: [{ id: 'openai', provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1', external: true }],
+      usage: { month: '2026-10', reservedMicroUsd: 0, requests: 0, requestsWithMissingUsage: 0 } };
+    case 'ai-settings-save': return { configuration: { revision: 1 }, hasApiKey: false };
+    case 'ai-assessments': return { items: [{ id: 'a'.repeat(32), kind: 'assessment',
+      name: skill.name, version: skill.version, state: 'COMPLETED', riskScore: 18,
+      revision: 0, createdAt: '2026-10-23', configuration: { model: hostile } }] };
+    case 'ai-jobs': return { items: [{ id: 'a'.repeat(32), kind: 'assessment',
+      name: skill.name, version: skill.version, state: 'COMPLETED', riskScore: 18,
+      revision: 0, createdAt: '2026-10-23', configuration: { model: hostile } }] };
+    case 'ai-audit': return { items: [{ action: 'configuration_changed', revision: 0, reason: hostile }] };
+    case 'ai-job-detail': return { job: { state: 'COMPLETED', kind: 'assessment',
+      riskScore: 18, sha256: archiveDigest, revision: 0, scannerVersion: '2.13.0',
+      configuration: { model: hostile } }, report: { untrustedText: hostile } };
+    case 'ai-probe': return { id: 'b'.repeat(32), kind: 'probe' };
+    case 'ai-cancel': return { status: 'CANCELLED' };
+    case 'ai-queue': return { id: 'c'.repeat(32), state: 'QUEUED' };
     case 'decision': return { status: call.action === 'revoke' ? 'REVOKED' : 'QUEUED' };
     default: throw new Error(`Unexpected mocked route: ${call.method} ${call.pathname}`);
   }
@@ -73,13 +96,19 @@ function classify(url, request) {
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+$/.test(pathname)) kind = 'detail';
   else if (/^\/api\/v1\/skills\/[^/]+\/[^/]+\/quality$/.test(pathname)) kind = 'quality';
   else if (pathname === '/api/v1/mcp/servers') kind = 'mcp';
+  else if (pathname === '/api/admin/skill-ai/settings') kind = request.method() === 'PUT' ? 'ai-settings-save' : 'ai-settings';
+  else if (pathname === '/api/admin/skill-ai/audit') kind = 'ai-audit';
+  else if (pathname === '/api/admin/skill-ai/assessments') kind = request.method() === 'POST' ? 'ai-queue' : (url.searchParams.has('name') ? 'ai-assessments' : 'ai-jobs');
+  else if (pathname === '/api/admin/skill-ai/probe') kind = 'ai-probe';
+  else if (/^\/api\/admin\/skill-ai\/jobs\/[a-f0-9]{32}\/cancel$/.test(pathname)) kind = 'ai-cancel';
+  else if (/^\/api\/admin\/skill-ai\/jobs\/[a-f0-9]{32}$/.test(pathname)) kind = 'ai-job-detail';
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+\/(revoke|rescan)$/.test(pathname)) {
     kind = 'decision'; action = pathname.split('/').at(-1);
   }
   return { kind, action, pathname, method: request.method(), q: url.searchParams.get('q'),
     cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit'),
     authorization: request.headers().authorization || '',
-    body: request.method() === 'POST' ? request.postDataJSON() : null };
+    body: ['POST', 'PUT'].includes(request.method()) ? request.postDataJSON() : null };
 }
 
 async function serveAssets() {
@@ -196,9 +225,9 @@ async function harness(browser, origin, reply = defaultReply) {
 }
 
 async function assertCleared(page) {
-  for (const id of ['packages', 'skills', 'security-table', 'security-detail', 'mcp-table', 'quality-detail'])
+  for (const id of ['packages', 'skills', 'security-table', 'security-detail', 'mcp-table', 'quality-detail', 'ai-jobs', 'ai-audit', 'ai-job-detail'])
     assert.equal(await page.locator(`#${id}`).textContent(), '', `${id} retained protected data`);
-  for (const id of ['quality-panel', 'security-detail', 'mcp-more'])
+  for (const id of ['quality-panel', 'security-detail', 'mcp-more', 'skill-ai-panel'])
     assert.equal(await page.locator(`#${id}`).isVisible(), false, `${id} should be hidden`);
   for (const id of ['security-pending', 'security-review', 'security-quarantine', 'security-approved'])
     assert.equal(await page.locator(`#${id}`).textContent(), '—');
@@ -250,6 +279,7 @@ async function tokenScenario(h) {
   await h.assess();
   await h.page.locator('#security-table button').click();
   await h.text('security-detail', 'old-report');
+  await h.text('ai-jobs', 'old-skill');
   assert.equal(await h.page.locator('#mcp-more').isVisible(), true);
 
   const detail = h.holdNext('detail');
@@ -276,7 +306,9 @@ async function tokenScenario(h) {
   await h.page.locator('#token').press('Tab');
   await h.ready('new', true);
   const fresh = h.calls.slice(boundary);
-  assert.deepEqual(fresh.map(call => call.kind).sort(), ['catalog', 'mcp', 'security', 'skills']);
+  await h.text('ai-status', 'AI is disabled');
+  assert.deepEqual(fresh.map(call => call.kind).sort(),
+    ['ai-audit', 'ai-jobs', 'ai-settings', 'catalog', 'mcp', 'security', 'skills']);
   assert.ok(fresh.every(call => call.authorization === `Bearer ${newToken}`));
   for (const id of ['packages', 'skills', 'security-table', 'mcp-table'])
     assert.doesNotMatch(await h.page.locator(`#${id}`).textContent(), /old-/);
@@ -317,6 +349,40 @@ async function invalidationScenario(h) {
     assert.equal(await h.page.locator('#quality-panel').isVisible(), false);
     assert.equal(await h.page.locator('#quality-detail').textContent(), '');
   }
+}
+
+async function skillAiScenario(h) {
+  await h.authenticate();
+  await h.text('ai-status', 'AI is disabled');
+  assert.equal(await h.page.locator('#skill-ai-panel').isVisible(), true);
+  assert.equal(await h.page.locator('#ai-enabled').isChecked(), false);
+  await h.text('ai-jobs', 'old-skill');
+  await h.page.locator('#ai-jobs button').first().click();
+  await h.text('ai-job-detail', hostile);
+  assert.equal(await h.page.locator('#ai-job-detail img, #ai-job-detail script').count(), 0);
+  assert.equal(await h.page.locator('#ai-audit img, #ai-audit script').count(), 0);
+  await h.page.locator('#security-table button').click();
+  await h.text('security-detail', 'Optional AI analysis');
+  await h.text('security-detail', hostile);
+  assert.equal(await h.page.locator('#security-detail img, #security-detail script').count(), 0);
+  await h.page.locator('#ai-enabled').check();
+  await h.page.locator('#ai-model').fill('example-model');
+  await h.page.locator('#ai-key').fill('synthetic-do-not-store');
+  await h.page.locator('#ai-input-rate').fill('1');
+  await h.page.locator('#ai-output-rate').fill('2');
+  await h.page.locator('#ai-transmission').check();
+  await h.page.locator('#ai-reason').fill('Synthetic opt in');
+  const oldCount = h.calls.length;
+  await h.page.locator('#ai-save').click();
+  await h.text('ai-status', 'AI is disabled');
+  const put = h.calls.slice(oldCount).find(call => call.kind === 'ai-settings-save');
+  assert.ok(put, 'AI settings must be sent to backend');
+  assert.equal(put.method, 'PUT');
+  assert.equal(put.body.configuration.enabled, true);
+  assert.equal(put.body.configuration.model, 'example-model');
+  assert.equal(put.body.reason, 'Synthetic opt in');
+  assert.equal(put.body.apiKey, 'synthetic-do-not-store');
+  assert.equal(await h.page.locator('#ai-key').inputValue(), '', 'Credential must leave the input after save');
 }
 
 async function layoutScenario(h) {
