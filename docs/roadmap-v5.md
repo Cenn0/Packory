@@ -1,5 +1,7 @@
 # Packory Roadmap V5 — consolidated, evidence-gated delivery
 
+> **Planning baseline, not live release status.** This roadmap was consolidated on 22 October 2026. For the later [23 October project status](project-status.md), [correctness/security review](review-2026-10-23.md) and [current protocol evidence](support-matrix.md), follow those dated sources. Items below describe acceptance work, not proof of completion.
+
 **Baseline:** 22 October 2026, main commit [6aa9835](https://github.com/Cenn0/Packory/commit/6aa983577bea14eace79bae270cdf48a070372e4).
 **Status:** active development; native hosted-feed baseline tested, **not** generally production-qualified.
 **Purpose:** a single ordered execution plan for remaining work. Older [V3](roadmap.md), [V4](roadmap-v4.md), [experimental graduation](experimental-graduation.md), [MCP](mcp-roadmap.md) and [Skill security](skill-security-roadmap.md) plans remain detailed historical/workstream references; V5 governs sequencing and release claims.
