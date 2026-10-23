@@ -95,11 +95,13 @@ python3 scripts/single_node_acceptance.py --template /tmp/packory-acceptance.jso
 python3 scripts/single_node_acceptance.py --validate /tmp/packory-acceptance.json
 ```
 
-The validator requires one exact source SHA, both `sha256:` image digests,
-both matching image revision labels, six pinned native/runtime versions,
+The validator requires one exact source SHA, two distinct `sha256:` image digests
+(one for the application, one for the scanner), both matching image revision
+labels, six pinned native/runtime versions,
 declared boot-test scope, bounded workload and numeric measurements when
-claiming resource tests passed. It requires 20 separate case outcomes, with
-finite status/reason enums, forbids additional fields and caps input at
+claiming resource tests passed. It requires 20 separate case outcomes, with status-consistent reason codes (`failed`: assertion/timeout;
+`skipped`: missing tool/provider, unsafe or unauthorized;
+`not_run`: not executed), forbids additional fields and caps input at
 64 KiB. Missing or failed cases return nonzero; complete results say
 **self-reported**, not independently corroborated.
 
