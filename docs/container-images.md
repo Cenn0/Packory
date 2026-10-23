@@ -83,11 +83,33 @@ label links each image to this public source repository. If a package already
 exists with restrictive GHCR Actions permissions, grant this repository write
 access to that package. Verify each package's visibility separately: a public
 Git repository does **not** guarantee anonymous pulls from an existing
-private GHCR package. The workflow performs authenticated SHA-tag read-back
-with an OCI revision-label check, records full manifest digests, and separately
-reports whether anonymous **manifest access** succeeded. An anonymous
-manifest read is not a complete anonymous image pull, does not verify layer
-downloads, and is not production qualification.
+private GHCR package. The workflow performs authenticated SHA-tag read-back,
+then requires **anonymous delivery of both complete images** before moving
+either `main` tag. A credential-free Python OCI reader retrieves each manifest,
+config and every compressed layer directly from GHCR and hashes the received
+bytes against the exact descriptors. Local Docker layer caches cannot satisfy
+this check. It verifies the expected source/revision labels and the declared
+non-root user, then rereads the manifest by digest. Private/unreadable,
+truncated, corrupt, wrong-revision or unexpected-platform images block mutable
+tag promotion. The admitted profile is a single Linux/amd64 image manifest;
+future multi-platform indexes need their own verification before enabling them.
+
+A sanitized `container-delivery-<SHA>-<attempt>` Actions artifact records the
+two immutable manifest digests, source, declared user, layer counts and verified
+byte totals for 30 days. It contains no tokens, signed CDN URLs, config bodies
+or raw diagnostics. An independently repeatable verification is:
+
+```bash
+python3 scripts/verify_container_delivery.py --sha <EXACT_COMMIT_SHA> \
+  --output /tmp/packory-container-delivery.json
+```
+
+The output must be a new file. This command downloads the complete compressed
+image content and can transfer several hundred megabytes. It requires only
+Python 3, HTTPS and anonymous registry availability, with no Docker daemon or
+account credentials. It does not extract or execute images. The separate CI
+container build/runtime smoke and the qualified release gates remain necessary.
+See the [OCI Distribution pull contract](https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md#pull).
 
 - Images: [Packory](https://github.com/Cenn0/Packory/pkgs/container/packory)
   and [SkillSpector](https://github.com/Cenn0/Packory/pkgs/container/packory-skillspector)

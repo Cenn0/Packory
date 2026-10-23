@@ -229,3 +229,14 @@ now uses native deprecate/clear rather than the Packory-specific mutation API.
 This completes this lifecycle slice, not the broader pnpm/Yarn/provenance or
 provider production acceptance. V5-01 remains externally blocked by effective
 branch-policy access; V5-10/11 require selected real-provider resources.
+
+## Container delivery checkpoint — 23 October 2026
+
+V5-02/03 now add a credential-free full-image delivery verifier and a sanitized
+exact-source digest evidence artifact. The publisher must successfully hash
+both SHA-tagged manifests, configs and every compressed layer before promoting
+either mutable main tag. Invalid labels, root identity, missing/altered content
+and an unsupported platform/manifest fail closed. Deterministic transport and
+workflow tests cover failures independently of real registry observations.
+This verifies the declared single-platform delivery profile; it does not
+replace image runtime, source CI, reviewer or deployment/release acceptance.
