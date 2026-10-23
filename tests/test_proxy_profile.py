@@ -39,6 +39,16 @@ class ProxyProfileContractTests(unittest.TestCase):
         self.assertIn("PACKORY_APP_IMAGE:?", COMPOSE)
         self.assertIn("PACKORY_SKILLSPECTOR_IMAGE:?", COMPOSE)
 
+    def test_unknown_tls_sni_and_mismatched_http_host_are_denied(self):
+        self.assertIn("listen 443 ssl default_server;", NGINX)
+        self.assertIn("ssl_reject_handshake on;", NGINX)
+        self.assertIn("return 421;", NGINX)
+        self.assertIn('if ($host != "packory.example.invalid")', NGINX)
+        default_block = NGINX.split("server {", 1)[1].split("}", 1)[0]
+        self.assertIn("ssl_reject_handshake on;", default_block)
+        self.assertLess(NGINX.index("ssl_reject_handshake on;"),
+                        NGINX.index("server_name packory.example.invalid;"))
+
     def test_streaming_auth_and_untrusted_identity_headers_have_explicit_contract(self):
         self.assertIn("proxy_set_header Authorization $http_authorization;", NGINX)
         self.assertIn("proxy_buffering off;", NGINX)

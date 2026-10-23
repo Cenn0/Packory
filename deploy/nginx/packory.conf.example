@@ -8,6 +8,15 @@ upstream packory_upstream {
     keepalive 16;
 }
 
+# Nginx >= 1.19.4: reject unknown/missing TLS SNI rather than serving the
+# Packory certificate from an implicit default virtual host.
+# Merge this block with an existing default 443 server; do not define two.
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+    return 421;
+}
+
 server {
     listen 443 ssl;
     server_name packory.example.invalid; # REPLACE with exact operator-controlled FQDN
@@ -15,6 +24,11 @@ server {
     ssl_certificate_key /etc/nginx/certs/packory.key; # Never commit real key material
     ssl_protocols TLSv1.2 TLSv1.3;
     server_tokens off;
+
+    # Reject a mismatched HTTP Host even after a valid SNI handshake.
+    if ($host != "packory.example.invalid") {
+        return 421;
+    }
 
     # Avoid logging bearer tokens, URL credentials and query-string secrets.
     # Configure a redacted HTTP-level log format before enabling access logs.
