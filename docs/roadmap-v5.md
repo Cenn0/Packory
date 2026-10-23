@@ -336,3 +336,15 @@ behavior and resource measurements require an operator-run installation test.
 See [single-node qualification](single-node-qualification.md#opt-in-bounded-latency-probe).
 Measured resource pressure, sustained capacity/SLOs, boot, provider faults,
 recovery and independent qualification remain separate unfinished acceptance.
+
+## Scanner outage CI subset — 23 October 2026
+
+The disposable SkillSpector Compose smoke now stages a second inert Skill while
+its scanner container is stopped. It requires the revision to remain queued,
+unavailable for download and ineligible for approval; after worker restart, it
+requires a completed scan before manual approval and exact-byte download. The
+outage command is guarded to the uniquely named GitHub Actions fixture project.
+This extends issue #133 and V5-15 with a runnable fail-closed case. It does not
+qualify scanner recovery on the installed MyCloud service, scanner detection
+coverage, host boot, capacity, Nginx, earlier-image upgrades or release gates.
+Check the exact-head CI run before recording the case as passed.

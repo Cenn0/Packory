@@ -69,10 +69,15 @@ material are uploaded. This version inventory is not proof of execution by itsel
 
 Run only on a **dedicated disposable CI runner** with Docker and passwordless
 local `sudo`; first build the local application image as `packory:ci`.
-The scanner is intentionally not started. TLS terminates in **Kestrel**, so this
-fixture does **not** qualify Nginx/Nginx Proxy Manager, scanner failure, host or
-daemon reboot, resource capacity, a previous-release schema upgrade, real
-provider recovery or production readiness. Those acceptance cases stay open.
+The scanner is intentionally not started in this HTTPS/recovery fixture. The
+separate `skillspector-smoke.yml` CI job uses a dedicated disposable Compose
+project to stage an inert Skill, stop its scanner, verify that the queued Skill
+stays unavailable and cannot be approved, then restart the worker and verify
+the exact bytes after scan and manual approval. Check the exact source run
+before claiming that scanner-outage subset passed. TLS terminates in **Kestrel**
+in the recovery fixture; these CI jobs do **not** qualify Nginx/Nginx Proxy
+Manager, host or daemon reboot, resource capacity, a previous-release schema
+upgrade, real-provider recovery or production readiness. Those cases stay open.
 The test certificate/key must never be reused outside the disposable fixture.
 
 Primary configuration references, checked 23 October 2026:

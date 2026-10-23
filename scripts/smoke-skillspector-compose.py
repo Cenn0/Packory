@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,7 @@ import zipfile
 BASE = "http://127.0.0.1:8080"
 NAME = "compose-e2e-skill"
 VERSION = "1.0.0"
+OUTAGE_NAME = "compose-e2e-scanner-outage"
 
 
 def http(method, path, data=None, mime=None, *, mcp_method=None, mcp_name=None):
@@ -55,19 +57,19 @@ def wait_ready(deadline):
     raise TimeoutError("Packory never became responsive")
 
 
-def zip_data():
+def zip_data(name=NAME):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(NAME + "/", "")
+        archive.writestr(name + "/", "")
         archive.writestr(
-            NAME + "/SKILL.md",
-            "---\nname: " + NAME +
+            name + "/SKILL.md",
+            "---\nname: " + name +
             "\ndescription: Synthetic inert Compose smoke fixture\n---\n"
             "# Test skill\nThis document is an inert integration-test fixture.\n",
         )
-        archive.writestr(NAME + "/references/guide.md", "# Synthetic reference only\n")
-        archive.writestr(NAME + "/references/nested/detail.txt", "Synthetic detail only\n")
-        archive.writestr(NAME + "/empty/", "")
+        archive.writestr(name + "/references/guide.md", "# Synthetic reference only\n")
+        archive.writestr(name + "/references/nested/detail.txt", "Synthetic detail only\n")
+        archive.writestr(name + "/empty/", "")
     return buffer.getvalue()
 
 
@@ -88,9 +90,9 @@ def send_upload(archive):
     return payload["sha256"]
 
 
-def wait_scan(deadline):
+def wait_scan(deadline, name=NAME):
     while time.monotonic() < deadline:
-        code, body = http("GET", "/api/security/skills/" + NAME + "/" + VERSION)
+        code, body = http("GET", "/api/security/skills/" + name + "/" + VERSION)
         require(code == 200, "Admin review endpoint did not return HTTP 200")
         details = json.loads(body)
         state = details["skill"]["state"]
@@ -100,9 +102,9 @@ def wait_scan(deadline):
     raise TimeoutError("Scanner never returned a terminal result")
 
 
-def decision(action, digest, reason):
+def decision(action, digest, reason, name=NAME):
     data = json.dumps({"sha256": digest, "reason": reason}).encode()
-    return http("POST", "/api/security/skills/" + NAME + "/" + VERSION + "/" + action,
+    return http("POST", "/api/security/skills/" + name + "/" + VERSION + "/" + action,
                 data, "application/json")
 
 
@@ -283,6 +285,45 @@ def check_mcp_revocation():
     verify_skill_integrity_over_mcp(10, expected_to_pass=False)
 
 
+def check_scanner_outage():
+    """A stopped worker cannot turn a queued Skill into a published artifact."""
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    require(os.environ.get("GITHUB_ACTIONS") == "true" and run_id.isdecimal() and
+            attempt.isdecimal() and os.environ.get("COMPOSE_PROJECT_NAME") ==
+            "packory-scanner-ci-" + run_id + "-" + attempt,
+            "Scanner outage requires the dedicated disposable CI Compose project")
+    quiet = {"check": True, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    subprocess.run(["docker", "compose", "stop", "-t", "20", "skillspector"], **quiet)
+    digest = None
+    try:
+        archive = zip_data(OUTAGE_NAME)
+        digest = send_upload(archive)
+        path = "/api/skills/" + OUTAGE_NAME + "/" + VERSION + "/download"
+        # Leave time for the API dispatcher to queue the scanner input while
+        # proving that neither a missing verdict nor approval can publish it.
+        for _ in range(5):
+            code, body = http("GET", "/api/security/skills/" + OUTAGE_NAME + "/" + VERSION)
+            require(code == 200 and json.loads(body)["skill"]["state"] == "QUEUED",
+                    "Scanner outage changed queued Skill state")
+            code, _ = http("GET", path)
+            require(code == 404, "Unscanned Skill became downloadable during scanner outage")
+            code, _ = decision("approve", digest, "Scanner unavailable in disposable fixture", OUTAGE_NAME)
+            require(code == 409, "Unscanned Skill could be approved during scanner outage")
+            time.sleep(1)
+    finally:
+        subprocess.run(["docker", "compose", "start", "skillspector"], **quiet)
+
+    require(digest is not None, "Scanner outage upload did not complete")
+    state = wait_scan(time.monotonic() + 240, OUTAGE_NAME)
+    require(state == "NEEDS_REVIEW", "Queued Skill was not scanned after worker recovery: " + state)
+    code, _ = decision("approve", digest, "Synthetic scanner recovery review", OUTAGE_NAME)
+    require(code == 200, "Recovered Skill could not be approved")
+    code, retrieved = http("GET", path)
+    require(code == 200 and hashlib.sha256(retrieved).hexdigest() == digest,
+            "Recovered Skill bytes differ from its staged digest")
+
+
 def main():
     require(len(os.environ["PACKORY_ADMIN_TOKEN"]) >= 32, "Ephemeral admin token missing")
     wait_ready(time.monotonic() + 90)
@@ -307,7 +348,8 @@ def main():
     code, _ = http("GET", "/api/skills/" + NAME + "/" + VERSION + "/download")
     require(code == 404, "Revoked Skill remained downloadable")
     check_mcp_revocation()
-    print("Compose end-to-end: staged, scanned, approved, MCP-list/get/read checked, revoked")
+    check_scanner_outage()
+    print("Compose end-to-end: stage/scan/approve/revoke, MCP and scanner outage/recovery passed")
 
 
 if __name__ == "__main__":
