@@ -15,6 +15,15 @@ public sealed class SkillAiFeatureTests : IDisposable
     private static SkillAiEndpoint Local => new("local", "ollama", "http://localhost:11434/v1", ["127.0.0.0/8"]);
     private readonly SkillAiDeployment deployment;
     private readonly SkillAiStore store;
+    private sealed class DeniedTransport : ISkillAiTransport
+    {
+        public int Calls { get; private set; }
+        public Task<string> SendAsync(SkillAiEndpoint endpoint, string body, string? credential, CancellationToken ct)
+        {
+            Calls++;
+            throw new InvalidOperationException("No network call is expected.");
+        }
+    }
 
     public SkillAiFeatureTests()
     {
@@ -32,6 +41,23 @@ public sealed class SkillAiFeatureTests : IDisposable
         Assert.False(cfg.Enabled);
         Assert.False(cfg.RequireForApproval);
         Assert.True(store.CanApprove("inert", "1.0", new string('a', 64)));
+    }
+
+    [Fact]
+    public async Task AiCannotReserveBudgetOrCallProviderWithoutWriterLease()
+    {
+        var cfg = store.Configuration().Configuration with { Enabled = true, EndpointId = Local.Id, Model = "synthetic" };
+        store.Save(new(cfg, null, false, "Synthetic opt in"), "synthetic-operator");
+        var job = store.Queue(null, Guid.NewGuid().ToString("N"), "synthetic-operator", "Synthetic probe");
+        Assert.True(store.Start(job.Id));
+        using var lease = new PostgresSingleWriterLease(new Settings { MetadataProvider = "postgresql" });
+        var transport = new DeniedTransport();
+        var gateway = new SkillAiGateway(deployment, new SkillAiSecrets(deployment), store, transport, lease);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => gateway.CompleteAsync(job,
+            Guid.NewGuid().ToString("N"), "{\"messages\":[{\"role\":\"user\",\"content\":\"inert\"}]}", CancellationToken.None));
+        Assert.Equal(0, transport.Calls);
+        Assert.Equal(0, store.Budget().Requests);
+        Assert.Equal(0, store.Get(job.Id)!.Requests);
     }
 
     [Fact]

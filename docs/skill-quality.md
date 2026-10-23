@@ -36,7 +36,7 @@ Reference inspection understands bounded inline and reference-link forms, encode
 
 ## Resource bounds and release state
 
-The existing MCP Skill snapshot is bounded to 512 files and 16 MiB uncompressed bytes; Packory's upload admission profile may be stricter. Quality assessment additionally caps Markdown at **256 KiB per file**, **1 MiB total attempted text decoding**, **2,048 recognized links** and **100 returned findings**. Total dimension counts remain available when `findingsTruncated` is true. Cancellation is observed before/through/after assessment. Approval and the immutable archive digest are checked again before the report is returned.
+The existing MCP Skill snapshot is bounded to 512 files and 20 MiB uncompressed bytes; Packory's upload admission profile may be stricter. Quality assessment additionally caps Markdown at **256 KiB per file**, **1 MiB total attempted text decoding**, **2,048 recognized links** and **100 returned findings**. Total dimension counts remain available when `findingsTruncated` is true. Cancellation is observed before/through/after assessment. Approval and the immutable archive digest are checked again before the report is returned.
 
 The profile explicitly does not assess behavioral correctness, non-Markdown file contents, script/agent/connector execution, malware safety, publisher identity or legal license rights. Script presence is not evidence that the script was tested. See the [MCP roadmap](mcp-roadmap.md) for isolated functional testing, agent/connector contracts and reviewable improvement proposals.
 

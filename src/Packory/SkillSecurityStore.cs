@@ -115,6 +115,40 @@ public sealed class SkillSecurityStore(Settings settings)
         return items;
     }
 
+    // Dispatch is not a dashboard query: completed rows must never hide work.
+    // Keyset continuation also cycles fairly past slow/blocked pending jobs.
+    public IReadOnlyList<Revision> PendingPage(string? afterName, string? afterVersion, int limit = 100)
+    {
+        if ((afterName is null) != (afterVersion is null) || limit is < 1 or > 100)
+            throw new ArgumentException("Invalid pending Skill page.");
+        var collation = settings.MetadataProvider == "postgresql" ? "\"C\"" : "BINARY";
+        var continuation = afterName is null ? "" : $"""
+            AND (name COLLATE {collation} > @afterName OR
+                 (name=@afterName AND version COLLATE {collation} > @afterVersion))
+            """;
+        using var db = Open();
+        using var cmd = Command(db, $"""
+            SELECT name,version,description,sha256,staging_key,state,risk_score,
+                   recommendation,report_json,updated_at
+            FROM skill_security_revisions
+            WHERE state IN ('QUEUED','PUBLISHING')
+            {continuation}
+            ORDER BY name COLLATE {collation},version COLLATE {collation} LIMIT @limit
+            """, ("limit", limit));
+        if (afterName is not null)
+        {
+            foreach (var (name, value) in new[] { ("afterName", afterName), ("afterVersion", afterVersion) })
+            {
+                var parameter = cmd.CreateParameter(); parameter.ParameterName = name;
+                parameter.Value = value!; cmd.Parameters.Add(parameter);
+            }
+        }
+        using var reader = cmd.ExecuteReader();
+        var items = new List<Revision>();
+        while (reader.Read()) items.Add(Read(reader));
+        return items;
+    }
+
     /// <summary>
     /// One bounded, provider-side keyset page. All approved-release predicates
     /// are evaluated inside the selected metadata database before LIMIT.

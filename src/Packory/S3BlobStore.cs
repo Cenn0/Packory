@@ -21,6 +21,7 @@ public sealed class S3BlobStore : BlobStore, IDisposable
     private readonly string _bucket;
     private readonly string _prefix;
     private readonly long _maxReadBytes;
+    private readonly ArtifactLocks _writeLocks = new();
 
     public S3BlobStore(Settings settings) : base(settings)
     {
@@ -179,7 +180,13 @@ public sealed class S3BlobStore : BlobStore, IDisposable
 
     public override async Task<bool> PutAsync(string key, Stream input, long maxBytes, CancellationToken ct)
     {
+        using var gate = await _writeLocks.AcquireAsync("s3-put", key, "", ct);
         if (await RemoteExistsAsync(key, ct)) return false;
+        // A process can die after local staging but before the remote PUT.
+        // Remote absence is authoritative: discard that cache and stage this
+        // caller's bounded input, rather than reporting a false remote collision
+        // or uploading bytes left by a different attempt.
+        DeleteCached(key);
         if (!await base.PutAsync(key, input, maxBytes, ct)) return false;
 
         var local = base.Existing(key) ?? throw new IOException("Temporary S3 source was not persisted.");

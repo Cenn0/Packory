@@ -46,10 +46,11 @@ MAVEN_METADATA_TABLES = ("maven_metadata",)
 # The v7 application initializes these tables, so an absent table must abort a new backup.
 SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
                             "mcp_registry_manifests", "mcp_registry_review_audit")
+AI_TABLES = ("skill_ai_configuration", "skill_ai_jobs", "skill_ai_requests", "skill_ai_audit")
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
     *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
-    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *FEED_NPM_DEPRECATION_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES))
+    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *FEED_NPM_DEPRECATION_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES, *AI_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -151,6 +152,10 @@ def metadata_tables(connection):
         for table in SECURITY_REGISTRY_TABLES:
             if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is None:
                 raise SnapshotError("Missing authoritative Skill/MCP security metadata table")
+    ai_tables = tuple(table for table in AI_TABLES
+                      if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is not None)
+    if ai_tables and len(ai_tables) != len(AI_TABLES):
+        raise SnapshotError("Incomplete authoritative AI policy/job/budget/audit ledger")
     return (CORE_TABLES + ("packory_schema_version",) +
             (FEED_TABLES if version >= 2 else ()) +
             (DIGEST_TABLES if version >= 3 else ()) +
@@ -164,7 +169,7 @@ def metadata_tables(connection):
             (FEED_CARGO_YANK_TABLES if version >= 14 else ()) +
             (FEED_NPM_DEPRECATION_TABLES if version >= 15 else ()) +
             (MAVEN_METADATA_TABLES if version >= 11 else ()) +
-            (SECURITY_REGISTRY_TABLES if version >= 7 else ()))
+            (SECURITY_REGISTRY_TABLES if version >= 7 else ()) + ai_tables)
 
 
 def feed_references(connection):
@@ -850,6 +855,11 @@ def verify(folder):
                 required.update(FEED_CARGO_YANK_TABLES)
             if db_version >= 15:
                 required.update(FEED_NPM_DEPRECATION_TABLES)
+            # AI was added independently of the core DB version. Older backups
+            # without the feature retain their original profile. If any AI
+            # evidence is present, all four ledgers are mandatory.
+            if set(table_counts).intersection(AI_TABLES):
+                required.update(AI_TABLES)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or

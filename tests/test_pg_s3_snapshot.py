@@ -328,6 +328,51 @@ class SnapshotTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(old))
             self.assertEqual(2, mod.verify(root)["schema"])
 
+    def test_optional_ai_tables_are_fingerprinted_as_one_complete_ledger(self):
+        ai_tables = {"skill_ai_configuration", "skill_ai_jobs", "skill_ai_requests", "skill_ai_audit"}
+
+        class OneRow:
+            def __init__(self, value): self.value = value
+            def fetchone(self): return (self.value,)
+
+        class Connection:
+            def __init__(self, present): self.present = present
+            def execute(self, query, args=None):
+                if "to_regclass('packory_schema_version')" in query: return OneRow("packory_schema_version")
+                if query.startswith("SELECT version FROM packory_schema_version"): return OneRow(7)
+                if query == "SELECT to_regclass(%s)":
+                    return OneRow(args[0] if args[0] not in ai_tables or args[0] in self.present else None)
+                raise AssertionError(query)
+
+        self.assertTrue(ai_tables <= set(mod.metadata_tables(Connection(ai_tables))))
+        self.assertFalse(ai_tables & set(mod.metadata_tables(Connection(set()))))
+        for missing in ai_tables:
+            with self.subTest(missing=missing), self.assertRaises(mod.SnapshotError):
+                mod.metadata_tables(Connection(ai_tables - {missing}))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dump = b"synthetic"
+            (root / "metadata.dump").write_bytes(dump)
+            tables = mod.metadata_tables(Connection(ai_tables))
+            hashes = {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()} for name in tables}
+            manifest = {"schema": 3, "profile": "postgresql-s3-offline",
+                        "source": {"bucket": "test-bucket", "prefix": "test/", "database": "test-db"},
+                        "postgres": {"path": "metadata.dump", "size": len(dump),
+                                     "sha256": hashlib.sha256(dump).hexdigest(),
+                                     "database_schema_version": 7,
+                                     "table_counts": {name: 0 for name in tables}, "table_fingerprints": hashes},
+                        "objects": [], "delete_markers": []}
+            path = root / "manifest.json"
+            path.write_text(json.dumps(manifest))
+            self.assertEqual(3, mod.verify(root)["schema"])
+            for missing in ai_tables:
+                altered = json.loads(json.dumps(manifest))
+                del altered["postgres"]["table_counts"][missing]
+                del altered["postgres"]["table_fingerprints"][missing]
+                path.write_text(json.dumps(altered))
+                with self.subTest(incomplete_manifest=missing), self.assertRaises(mod.SnapshotError):
+                    mod.verify(root)
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")

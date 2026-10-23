@@ -8,9 +8,51 @@ using Xunit;
 
 namespace Packory.Tests;
 
+public sealed class S3ProviderFactAttribute : FactAttribute
+{
+    public S3ProviderFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PACKORY_TEST_S3")))
+            Skip = "Requires an isolated S3 endpoint.";
+    }
+}
+
 public sealed class S3ProviderTests
 {
-    [Fact]
+    [S3ProviderFact]
+    public async Task AbandonedLocalStageCannotBlockOrSubstituteNewRemoteWrite()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");
+        Assert.False(string.IsNullOrWhiteSpace(endpoint));
+        var root = Path.Combine(Path.GetTempPath(), "packory-s3-abandoned-" + Guid.NewGuid().ToString("N"));
+        const string bucket = "packory-ci-objectstore";
+        var settings = new Settings { DataDirectory = root, BlobProvider = "s3",
+            S3Endpoint = endpoint, S3Bucket = bucket, S3Region = "us-east-1",
+            S3KeyPrefix = "abandoned-" + Guid.NewGuid().ToString("N"),
+            S3AccessKey = "test", S3SecretKey = "test", S3AllowLoopbackHttp = true };
+        settings.Validate();
+        using var sdk = new AmazonS3Client(new BasicAWSCredentials("test", "test"), new AmazonS3Config {
+            ServiceURL = endpoint, AuthenticationRegion = "us-east-1", ForcePathStyle = true });
+        await sdk.PutBucketAsync(new PutBucketRequest { BucketName = bucket });
+        try
+        {
+            const string key = "raw/example/1.0.0/payload.blob";
+            var abandoned = Encoding.UTF8.GetBytes("abandoned local-only content");
+            Assert.True(await new BlobStore(settings).PutAsync(key, new MemoryStream(abandoned), 1024, CancellationToken.None));
+            using var remote = new S3BlobStore(settings);
+            Assert.False(remote.Contains(key));
+            var fresh = Encoding.UTF8.GetBytes("current caller content");
+            Assert.True(await remote.PutAsync(key, new MemoryStream(fresh), 1024, CancellationToken.None));
+            using var fetched = await sdk.GetObjectAsync(bucket, settings.S3KeyPrefix + "/" + key);
+            using var bytes = new MemoryStream(); await fetched.ResponseStream.CopyToAsync(bytes);
+            Assert.Equal(fresh, bytes.ToArray());
+            Assert.Equal(fresh, await File.ReadAllBytesAsync(remote.Existing(key)!));
+            Assert.False(await remote.PutAsync(key, new MemoryStream(abandoned), 1024, CancellationToken.None));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [S3ProviderFact]
     public async Task S3ImmutableWritesAndMutableMetadataSurviveRestart()
     {
         var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");
@@ -86,7 +128,7 @@ public sealed class S3ProviderTests
             if (Directory.Exists(second)) Directory.Delete(second, true);
         }
     }
-    [Fact]
+    [S3ProviderFact]
     public async Task RemoteIntegrityAuditDetectsTamperingHiddenByHealthyLocalCache()
     {
         var endpoint = Environment.GetEnvironmentVariable("PACKORY_TEST_S3");

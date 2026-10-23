@@ -17,8 +17,12 @@ single-writer implementation, **not** full distribution-spec certification.
   repository references the blob and the stored SHA-256 matches.
 - `GET/HEAD/PUT /v2/<repo>/manifests/<tag|digest>`: OCI image/indices,
   OCI artifact manifests and Docker v2 media types; checked content references
-  must resolve within the repository before publishing. Descriptor validation
-  and media-type/client combinations remain a tested subset.
+  must resolve within the repository before publishing. Global and private
+  manifests share descriptor admission: valid media type, SHA-256, exact
+  byte size and matching inline data; alternate download `urls` and duplicate
+  JSON fields are rejected. Required config/layer/index/blob shapes and up
+  to 4,096 descriptors per array are checked. This is a restricted hosted
+  profile; media-type/client combinations remain a tested subset.
 - `GET /v2/<repo>/tags/list`: sorted tags and paginated Link header; n=0 returns
   an empty page without a next link.
 - `GET /v2/<repo>/referrers/<digest>`: subject index with actual artifactType

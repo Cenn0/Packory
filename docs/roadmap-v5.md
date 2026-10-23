@@ -272,3 +272,14 @@ DDL race (`pg_type_typname_nsp_index`). Metadata, Skill-release and MCP-catalog
 initialization now share a database/schema advisory lock, with a twelve-start
 fresh-schema regression and failure/retry coverage. This is an incremental
 V5-12 startup correction, not distributed writer fencing or full DR acceptance.
+
+## 23 October 2026 review corrections
+
+The [architecture, correctness and security review](review-2026-10-23.md)
+corrects REV-01–REV-13: bounded/deadlined upstream reads, uniform npm
+integrity admission, Skill YAML/archive/dispatch consistency, safe static
+report ingestion, null-safe decisions, S3 abandoned-stage retries, complete
+AI backup fingerprints, writer-lease admission and hosted OCI descriptors.
+These are verified corrections within V5-12/V5-13/V5-20/V5-21/V5-24/V5-32/V5-35a,
+not closure of those broader workstreams or of any external release gate.
+The review records exact local evidence and unexecuted provider/container checks.

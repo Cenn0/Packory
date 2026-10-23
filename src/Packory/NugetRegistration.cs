@@ -58,21 +58,22 @@ public static class NugetRegistration
         var key = $"nuget-registration/{id}/{Names.HashName(suffix)}.json";
         var cached = blobs.Existing(key);
         byte[]? bytes = null;
+        using var deadline = UpstreamDeadline.Start(client, ct);
         try
         {
             var url = settings.NugetRegistrationUrl.TrimEnd('/') + "/" + id + "/" + suffix;
-            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.IsSuccessStatusCode)
             {
-                await using var stream = await response.Content.ReadAsStreamAsync(ct);
-                bytes = await BlobStore.ReadBoundedAsync(stream, settings.MaxMetadataBytes, ct);
+                await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                bytes = await BlobStore.ReadBoundedAsync(stream, settings.MaxMetadataBytes, deadline.Token);
                 if (JsonNode.Parse(bytes) is not JsonObject) throw new InvalidDataException("Invalid upstream registration");
                 await blobs.ReplaceAsync(key, new MemoryStream(bytes, false), settings.MaxMetadataBytes, ct);
             }
             else if (response.StatusCode != System.Net.HttpStatusCode.NotFound) response.EnsureSuccessStatusCode();
         }
         catch (HttpRequestException) when (cached is not null) { }
-        catch (TaskCanceledException) when (cached is not null && !ct.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cached is not null && !ct.IsCancellationRequested) { }
         if (bytes is null && cached is not null) bytes = await File.ReadAllBytesAsync(cached, ct);
         if (bytes is null) return null;
         var doc = JsonNode.Parse(bytes) as JsonObject;

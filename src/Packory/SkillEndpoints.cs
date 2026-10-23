@@ -6,6 +6,7 @@ namespace Packory;
 
 public static class SkillEndpoints
 {
+    public const long MaxUncompressedBytes = 20L * 1024 * 1024;
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/skills", (IPackageDatabase db, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
@@ -161,11 +162,13 @@ public static class SkillEndpoints
         {
             using var zip = new ZipArchive(new MemoryStream(data, false), ZipArchiveMode.Read);
             if (zip.Entries.Count is < 1 or > 250) throw new InvalidDataException("ZIP has an invalid number of files");
-            const long maximumUncompressed = 20 * 1024 * 1024;
+            const long maximumUncompressed = MaxUncompressedBytes;
             long uncompressed = 0;
             // ZIP archives can contain duplicate/case-conflicting paths. They are
             // ambiguous on common client filesystems even without traversal.
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in zip.Entries)
             {
                 var entryName = e.FullName;
@@ -178,6 +181,18 @@ public static class SkillEndpoints
                     unixType is not (0 or 0x4000 or 0x8000) ||
                     !names.Add(entryName.Normalize(NormalizationForm.FormC)))
                     throw new InvalidDataException("Unsafe or ambiguous ZIP entry");
+                var canonical = entryName.TrimEnd('/').Normalize(NormalizationForm.FormC);
+                var directory = entryName.EndsWith('/');
+                if (files.Contains(canonical) || (!directory && directories.Contains(canonical)))
+                    throw new InvalidDataException("ZIP file/directory collision");
+                for (var slash = canonical.IndexOf('/'); slash >= 0; slash = canonical.IndexOf('/', slash + 1))
+                {
+                    var parent = canonical[..slash];
+                    if (files.Contains(parent)) throw new InvalidDataException("ZIP file/directory collision");
+                    directories.Add(parent);
+                }
+                if (directory) directories.Add(canonical);
+                else files.Add(canonical);
                 if (entryName.EndsWith('/'))
                 {
                     if (e.Length != 0) throw new InvalidDataException("Directory ZIP entry contains bytes");
@@ -208,24 +223,11 @@ public static class SkillEndpoints
             using var reader = new StreamReader(manifests[0].Open(),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true));
             var markdown = reader.ReadToEnd();
-            var lines = markdown.Replace("\r\n", "\n").Split('\n');
-            if (lines.Length < 4 || lines[0].Trim() != "---") throw new InvalidDataException("Missing YAML frontmatter");
-            var end = Array.FindIndex(lines, 1, x => x.Trim() == "---");
-            if (end < 3 || end > 60) throw new InvalidDataException("Invalid YAML frontmatter");
-            string? name = null; string? description = null;
-            foreach (var line in lines.Skip(1).Take(end - 1))
-            {
-                if (line.StartsWith("name:", StringComparison.Ordinal))
-                {
-                    if (name is not null) throw new InvalidDataException("Duplicate skill name");
-                    name = Unquote(line[5..].Trim());
-                }
-                if (line.StartsWith("description:", StringComparison.Ordinal))
-                {
-                    if (description is not null) throw new InvalidDataException("Duplicate skill description");
-                    description = Unquote(line[12..].Trim());
-                }
-            }
+            var frontmatter = SkillFrontmatter.Parse(markdown);
+            static string? Text(System.Text.Json.Nodes.JsonNode? node) =>
+                node is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+            var name = Text(frontmatter["name"]);
+            var description = Text(frontmatter["description"]);
             if (name is null || !Names.Skill(name) || description is null || description.Length is < 1 or > 1024)
                 throw new InvalidDataException("SKILL.md requires valid name and description frontmatter fields");
             if (manifests[0].FullName.Contains('/') && !manifests[0].FullName.StartsWith(name + "/", StringComparison.Ordinal))
@@ -237,13 +239,7 @@ public static class SkillEndpoints
             return new SkillManifest(name, description);
         }
         catch (InvalidDataException) { throw; }
-        catch (Exception e) when (e is IOException or ArgumentException or NotSupportedException)
+        catch (Exception e) when (e is IOException or ArgumentException or NotSupportedException or YamlDotNet.Core.YamlException)
         { throw new InvalidDataException("Invalid ZIP archive"); }
-    }
-
-    private static string Unquote(string value)
-    {
-        if (value.Length >= 2 && value[0] == value[^1] && value[0] is '\'' or '"') return value[1..^1];
-        return value;
     }
 }
