@@ -35,6 +35,10 @@ XML
   dotnet pack "$NATIVE_WORK/nuget-package/Synthetic.csproj" \
     --no-restore -c Release -o "$NATIVE_WORK/nuget-output" --verbosity quiet
   NATIVE_NUPKG="$NATIVE_WORK/nuget-output/Packory.Compose.Smoke.1.0.0.nupkg"
+  # NuGet push requires a separate API key argument. Keep a runner-owned,
+  # synthetic throwaway copy before the bind-mounted source becomes root-owned.
+  cp "$WORK/write" "$NATIVE_WORK/nuget-api-key"
+  chmod 600 "$NATIVE_WORK/nuget-api-key"
   test -s "$NATIVE_NUPKG"
   NATIVE_NUGET_SHA="$(sha256sum "$NATIVE_NUPKG" | cut -d' ' -f1)"
   for role in write read; do
@@ -70,7 +74,7 @@ JSON
 
 native_publish() {
   dotnet nuget push "$NATIVE_NUPKG" --source packory \
-    --configfile "$NATIVE_WORK/NuGet.write.Config" --api-key "$(cat "$WORK/write")" \
+    --configfile "$NATIVE_WORK/NuGet.write.Config" --api-key "$(cat "$NATIVE_WORK/nuget-api-key")" \
     >"$NATIVE_WORK/nuget-publish.log" 2>&1 || {
       printf 'Disposable native NuGet publication failed.\n' >&2; return 1;
     }
