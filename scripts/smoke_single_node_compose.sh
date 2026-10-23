@@ -116,6 +116,10 @@ test "$tls_status" = 60
 test "$(code "$BASE/api/packages")" = "401"
 test "$(code -K "$WORK/invalid.curl" "$BASE/api/packages")" = "401"
 test "$(code -K "$WORK/read.curl" "$BASE/api/packages")" = "200"
+test "$(code -X PUT -H 'Content-Type: application/octet-stream' \
+  --data-binary "@$WORK/payload" "$ARTIFACT")" = "401"
+test "$(code -K "$WORK/invalid.curl" -X PUT -H 'Content-Type: application/octet-stream' \
+  --data-binary "@$WORK/payload" "$ARTIFACT")" = "401"
 test "$(code -K "$WORK/read.curl" -X PUT -H 'Content-Type: application/octet-stream' \
   --data-binary "@$WORK/payload" "$ARTIFACT")" = "403"
 test "$(code -K "$WORK/write.curl" -X PUT -H 'Content-Type: application/octet-stream' \
