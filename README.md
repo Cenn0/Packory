@@ -89,6 +89,8 @@ This launches the app only. Use the Docker Compose stack when you also need the 
 
 **Private hosted E0:** isolated native feed routes for all eight package kinds are implemented with explicit activation and exact `feed:{id}:read` or `feed:{id}:publish` grants. Private requests do not fall back to global or upstream packages. The [E0 acceptance record](docs/e0-acceptance.md) is evidence for its named test versions and providers, **not** a blanket interoperability or production claim. Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
 
+**Mutable metadata boundaries:** Private npm provides a durable scoped mutable dist-tag API with audited updates; package unpublish remains disabled. Private Cargo supports scoped yank/unyank state (V14) on a per-feed basis, not full crates.io owner management or broad compatibility certification.
+
 ### Try a local registry
 
 ```bash
