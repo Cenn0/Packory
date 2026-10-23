@@ -348,3 +348,14 @@ This extends issue #133 and V5-15 with a runnable fail-closed case. It does not
 qualify scanner recovery on the installed MyCloud service, scanner detection
 coverage, host boot, capacity, Nginx, earlier-image upgrades or release gates.
 Check the exact-head CI run before recording the case as passed.
+
+## NuGet archive parser budgets — 24 October 2026
+
+A focused V5-13/V5-20 hardening slice preflights NuGet ZIP directory count and
+size before entry materialization, then bounds actual `.nuspec` decompression
+instead of checking only declared length. The same parser serves global and
+private hosted NuGet paths and later nuspec reads. Adversarial directory and
+inflation fixtures plus the native-client/profile CI must pass on the exact PR
+head before this slice is recorded as tested. This does not complete the wider
+NuGet client matrix, package signature trust, real-provider restore or release
+security review.
