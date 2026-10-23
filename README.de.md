@@ -19,7 +19,7 @@ Packory stellt native Schnittstellen für **NuGet, npm, Cargo, PyPI, OCI/Helm, M
 
 ## Docker-Schnellstart
 
-**Voraussetzungen:** Docker Engine mit Docker Compose v2, Git und eine POSIX-kompatible Shell mit OpenSSL. Die Beispiele dienen der **lokalen Erprobung**, nicht der öffentlichen Bereitstellung.
+**Voraussetzungen:** Docker Engine mit Docker Compose v2, Git und eine POSIX-kompatible Shell mit OpenSSL (sowie curl für die Readiness-Prüfung). Die Beispiele dienen der **lokalen Erprobung**, nicht der öffentlichen Bereitstellung.
 
 ### Variante A — Lokal bauen
 
@@ -50,6 +50,11 @@ Verwendet werden `ghcr.io/cenn0/packory:main` und `ghcr.io/cenn0/packory-skillsp
 docker compose ps
 curl -fsS http://localhost:8080/health/ready
 docker compose logs --tail=100 packory
+```
+
+Zum späteren Stoppen (bei Variante B `-f compose.ghcr.yaml` ergänzen):
+
+```bash
 docker compose down
 ```
 
