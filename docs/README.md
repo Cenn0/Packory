@@ -1,48 +1,74 @@
-# Packory documentation
+# Packory documentation hub
 
-[← English README](../README.md) · [Deutsch](../README.de.md)
+[← README (English)](../README.md) · [README auf Deutsch](../README.de.md) · [Docker quick start](../README.md#docker-quick-start)
 
-Packory is a **self-hosted registry hub in active development**. Current hosted and cached capabilities span NuGet, npm, Cargo, PyPI, OCI, global Maven release files, global Raw artifacts and Agent Skills, each with its own compatibility limitations. The read-only MCP server, reviewed MCP Registry metadata and static Skill quality assessment have separate documented functional profiles. The support matrix records their tested scope and remaining gaps; no complete upstream interoperability or production certification is implied. Go provides a limited hosted GOPROXY download and authenticated import profile; see [Go hosted](go-proxy.md) for the exact acceptance boundary.
+Packory is a self-hosted distribution platform in **active development**. Documentation here distinguishes implemented behavior, evidence for **specific** native-client/backend tests and production-release qualification. Start with the quick start for a local setup; do **not** infer broad support from a single test or from a proposed design.
 
-| Goal | Guide |
+## Get started
+
+| I want to… | Start here |
 | --- | --- |
-| Start locally | [Quick start](../README.md#quick-start) |
-| Native APIs, access and examples | [API](api.md) |
-| Actual runtime topology and persistence | [Architecture](architecture.md) |
-| Versioned architecture decision | [ADR-001 V3 boundaries](adr/0001-v3-platform-boundaries.md) |
-| Tested native clients and deployment profiles | [Support matrix](support-matrix.md) |
-| Production blockers and real-provider recovery | [Release gates](release-gates.md) |
-| Architecture, security and correctness review with corrected defects and scoped test evidence | [23 October 2026 review](review-2026-10-23.md) |
-| Deployment, TLS, tokens and backups | [Operations](operations.md) |
-| **Current priorities, gates and execution order (22 October 2026)** | **[Roadmap V5](roadmap-v5.md)** |
-| Historical V3 engineering plan | [Roadmap V3](roadmap.md) |
-| Additional package ecosystems and precise implementation status | [Roadmap V4](roadmap-v4.md) |
-| Experimental-to-supported implementation ledger and PR sequence | [Experimental graduation](experimental-graduation.md) |
-| Delivered MCP functions, remaining Registry/protocol work, quality and optional gateway | [MCP delivery roadmap](mcp-roadmap.md) |
-| Native Maven/Gradle hosted deployment and remaining limits | [Maven](maven.md) |
-| Go hosted GOPROXY, module importer and native client test profile | [Go hosted registry](go-proxy.md) |
-| Experimental hosted Raw API and access limits | [Raw / Generic](raw-registry.md) |
-| Current V4/MS5 progress, MCP continuation and outstanding gates | [20 October 2026 checkpoint](roadmap-status-2026-10-20.md) |
-| Earlier delivery evidence and unfinished V3 gates | [18 October 2026 checkpoint](roadmap-status-2026-10-18.md) |
-| MCP and NVIDIA SkillSpector integration | [MCP and Skill Security](mcp-security-integration.md) |
-| Reviewed inert MCP remote/package server.json metadata, v0.1 read API and discovery | [MCP Registry Catalog](mcp-registry-catalog.md) |
-| Optional AI review of staged Skills: provider allowlists, isolated worker, admin dashboard, budget and operating limits | [SkillSpector AI](skill-ai.md) |
-| Static Skill findings, improvement suggestions, source digests and coverage through MCP/REST/UI | [Skill quality](skill-quality.md) |
-| Merged implementation slices and explicitly open gates | [Delivery evidence](delivery-evidence-2026-10-17.md) |
-| Historical Agent Skill scanning and Security UI plan, with current delivery links | [Skill Security Roadmap (NVIDIA SkillSpector)](skill-security-roadmap.md) |
-| Cargo and PyPI specifics | [Cargo / PyPI](cargo-pypi.md) |
-| OCI capabilities | [OCI](oci.md) |
-| S3 single-writer recovery limitations | [S3](s3.md) |
-| OIDC / optional Keycloak | [OIDC](oidc-keycloak.md) |
-| Contribute/report defects | [Contributing](../CONTRIBUTING.md) |
-| Report security issues privately | [Security](../SECURITY.md) |
+| **Build and run locally with Docker Compose** | [README Docker quick start](../README.md#docker-quick-start) |
+| **Pull the development containers instead of building** | [GHCR images, tags and deployment](container-images.md) |
+| Set up TLS, access, configuration and backups | [Operations](operations.md) |
+| Configure a private TLS ingress (reference only) | [Reverse-proxy guide](reverse-proxy.md) |
+| Configure native clients and isolated private feeds | [Feeds](feeds.md) · [API reference](api.md) |
+| Check exactly what was tested | [Protocol and deployment support matrix](support-matrix.md) |
+| Understand the deployed application | [Architecture](architecture.md) |
 
-## Evidence is scoped
+## Package registries
 
-- **Implemented:** named routes and storage/authentication code exist on main.
-- **Tested:** consult CI workflow commit checks and [the versioned matrix](support-matrix.md), including local fake origins and Moto.
-- **Independent assessments:** publication approval, artifact integrity, static quality, signed external validation evidence and functional execution are separate claims. The [quality profile](skill-quality.md) reports its coverage and omissions explicitly.
-- **Not guaranteed:** full client protocol parity, browser SSO/BFF, real S3 backup and restore, active-active/multi-writer safety or production readiness.
-- **Security best practice:** HTTPS, least-privilege runtime credentials outside Git, namespace reservations, explicit operational backup and isolated restore drills.
+| Ecosystem | Documentation |
+| --- | --- |
+| NuGet / npm and private feed access | [Feeds and client configuration](feeds.md) · [API reference](api.md) |
+| Cargo / PyPI | [Cargo and PyPI](cargo-pypi.md) |
+| OCI / Helm | [OCI registry](oci.md) · [Upload recovery](oci-upload-recovery.md) · [Process recovery](oci-process-recovery.md) |
+| Maven / Gradle | [Maven](maven.md) |
+| Go | [Go hosted GOPROXY](go-proxy.md) |
+| Generic files | [Raw registry](raw-registry.md) |
+| Integrity and identifiers | [Download integrity](download-integrity.md) · [npm integrity](npm-download-integrity.md) · [Identifiers](identifier-validation.md) |
 
-No screenshot is published until the source is verified to contain no private project, identities, secrets or addresses.
+## Agent Skills, MCP and identity
+
+| Topic | Documentation |
+| --- | --- |
+| Offline SkillSpector, approval and distribution policy | [Skill security integration](mcp-security-integration.md) · [Archive validation](skill-archive-validation.md) |
+| **Optional** AI-assisted inspection | [Skill AI: setup, limits and opt-in](skill-ai.md) |
+| Deterministic documentation quality assessment | [Skill quality](skill-quality.md) |
+| Read-only MCP endpoint and remaining work | [MCP delivery roadmap](mcp-roadmap.md) · [MCP validation](mcp-validation-results.md) |
+| Reviewed inert MCP Registry metadata | [MCP Registry catalog](mcp-registry-catalog.md) |
+| OIDC resource server / Keycloak test profile | [OIDC and Keycloak](oidc-keycloak.md) |
+
+## Architecture, operations and verification
+
+| Topic | Documentation |
+| --- | --- |
+| Component model, storage and consistency | [Runtime architecture](architecture.md) · [ADR-001 V3 boundaries](adr/0001-v3-platform-boundaries.md) |
+| Storage providers and recovery | [S3](s3.md) · [PostgreSQL/S3 offline recovery](pg-s3-offline-recovery.md) · [Schema/versioning](schema-versioning.md) |
+| Build and release verification | [CI qualification](ci-qualification.md) · [Supply chain](ci-supply-chain.md) · [Release gates](release-gates.md) · [Releasing](RELEASING.md) |
+| Safety and public contributions | [Public privacy policy](public-privacy.md) · [Security](../SECURITY.md) · [Contributing](../CONTRIBUTING.md) |
+| **Latest detailed review in this repository** | [Architecture, correctness and security review — 23 October 2026](review-2026-10-23.md) |
+| Evidence for eight private hosted package protocols | [E0 acceptance](e0-acceptance.md) |
+
+## Roadmaps and historical evidence
+
+**Current planning entry point:** [Roadmap V5](roadmap-v5.md). It describes outstanding work and acceptance gates, **not** a commitment that every item is already implemented.
+
+- [Experimental capability graduation](experimental-graduation.md) tracks bounded protocol maturity.
+- [Roadmap V4](roadmap-v4.md) and [Roadmap V3](roadmap.md) are historical plans; they can contain superseded status statements.
+- [20 October checkpoint](roadmap-status-2026-10-20.md), [18 October checkpoint](roadmap-status-2026-10-18.md) and [17 October delivery evidence](delivery-evidence-2026-10-17.md) describe **dated snapshots**, not today's CI status.
+- [Skill security roadmap](skill-security-roadmap.md) records historical work and unresolved assurance tasks.
+- [Brand and light/dark assets](branding/README.md) document design concepts, not necessarily the deployed UI.
+
+## How to interpret evidence
+
+| Level | Meaning | What it does **not** establish |
+| --- | --- | --- |
+| **Implemented** | Code and routes exist at a stated revision | Client compatibility or release readiness |
+| **Tested** | Named operation, native client/SDK, provider, configuration and revision passed | Other versions, OSs, services or real-cloud recovery |
+| **Packory-supported profile** | A maintained, explicitly scoped compatibility and operating contract has been accepted | Upstream vendor endorsement or universal protocol compliance |
+| **Production recommendation** | Actual deployment, recovery, security and operational release gates have been met | A guarantee for untested configurations |
+
+**Important unresolved guarantees:** browser SSO/BFF, broad interoperability, externally verified publisher identity, coordinated real-provider restores, complete supply-chain qualification and active-active writes. Never treat static Skill quality or optional AI output as malware certification. See [Support matrix](support-matrix.md) and [Release gates](release-gates.md).
+
+Do not publish screenshots or examples containing personal identities, email addresses, secrets, private URLs, proprietary packages or production data. This is a public repository.
