@@ -76,7 +76,15 @@ native_publish() {
   dotnet nuget push "$NATIVE_NUPKG" --source packory \
     --configfile "$NATIVE_WORK/NuGet.write.Config" --api-key "$(cat "$NATIVE_WORK/nuget-api-key")" \
     >"$NATIVE_WORK/nuget-publish.log" 2>&1 || {
-      printf 'Disposable native NuGet publication failed.\n' >&2; return 1;
+      # Never print raw client logs, package paths or synthetic credentials.
+      python3 - "$NATIVE_WORK/nuget-publish.log" <<'PYCODE' >&2
+import re,sys
+from pathlib import Path
+log=Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+status=sorted(set(re.findall(r'(?<!\\d)(?:HTTP\\s+)?[1-5]\\d{2}(?!\\d)|\\bNU\\d{4}\\b', log)))
+print('Disposable native NuGet publication failed; error codes:', ','.join(status) or 'unclassified')
+PYCODE
+      return 1;
     }
   npm publish "$NATIVE_WORK/npm-package" --registry="http://localhost:8080/npm/" \
     --userconfig="$NATIVE_WORK/write.npmrc" --globalconfig="$NATIVE_WORK/empty.npmrc" \
