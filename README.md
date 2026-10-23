@@ -19,7 +19,7 @@ Packory provides native endpoints for **NuGet, npm, Cargo, PyPI, OCI/Helm, Maven
 
 ## Docker quick start
 
-**Prerequisites:** Docker Engine with Docker Compose v2, Git and a POSIX-compatible shell with OpenSSL. The commands below are for **local evaluation**, not a public deployment.
+**Prerequisites:** Docker Engine with Docker Compose v2, Git and a POSIX-compatible shell with OpenSSL (plus curl for the readiness check). The commands below are for **local evaluation**, not a public deployment.
 
 ### Option A — Build locally
 
@@ -50,6 +50,11 @@ This uses `ghcr.io/cenn0/packory:main` and `ghcr.io/cenn0/packory-skillspector:m
 docker compose ps
 curl -fsS http://localhost:8080/health/ready
 docker compose logs --tail=100 packory
+```
+
+To stop the stack later (for option B, add `-f compose.ghcr.yaml`):
+
+```bash
 docker compose down
 ```
 
