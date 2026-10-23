@@ -62,6 +62,41 @@
       <div class="security-metrics" aria-label="Skill approval overview"><div><strong id="security-pending">—</strong><span>Queued</span></div><div><strong id="security-review">—</strong><span>Review</span></div><div><strong id="security-quarantine">—</strong><span>Quarantine</span></div><div><strong id="security-approved">—</strong><span>Approved</span></div></div>
       <div class="table-wrap"><table><thead><tr><th>Skill version</th><th>State</th><th>Risk / 100</th><th>Last updated</th><th>Review</th></tr></thead><tbody id="security-table"></tbody></table></div>
       <div id="security-detail" class="security-detail" hidden aria-live="polite"></div>
+
+      <section id="skill-ai-panel" class="skill-ai-panel" aria-labelledby="skill-ai-title" hidden>
+        <div class="section-head"><div><p class="eyebrow">OPTIONAL ANALYSIS</p><h3 id="skill-ai-title">SkillSpector AI settings</h3><p class="muted">The offline static scanner remains independent. AI never automatically approves a Skill.</p></div><button id="ai-reload" type="button">Refresh AI settings</button></div>
+        <p id="ai-status" role="status" aria-live="polite"></p>
+        <form id="ai-settings">
+          <div class="ai-config-grid">
+            <label class="ai-check"><input id="ai-enabled" type="checkbox"> Enable AI analysis (opt-in)</label>
+            <label for="ai-endpoint">Approved provider endpoint<select id="ai-endpoint"></select></label>
+            <label for="ai-model">Model ID<input id="ai-model" maxlength="160" autocomplete="off" placeholder="Model identifier"></label>
+            <label for="ai-trigger">Scan trigger<select id="ai-trigger"><option value="manual">Manual only</option><option value="suspicious">Automatically for suspicious static scans</option><option value="always">Automatically for reviewed scans</option></select></label>
+            <label class="ai-check"><input id="ai-required" type="checkbox"> Require successful AI scan before approval</label>
+            <label class="ai-check"><input id="ai-transmission" type="checkbox"> I authorize sending skill contents to this external provider</label>
+            <label for="ai-key">Set or rotate provider API key<input id="ai-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="Never displayed after saving"></label>
+            <label class="ai-check"><input id="ai-clear-key" type="checkbox"> Clear saved API key</label>
+            <label for="ai-timeout">Timeout in seconds (15–600)<input id="ai-timeout" type="number" min="15" max="600" step="1"></label>
+            <label for="ai-concurrent">Concurrent scans (1–4)<input id="ai-concurrent" type="number" min="1" max="4" step="1"></label>
+            <label for="ai-requests">Max model requests per scan (1–64)<input id="ai-requests" type="number" min="1" max="64" step="1"></label>
+            <label for="ai-prompt-bytes">Max prompt bytes per request<input id="ai-prompt-bytes" type="number" min="1024" max="131072" step="1"></label>
+            <label for="ai-output-tokens">Max output tokens per request<input id="ai-output-tokens" type="number" min="64" max="16384" step="1"></label>
+            <label for="ai-budget">Monthly reservation budget (USD)<input id="ai-budget" type="number" min="0" max="1000000" step="0.000001"></label>
+            <label for="ai-input-rate">Input price (USD / million tokens)<input id="ai-input-rate" type="number" min="0" max="1000" step="0.000001"></label>
+            <label for="ai-output-rate">Output price (USD / million tokens)<input id="ai-output-rate" type="number" min="0" max="1000" step="0.000001"></label>
+            <label for="ai-language">Report language<select id="ai-language"><option value="English">English</option><option value="German">German</option></select></label>
+          </div>
+          <label for="ai-reason">Configuration change reason (audit log)<input id="ai-reason" maxlength="512" minlength="3" required placeholder="Why are these settings changing?"></label>
+          <p class="muted" id="ai-provider-info">Only deployment-approved endpoints are selectable. Prices are operator-provided admission estimates, not a provider billing guarantee. No credential is returned to the browser.</p>
+          <div class="security-actions"><button id="ai-save" type="submit">Save AI configuration</button><button id="ai-probe" type="button">Test provider connection</button><button id="ai-jobs-reload" type="button">Refresh assessment jobs</button></div>
+        </form>
+        <p id="ai-usage" class="muted"></p>
+        <h4>Recent AI assessments and connection tests</h4>
+        <div id="ai-jobs" class="ai-jobs" aria-live="polite"></div>
+        <div id="ai-job-detail" class="ai-job-detail" hidden></div>
+        <h4>Configuration and job audit</h4>
+        <div id="ai-audit" class="ai-audit"></div>
+      </section>
       <p class="muted">An approved scan is a policy decision, not a guarantee that a Skill is harmless. Scanner errors and incomplete results block publication. Privileged actions require an administrator credential.</p>
     </section>
     <footer>Packory experimental · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · <a href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" rel="noopener noreferrer">Support matrix</a> · Apache-2.0</footer>
