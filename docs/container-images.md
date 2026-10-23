@@ -127,3 +127,9 @@ production certification. A deployment still needs TLS, secret handling,
 database/object-store resilience, image vulnerability review, supply-chain
 attestations, backups and documented disaster-recovery evidence as specified
 in [release gates](release-gates.md).
+
+Superseded runs that exit before completing full delivery verification do not
+try to upload nonexistent evidence. The uploader is gated by a proof-completed
+step output, written only after the byte verifier succeeds. A subsequent
+mutable-tag failure can still preserve that completed proof; missing expected
+evidence remains an error. This does not weaken either CI or promotion gates.

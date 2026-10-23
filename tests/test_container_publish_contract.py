@@ -60,6 +60,20 @@ class ImagePublicationContractTests(unittest.TestCase):
                     # echo is command substitution, not formatting.
                     self.assertNotRegex(line, r"(?<!\\)`")
 
+    def test_superseded_run_does_not_upload_nonexistent_delivery_evidence(self):
+        section = step_block("Publish SHA and main tags to GitHub Container Registry")
+        evidence = step_block("Preserve exact-revision anonymous delivery evidence")
+        self.assertIn("id: publication", section)
+        self.assertIn("if: always() && steps.publication.outputs.delivery_verified == 'true'", evidence)
+        marker = 'echo "delivery_verified=true" >> "$GITHUB_OUTPUT"'
+        self.assertEqual(1, section.count(marker))
+        # Early superseded exits produce no proof and therefore no upload attempt.
+        # A later tag-promotion failure still preserves a completed byte proof.
+        self.assertLess(section.index('exit 0'), section.index(marker))
+        self.assertLess(section.index('scripts/verify_container_delivery.py'), section.index(marker))
+        self.assertLess(section.index(marker), section.index('docker tag "$image:build" "$image:main"'))
+        self.assertIn("if-no-files-found: error", evidence)
+
     def test_full_anonymous_delivery_is_required_before_moving_mutable_tags(self):
         section = step_block("Publish SHA and main tags to GitHub Container Registry")
         self.assertIn('env -u GHCR_TOKEN python3 scripts/verify_container_delivery.py', section)

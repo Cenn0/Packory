@@ -108,6 +108,7 @@ jobs:
             http://127.0.0.1:18080/health/ready >/dev/null
 
       - name: Publish SHA and main tags to GitHub Container Registry
+        id: publication
         if: steps.eligibility.outputs.eligible == 'true'
         shell: bash
         env:
@@ -145,6 +146,7 @@ jobs:
           # Do this before moving either mutable tag; a failed pull leaves main unchanged.
           env -u GHCR_TOKEN python3 scripts/verify_container_delivery.py \
             --sha "$SOURCE_SHA" --output "$RUNNER_TEMP/container-delivery.json"
+          echo "delivery_verified=true" >> "$GITHUB_OUTPUT"
 
           # Check again before moving the mutable main tags. These two image
           # names cannot be updated atomically; deploy matching SHA tags.
@@ -163,7 +165,7 @@ jobs:
           echo 'These development images are NOT independently approved production releases.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Preserve exact-revision anonymous delivery evidence
-        if: steps.eligibility.outputs.eligible == 'true' && always()
+        if: always() && steps.publication.outputs.delivery_verified == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: container-delivery-${{ env.SOURCE_SHA }}-${{ github.run_attempt }}
