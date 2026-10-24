@@ -42,7 +42,7 @@ Modules:
 - `ArtifactLocks`: bounded striped per-artifact coordination for uploads and cache cold misses, **single-process only**.
 - `ArtifactRecovery`: reconciles publication intents and ledger references, including private feed assets; eligible unindexed local objects can be quarantined. Remote S3 quarantine is a separate explicit reviewed operation, without distributed reconciliation or automatic repair of missing committed bytes.
 - Hosted publication transactions append a limited audit event (credential role, not a user identity); read access is restricted to administrators. A bounded in-process rate limiter guards mutation endpoints.
-- `Access`: static/managed credentials and optional validated OIDC JWT scopes. Global reads follow anonymous-read configuration; private reads always require an exact feed grant. Feed-scoped credentials do not grant global catalog/MCP access. Interactive browser SSO is not implemented.
+- `Access`: static/managed credentials and optional validated OIDC JWT scopes. Global reads follow anonymous-read configuration; private reads always require an exact feed grant. Feed-scoped credentials do not grant global catalog/MCP access. Interactive browser SSO is now opt-in through an isolated OIDC code/PKCE session flow, but real-provider/browser E2E acceptance and durable multi-node sessions are not implemented.
 - `wwwroot`: standalone JS/CSS dashboard, no third-party runtime CDN.
 
 ## Core invariants
@@ -96,4 +96,4 @@ OCI retains the native `/v2/` namespace, with private repositories below `/v2/fe
 
 ## Remaining V3 evolution
 
-Feed metadata, activation and private hosted routing are implemented. General proxy/group semantics, complete namespace/policy/retention/quotas, declarative feed import/export, CAS reference counting and browser BFF remain later MS2/MS4 work. Private Skill distribution and feed-aware MCP discovery remain MS5/MCP-P5. See [ADR-001](adr/0001-v3-platform-boundaries.md), [support matrix](support-matrix.md), [E0 acceptance](e0-acceptance.md) and [release gates](release-gates.md). Restricted S3/PostgreSQL reader replicas exist, while NuGet/npm mirror GETs remain disabled on readers; active-active writing is not supported.
+Feed metadata, activation and private hosted routing are implemented. General proxy/group semantics, complete namespace/policy/retention/quotas, declarative feed import/export, CAS reference counting and full browser BFF qualification (refresh, revocation and provider E2E) remain later MS2/MS4 work. Private Skill distribution and feed-aware MCP discovery remain MS5/MCP-P5. See [ADR-001](adr/0001-v3-platform-boundaries.md), [support matrix](support-matrix.md), [E0 acceptance](e0-acceptance.md) and [release gates](release-gates.md). Restricted S3/PostgreSQL reader replicas exist, while NuGet/npm mirror GETs remain disabled on readers; active-active writing is not supported.
