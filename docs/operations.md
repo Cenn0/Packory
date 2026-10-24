@@ -31,6 +31,9 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_DENIED_NPM_SCOPES` | *(empty)* | Comma-separated npm scopes blocked for both read and publish |
 | `PACKORY_OIDC_AUTHORITY` | *(unset)* | HTTPS authority / issuer URL for optional JWT validation |
 | `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
+| `PACKORY_OIDC_CLIENT_ID` | *(unset)* | Optional confidential web-client ID for browser code + PKCE |
+| `PACKORY_OIDC_CLIENT_SECRET_FILE` | *(unset)* | Secret file, operator-mounted (or use `PACKORY_OIDC_CLIENT_SECRET`) |
+| `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | For browser SSO, use the exact HTTPS public origin |
 | `PACKORY_MAX_RAW_FEED_BYTES` | `0` (disabled) | Logical committed-byte limit independently applied to every private Raw feed; 0–1 TiB. |
 | `PACKORY_MAX_RAW_FEED_ARTIFACTS` | `0` (disabled) | Committed asset-count limit independently applied to every private Raw feed; 0–100,000,000. |
 | `PACKORY_MAX_BLOB_STORAGE_BYTES` | `0` (unlimited) | Optional single-process filesystem blob capacity; writes fail HTTP 507 if exceeded. Not a S3 quota. |
@@ -355,7 +358,7 @@ Do not commit personal emails, contact details, tokens, `.env`, `.npmrc`, genera
 
 ### Optional OIDC / Keycloak API integration
 
-The bearer-token resource-server integration requires valid JWTs from an HTTPS OIDC authority and explicit Packory scopes. Refer to [OIDC and Keycloak](oidc-keycloak.md) for Keycloak audience-mapper configuration and security boundaries. The web dashboard does not yet implement interactive SSO; do not assume logging into Keycloak unlocks a browser session.
+The bearer-token resource-server integration requires valid JWTs from an HTTPS OIDC authority and explicit Packory scopes. Refer to [OIDC and Keycloak](oidc-keycloak.md) for Keycloak audience-mapper configuration and security boundaries. Interactive browser SSO is now available **only** when the confidential browser client ID/secret are configured in addition to JWT issuer/audience. It uses a per-process server-side session with 15-minute absolute expiry and CSRF on mutations; real interactive Keycloak/browser qualification is still open. Restrict and back up `data/identity-keys` on the writer node, and never share the OIDC client secret with the browser.
 
 
 ### PostgreSQL metadata backend
