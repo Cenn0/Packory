@@ -16,6 +16,22 @@ public static class Access
     private const string ManagedIdKey = "packory.managed-id";
     private const string ValidatedJwtKey = "packory.jwt-bearer-principal";
 
+    private static ClaimsPrincipal? ValidatedBrowser(HttpContext context, Settings settings) =>
+        settings.OidcWebEnabled &&
+        context.Items.TryGetValue(BrowserSso.BrowserPrincipalKey, out var value) &&
+        value is ClaimsPrincipal principal &&
+        principal.Identity?.AuthenticationType == BrowserSso.CookieScheme
+            ? principal : null;
+
+    private static string? BrowserCredentialRole(HttpContext context, Settings settings) =>
+        BrowserSso.Role(ValidatedBrowser(context, settings)) switch
+        {
+            "admin" => "browser-admin",
+            "write" => "browser-write",
+            "read" => "browser-read",
+            _ => null
+        };
+
     /// <summary>
     /// Called only by JwtBearerEvents.OnTokenValidated after cryptographic
     /// signature, issuer, audience and lifetime verification. A browser cookie
@@ -47,11 +63,12 @@ public static class Access
     {
         if (!write && settings.AnonymousRead) return null;
         var token = ExtractToken(context);
-        if (string.IsNullOrEmpty(token) && OidcCredentialRole(context, settings) is null)
+        if (string.IsNullOrEmpty(token) && OidcCredentialRole(context, settings) is null &&
+            BrowserCredentialRole(context, settings) is null)
             return Results.Unauthorized();
 
         var role = (token is null ? null : CredentialRole(token, settings, context)) ??
-            OidcCredentialRole(context, settings);
+            OidcCredentialRole(context, settings) ?? BrowserCredentialRole(context, settings);
         if (role is null) return Results.Unauthorized();
         // A grant scoped to one private feed or publish namespace is NOT a
         // global registry read permission. Native private feed routes use
@@ -61,8 +78,9 @@ public static class Access
             context.Items[ManagedNamespaceKey] is string)
             return Results.Json(new { error = "Scoped credentials cannot read global registries" },
                 statusCode: StatusCodes.Status403Forbidden);
-        if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" or "managed-write" ||
-            (!write && role is "read-token" or "oidc-read" or "managed-read"))
+        if (role is "admin-token" or "write-token" or "oidc-admin" or "oidc-write" or
+            "browser-admin" or "browser-write" or "managed-write" ||
+            (!write && role is "read-token" or "oidc-read" or "browser-read" or "managed-read"))
         {
             context.Items[RoleKey] = role;
             context.Items[ActorKey] = role.StartsWith("managed-", StringComparison.Ordinal)
@@ -164,7 +182,7 @@ public static class Access
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
-        return Actor(context) is "admin-token" or "oidc-admin"
+        return Actor(context) is "admin-token" or "oidc-admin" or "browser-admin"
             ? null : Results.Json(new { error = "Administrator credential required" },
                 statusCode: StatusCodes.Status403Forbidden);
     }
@@ -178,7 +196,8 @@ public static class Access
     {
         var token = ExtractToken(context);
         return (token is null ? null : CredentialRole(token, settings, context))
-            ?? OidcCredentialRole(context, settings) ?? "unauthenticated";
+            ?? OidcCredentialRole(context, settings)
+            ?? BrowserCredentialRole(context, settings) ?? "unauthenticated";
     }
 
     private static string? OidcCredentialRole(HttpContext context, Settings settings)
@@ -205,9 +224,9 @@ public static class Access
     {
         var role = context.Items.TryGetValue(RoleKey, out var value)
             ? value as string ?? Actor(context) : Actor(context);
-        if (role is "admin-token" or "oidc-admin") return null;
+        if (role is "admin-token" or "oidc-admin" or "browser-admin") return null;
         if (role == "write-token" && settings.WriteNamespaces.Length == 0) return null;
-        if (role == "oidc-write" && !settings.RequireOidcNamespaceGrants) return null;
+        if (role is "oidc-write" or "browser-write" && !settings.RequireOidcNamespaceGrants) return null;
         IEnumerable<string> grants = role switch
         {
             "write-token" => settings.WriteNamespaces,
@@ -215,6 +234,9 @@ public static class Access
                 new[] { grant },
             "oidc-write" =>
                 ValidatedBearer(context, settings)?.FindAll("packory_namespace").Select(x => x.Value)
+                    ?? Enumerable.Empty<string>(),
+            "browser-write" =>
+                ValidatedBrowser(context, settings)?.FindAll("packory_namespace").Select(x => x.Value)
                     ?? Enumerable.Empty<string>(),
             _ => []
         };
@@ -242,7 +264,12 @@ public static class Access
             return Results.BadRequest(new { error = "Invalid feed ID" });
         // Unlike generic package reads, private feeds must authenticate
         // even when anonymous catalog reads are configured.
-        if (RequireMcp(ctx, settings) is { } denied)
+        // Hosted feed routes are also used from the web dashboard, but MCP
+        // and native package routes must remain strictly bearer-only.
+        var browser = BrowserCredentialRole(ctx, settings);
+        var admission = browser is null ? RequireMcp(ctx, settings)
+            : Require(ctx, settings, write: publish);
+        if (admission is { } denied)
         {
             // NuGet clients need a standards-compliant authentication challenge
             // before retrying a private service-index request with configured
@@ -251,7 +278,7 @@ public static class Access
             return denied;
         }
         var role = ctx.Items[RoleKey] as string;
-        if (role is "admin-token" or "oidc-admin") return null;
+        if (role is "admin-token" or "oidc-admin" or "browser-admin") return null;
         if (role is "managed-read" or "managed-write" &&
             ctx.Items[ManagedNamespaceKey] is string grant && ValidFeedGrant(grant))
         {
@@ -268,6 +295,17 @@ public static class Access
             var required = feedId + ":" + (publish ? "publish" : "read");
             if ((!publish || role == "oidc-write") &&
                 verified.FindAll("packory_feed").Any(c =>
+                    string.Equals(c.Value, required, StringComparison.Ordinal) ||
+                    (!publish && string.Equals(c.Value, feedId + ":publish",
+                        StringComparison.Ordinal))))
+                return null;
+        }
+        if (role is "browser-read" or "browser-write" &&
+            ValidatedBrowser(ctx, settings) is { } session)
+        {
+            var required = feedId + ":" + (publish ? "publish" : "read");
+            if ((!publish || role == "browser-write") &&
+                session.FindAll("packory_feed").Any(c =>
                     string.Equals(c.Value, required, StringComparison.Ordinal) ||
                     (!publish && string.Equals(c.Value, feedId + ":publish",
                         StringComparison.Ordinal))))
