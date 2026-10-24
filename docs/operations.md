@@ -19,7 +19,7 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_INSTANCE_ROLE` | `writer` | `writer` holds the exclusive PostgreSQL advisory lease; `reader` is opt-in PostgreSQL/S3 read-only replica with a restricted protocol allowlist |
 | `PACKORY_POSTGRES_CONNECTION_STRING` | *(unset)* | PostgreSQL ADO.NET connection string (runtime secret; required for postgresql provider) |
 | `PACKORY_DATA_DIRECTORY` | `./data` or `/data` in Docker | SQLite + blob root |
-| `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute origin (no path) advertised to clients |
+| `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute public origin; browser SSO requires HTTPS except on loopback |
 | `PACKORY_NUGET_UPSTREAM_URL` | `https://api.nuget.org/v3-flatcontainer/` | Trusted NuGet flat container |
 | `PACKORY_NUGET_REGISTRATION_URL` | `https://api.nuget.org/v3/registration5-semver2/` | Trusted NuGet registration source |
 | `PACKORY_NPM_UPSTREAM_URL` | `https://registry.npmjs.org/` | Trusted npm upstream |
@@ -33,7 +33,6 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
 | `PACKORY_OIDC_CLIENT_ID` | *(unset)* | Optional confidential web-client ID for browser code + PKCE |
 | `PACKORY_OIDC_CLIENT_SECRET_FILE` | *(unset)* | Secret file, operator-mounted (or use `PACKORY_OIDC_CLIENT_SECRET`) |
-| `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | For browser SSO, use the exact HTTPS public origin |
 | `PACKORY_MAX_RAW_FEED_BYTES` | `0` (disabled) | Logical committed-byte limit independently applied to every private Raw feed; 0–1 TiB. |
 | `PACKORY_MAX_RAW_FEED_ARTIFACTS` | `0` (disabled) | Committed asset-count limit independently applied to every private Raw feed; 0–100,000,000. |
 | `PACKORY_MAX_BLOB_STORAGE_BYTES` | `0` (unlimited) | Optional single-process filesystem blob capacity; writes fail HTTP 507 if exceeded. Not a S3 quota. |
