@@ -85,7 +85,7 @@ This launches the app only. Use the Docker Compose stack when you also need the 
 | **Agent Skills** | ZIP staging, offline SkillSpector inspection, approval/revocation and static quality findings | [Skill security](docs/mcp-security-integration.md) · [Quality](docs/skill-quality.md) |
 | **Optional AI review** | Opt-in LLM assessment with separate networkless worker and operator-controlled provider access; human approval remains required | [Skill AI](docs/skill-ai.md) |
 | **MCP discovery** | Authenticated read-only `/mcp`, global catalog traversal and approved Skill access; reviewed inert MCP Registry descriptors | [MCP roadmap](docs/mcp-roadmap.md) · [Registry catalog](docs/mcp-registry-catalog.md) |
-| **Platform** | Dashboard, REST API, exact private-feed grants, optional OIDC JWT validation, SQLite/filesystem or PostgreSQL/S3 | [API](docs/api.md) · [Operations](docs/operations.md) |
+| **Platform** | Dashboard, REST API, exact private-feed grants, optional OIDC JWT validation and browser SSO, SQLite/filesystem or PostgreSQL/S3 | [API](docs/api.md) · [Operations](docs/operations.md) |
 
 **Private hosted E0:** isolated native feed routes for all eight package kinds are implemented with explicit activation and exact `feed:{id}:read` or `feed:{id}:publish` grants. Private requests do not fall back to global or upstream packages. The [E0 acceptance record](docs/e0-acceptance.md) is evidence for its named test versions and providers, **not** a blanket interoperability or production claim. Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
 
@@ -128,7 +128,7 @@ Packory is **not** currently a microservices deployment. Protocol adapters share
 ## Important limits
 
 - Native-client tests qualify **specific protocols, operations, versions and storage profiles**, not official upstream vendor endorsement or full specification compliance.
-- Static tokens and optional OIDC JWT validation do **not** provide browser SSO/BFF, complete individual attribution, comprehensive immutable audit or granular per-package permissions.
+- Browser SSO is now available as an **opt-in, single-instance** OIDC code/PKCE integration with server-side session tickets and CSRF protection. It is **not yet live-browser/IdP-qualified**; individual attribution, continuous group revocation, multi-node sessions, comprehensive immutable audit and granular per-package policy remain out of scope.
 - PostgreSQL/S3 integration is experimental and real-provider recovery remains a release gate. **Multiple active writers are not supported**; reader replicas have a deliberately restricted endpoint allowlist.
 - Package integrity checks, static Skill inspection and AI review are not malware certification, provenance validation or safe-execution guarantees.
 - Keep the deployment loopback-only for evaluation. A shared installation needs TLS, explicit access policy, egress controls, least-privilege credentials and coherent **database plus blob-store backups**.

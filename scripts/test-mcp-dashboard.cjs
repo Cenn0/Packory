@@ -53,6 +53,7 @@ function defaultReply(call) {
   const prefix = call.authorization === `Bearer ${newToken}` ? 'new' : 'old';
   const skill = record(prefix);
   switch (call.kind) {
+    case 'session': return { enabled: false, authenticated: false, role: 'none' };
     case 'catalog': return { items: [{ name: `${prefix}-package`, version: '1.0.0', kind: 'nuget', origin: 'hosted' }] };
     case 'skills': return { items: [{ name: skill.name, version: skill.version }] };
     case 'security': return { items: [skill] };
@@ -90,7 +91,8 @@ function defaultReply(call) {
 function classify(url, request) {
   const pathname = url.pathname;
   let kind, action;
-  if (pathname === '/api/packages') kind = 'catalog';
+  if (pathname === '/auth/session') kind = 'session';
+  else if (pathname === '/api/packages') kind = 'catalog';
   else if (pathname === '/api/skills') kind = 'skills';
   else if (pathname === '/api/security/skills') kind = 'security';
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+$/.test(pathname)) kind = 'detail';
@@ -108,6 +110,8 @@ function classify(url, request) {
   return { kind, action, pathname, method: request.method(), q: url.searchParams.get('q'),
     cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit'),
     authorization: request.headers().authorization || '',
+    browserHeader: request.headers()['x-packory-browser'] || '',
+    csrfHeader: request.headers()['x-packory-csrf'] || '',
     body: ['POST', 'PUT'].includes(request.method()) ? request.postDataJSON() : null };
 }
 
@@ -160,7 +164,9 @@ async function harness(browser, origin, reply = defaultReply) {
       failures.push('Unexpected external or injected resource request');
       await route.abort(); return;
     }
-    if (!url.pathname.startsWith('/api/')) { await route.continue(); return; }
+    if (!url.pathname.startsWith('/api/') && url.pathname !== '/auth/session') {
+      await route.continue(); return;
+    }
     let held;
     try {
       const call = classify(url, request); calls.push(call);
@@ -453,6 +459,35 @@ async function main() {
     await scenario('token change and stale responses', defaultReply, tokenScenario);
     await scenario('revoke, rescan and refresh invalidation', defaultReply, invalidationScenario);
     await scenario('optional AI form and safe assessment rendering', defaultReply, skillAiScenario);
+    await scenario('browser SSO session and CSRF headers', call => {
+      if (call.kind === 'session')
+        return { enabled: true, authenticated: true, role: 'admin', csrfToken: 'synthetic-csrf-token' };
+      return defaultReply(call);
+    }, async h => {
+      await h.text('sso-status', 'Signed in · admin');
+      await h.ready('old', true);
+      assert.equal(await h.page.locator('#sso-login').isVisible(), false);
+      assert.equal(await h.page.locator('#sso-logout').isVisible(), true);
+      // Exercise the actual dashboard request transport, not a synthetic header builder.
+      await h.page.evaluate(() => request('/api/admin/skill-ai/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      }));
+      const put = h.calls.find(x => x.kind === 'ai-settings-save');
+      assert.ok(put, 'browser must reach admin endpoint using same-origin request');
+      assert.equal(put.browserHeader, '1');
+      assert.equal(put.csrfHeader, 'synthetic-csrf-token');
+      assert.equal(put.authorization, '', 'browser session must not synthesize bearer tokens');
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      const previous = h.calls.length;
+      await h.page.evaluate(() => request('/api/admin/skill-ai/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      }));
+      const tokenPut = h.calls.slice(previous).find(x => x.kind === 'ai-settings-save');
+      assert.equal(tokenPut.authorization, 'Bearer ' + oldToken);
+      assert.equal(tokenPut.browserHeader, '');
+      assert.equal(tokenPut.csrfHeader, '');
+    });
     await scenario('desktop and mobile layout', call => {
       const result = defaultReply(call);
       const name = 'fixture-' + 'a'.repeat(56);
@@ -462,7 +497,7 @@ async function main() {
       if (call.kind === 'mcp') result.items[0].remoteUrl += '/' + 'p'.repeat(180);
       return result;
     }, layoutScenario);
-    process.stdout.write(`PASS MCP dashboard: ${passed}/5 scenarios (mocked API; desktop and mobile).\n`);
+    process.stdout.write(`PASS MCP dashboard: ${passed}/6 scenarios (mocked API; desktop and mobile).\n`);
   } catch (error) {
     process.stderr.write(`FAIL MCP dashboard (${active}): ${String(error.message).replace(/\s+/g, ' ')}\n`);
     process.exitCode = 1;

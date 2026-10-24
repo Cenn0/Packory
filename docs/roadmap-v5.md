@@ -182,7 +182,7 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
 | V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |
 | V5-27 | Bounded feed/query-scoped REST keyset discovery added on both providers; logical single-writer quotas and explicit indefinite retention implemented; MCP/UI discovery and physical-provider qualification remain |
-| V5-30 | Browser BFF and its security/E2E acceptance remain unimplemented |
+| V5-30 | **Partial:** confidential OIDC browser code/PKCE, short-lived in-process session store, CSRF on opted-in API mutations, explicit web ID-token roles and dashboard login/logout added in PR #154; real Keycloak browser E2E, robust IdP logout, live role revocation, distributed session management and independent security acceptance remain open |
 | V5-31 | Privileged dashboard depends on V5-30; current catalog UI does not satisfy it |
 | V5-32 | Existing static scan/approval does not verify publisher signatures or ownership |
 | V5-33 | Inert reviewed MCP Registry profile exists; full publisher/sync/lifecycle qualification remains |
@@ -320,7 +320,7 @@ OpenSSL versions are now recorded separately from client versions.
 This is additional runnable acceptance, **not closure** of the three workstreams
 or issue #133. Check exact-head CI results; the complete host-boot, scanner,
 capacity/fault, prior-release migration, real-provider and independent release
-criteria remain open. No browser BFF, new ecosystem adapter, stable release or
+criteria remain open. No fully qualified browser BFF, new ecosystem adapter, stable release or
 production deployment is introduced. See [the precise automated scope](single-node-qualification.md).
 
 ## Bounded load-probe tranche — 23 October 2026

@@ -65,6 +65,11 @@ public sealed class Settings
     public string? OidcAuthority { get; set; }
     public string? OidcAudience { get; set; }
     public bool OidcEnabled => !string.IsNullOrWhiteSpace(OidcAuthority);
+    // A confidential interactive web client is separate from the JWT API audience.
+    public string? OidcClientId { get; set; }
+    public string? OidcClientSecret { get; set; }
+    public bool OidcWebEnabled => !string.IsNullOrWhiteSpace(OidcClientId) &&
+                                  !string.IsNullOrWhiteSpace(OidcClientSecret);
     public string? AdminToken { get; set; }
     public string? ReadToken { get; set; }
     public string? WriteToken { get; set; }
@@ -206,6 +211,13 @@ public sealed class Settings
             !string.IsNullOrEmpty(oidc.Query) || !string.IsNullOrEmpty(oidc.Fragment) ||
             string.IsNullOrWhiteSpace(OidcAudience) || OidcAudience.Length > 256))
             throw new InvalidOperationException("OIDC requires an HTTPS authority and nonempty audience.");
+        if ((!string.IsNullOrWhiteSpace(OidcClientId) ||
+             !string.IsNullOrWhiteSpace(OidcClientSecret)) && !OidcWebEnabled)
+            throw new InvalidOperationException("OIDC browser client ID and secret must be configured together.");
+        if (OidcWebEnabled && (!OidcEnabled || OidcClientId!.Length > 256 ||
+            OidcClientSecret!.Length < 16 ||
+            (!string.Equals(origin.Scheme, "https", StringComparison.Ordinal) && !origin.IsLoopback)))
+            throw new InvalidOperationException("Browser SSO requires an OIDC issuer, confidential client, and HTTPS public origin (HTTP only on loopback).");
         if (WriteNamespaces.Any(x => !Access.ValidNamespaceGrant(x)))
             throw new InvalidOperationException("Invalid WriteNamespaces grant.");
         if (MaxBlobStorageBytes < 0 || MaxBlobStorageBytes > 1_099_511_627_776L ||

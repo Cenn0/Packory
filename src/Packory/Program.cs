@@ -1,4 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
@@ -17,6 +23,8 @@ builder.Configuration.GetSection("Packory").Bind(settings);
 // Operator-selected absolute secret files never expose their contents in the environment.
 settings.OidcAuthority = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUTHORITY") ?? settings.OidcAuthority;
 settings.OidcAudience = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUDIENCE") ?? settings.OidcAudience;
+settings.OidcClientId = Environment.GetEnvironmentVariable("PACKORY_OIDC_CLIENT_ID") ?? settings.OidcClientId;
+settings.OidcClientSecret = RuntimeSecretFiles.Resolve("PACKORY_OIDC_CLIENT_SECRET", settings.OidcClientSecret);
 settings.AdminToken = RuntimeSecretFiles.Resolve("PACKORY_ADMIN_TOKEN", settings.AdminToken, blankEnvironmentMeansUnset: true);
 settings.ReadToken = RuntimeSecretFiles.Resolve("PACKORY_READ_TOKEN", settings.ReadToken, blankEnvironmentMeansUnset: true);
 settings.WriteToken = RuntimeSecretFiles.Resolve("PACKORY_WRITE_TOKEN", settings.WriteToken, blankEnvironmentMeansUnset: true);
@@ -97,7 +105,7 @@ if (settings.OidcEnabled)
 {
     // The JWT middleware validates signature, issuer, audience and lifetime using
     // the HTTPS OpenID Connect discovery document and signing keys.
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    var authentication = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
             options.Authority = settings.OidcAuthority;
@@ -124,6 +132,71 @@ if (settings.OidcEnabled)
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
         });
+    if (settings.OidcWebEnabled)
+    {
+        builder.Services.AddAntiforgery(options =>
+        {
+            options.HeaderName = "X-Packory-Csrf";
+            options.Cookie.Name = "Packory.Csrf";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Strict;
+            options.Cookie.SecurePolicy = settings.Base.StartsWith("https://", StringComparison.Ordinal)
+                ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
+        });
+        // Persist OIDC correlation/CSRF protection keys. The volume and key
+        // files require restricted access and encrypted-at-rest storage.
+        var keyDirectory = Path.Combine(Path.GetFullPath(settings.DataDirectory), "identity-keys");
+        Directory.CreateDirectory(keyDirectory);
+        builder.Services.AddDataProtection().SetApplicationName("Packory")
+            .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+        authentication.AddCookie(BrowserSso.CookieScheme, options =>
+        {
+            options.Cookie.Name = "Packory.Session";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.Cookie.SecurePolicy = settings.Base.StartsWith("https://", StringComparison.Ordinal)
+                ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
+            options.ExpireTimeSpan = TimeSpan.FromMinutes(15);
+            options.SlidingExpiration = false;
+            options.SessionStore = new BrowserTicketStore();
+            options.LoginPath = "/auth/login";
+        }).AddOpenIdConnect(BrowserSso.OidcScheme, options =>
+        {
+            options.SignInScheme = BrowserSso.CookieScheme;
+            options.Authority = settings.OidcAuthority;
+            options.ClientId = settings.OidcClientId;
+            options.ClientSecret = settings.OidcClientSecret;
+            options.RequireHttpsMetadata = true;
+            options.ResponseType = OpenIdConnectResponseType.Code;
+            options.UsePkce = true;
+            options.SaveTokens = false;
+            options.GetClaimsFromUserInfoEndpoint = false;
+            options.MapInboundClaims = false;
+            options.Scope.Clear();
+            options.Scope.Add("openid");
+            options.CallbackPath = "/auth/callback";
+            options.SignedOutCallbackPath = "/auth/signed-out";
+            options.Events = new OpenIdConnectEvents
+            {
+                OnTicketReceived = context =>
+                {
+                    if (context.Principal is { } verified)
+                        context.Principal = BrowserSso.RestrictIdentity(verified);
+                    return Task.CompletedTask;
+                },
+                OnRedirectToIdentityProvider = context =>
+                {
+                    context.ProtocolMessage.RedirectUri = settings.Base + "/auth/callback";
+                    return Task.CompletedTask;
+                },
+                OnRedirectToIdentityProviderForSignOut = context =>
+                {
+                    context.ProtocolMessage.PostLogoutRedirectUri = settings.Base + "/auth/signed-out";
+                    return Task.CompletedTask;
+                }
+            };
+        });
+    }
 }
 builder.Services.AddSingleton(settings);
 builder.Services.AddHttpContextAccessor();
@@ -270,6 +343,7 @@ var telemetry = app.Services.GetRequiredService<PackoryTelemetry>();
 app.Use((ctx, next) => telemetry.Observe(ctx, _ => next(ctx)));
 // Authenticate before applying the MCP token/OIDC scope gate.
 if (settings.OidcEnabled) app.UseAuthentication();
+if (settings.OidcWebEnabled) app.Use(BrowserSso.AllowBrowserApi);
 app.Use(async (ctx, next) =>
 {
     if (ctx.Request.Path.StartsWithSegments("/mcp"))
@@ -389,6 +463,42 @@ app.Use(async (ctx, next) =>
 });
 app.UseDefaultFiles();
 app.UseStaticFiles();
+if (settings.OidcWebEnabled)
+{
+    app.MapGet("/auth/session", async (HttpContext ctx, IAntiforgery antiforgery) =>
+    {
+        ctx.Response.Headers.CacheControl = "no-store";
+        var authenticated = await ctx.AuthenticateAsync(BrowserSso.CookieScheme);
+        if (!authenticated.Succeeded || authenticated.Principal is null)
+            return Results.Json(new { enabled = true, authenticated = false, role = "none" });
+        var csrf = antiforgery.GetAndStoreTokens(ctx);
+        return Results.Json(new
+        {
+            enabled = true, authenticated = true,
+            role = BrowserSso.Role(authenticated.Principal),
+            csrfToken = csrf.RequestToken
+        });
+    });
+    app.MapGet("/auth/login", () =>
+        Results.Challenge(new AuthenticationProperties { RedirectUri = "/" },
+            [BrowserSso.OidcScheme]));
+    app.MapPost("/auth/logout", async (HttpContext ctx, IAntiforgery antiforgery) =>
+    {
+        var authenticated = await ctx.AuthenticateAsync(BrowserSso.CookieScheme);
+        if (!authenticated.Succeeded) return Results.Unauthorized();
+        if (!await antiforgery.IsRequestValidAsync(ctx)) return Results.BadRequest();
+        return Results.SignOut(new AuthenticationProperties { RedirectUri = "/" },
+            [BrowserSso.CookieScheme, BrowserSso.OidcScheme]);
+    });
+}
+else
+{
+    app.MapGet("/auth/session", (HttpContext ctx) =>
+    {
+        ctx.Response.Headers.CacheControl = "no-store";
+        return Results.Json(new { enabled = false, authenticated = false, role = "none" });
+    });
+}
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
