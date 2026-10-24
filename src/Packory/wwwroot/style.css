@@ -77,3 +77,9 @@
 .ai-audit{max-height:220px;overflow:auto}
 .ai-audit p{margin:5px 0;font-size:12px}
 @media(max-width:680px){.ai-config-grid{grid-template-columns:1fr}.skill-ai-panel{padding-top:15px}}
+
+/* Optional browser sign-in; the API-token fallback remains visible. */
+.sso-auth{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.sso-auth span{flex:1;font-size:12px;color:#c6d8ec}
+.sso-auth button{min-height:34px;padding:6px 12px;font-size:12px}
+.sso-auth button[hidden]{display:none}
