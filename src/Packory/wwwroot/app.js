@@ -435,7 +435,7 @@ async function loadSkillAi() {
 async function loadSkillAiJobs() {
   const requestId = aiView.requestId;
   const token = state.token;
-  if (!aiView.configuration || !token) return;
+  if (!aiView.configuration || !canAdmin()) return;
   const list = $('ai-jobs'), audit = $('ai-audit');
   try {
     const [jobs, history] = await Promise.all([
