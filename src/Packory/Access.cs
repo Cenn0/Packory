@@ -277,6 +277,13 @@ public static class Access
             ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"Packory private feed\"";
             return denied;
         }
+        // Anonymous global reads must not erase a valid browser role when
+        // evaluating a specific private hosted feed.
+        if (browser is not null)
+        {
+            ctx.Items[RoleKey] = browser;
+            ctx.Items[ActorKey] = browser;
+        }
         var role = ctx.Items[RoleKey] as string;
         if (role is "admin-token" or "oidc-admin" or "browser-admin") return null;
         if (role is "managed-read" or "managed-write" &&
