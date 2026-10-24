@@ -1,13 +1,21 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { token: '' };
+const state = { token: '', sso: { enabled: false, authenticated: false, role: 'none', csrfToken: null } };
+const canAdmin = () => !!state.token || (state.sso.authenticated && state.sso.role === 'admin');
 let catalogRequest = 0, securityRequest = 0, securityDetailRequest = 0;
 let qualityRequest = 0;
 const mcpView = { cursor: null, query: '', count: 0, requestId: 0 };
-function headers() { return state.token ? { Authorization: `Bearer ${state.token}` } : {}; }
+function headers() {
+  if (state.token) return { Authorization: `Bearer ${state.token}` };
+  return state.sso.authenticated ? { 'X-Packory-Browser': '1' } : {};
+}
 function element(tag, text, css) { const node = document.createElement(tag); node.textContent = text; if (css) node.className = css; return node; }
 async function request(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
+  const browser = !state.token && state.sso.authenticated;
+  const unsafe = !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase());
+  const requestHeaders = { ...headers(), ...(options.headers || {}) };
+  if (browser && unsafe) requestHeaders['X-Packory-Csrf'] = state.sso.csrfToken;
+  const response = await fetch(path, { ...options, credentials: 'same-origin', headers: requestHeaders });
   if (!response.ok) throw new Error(`HTTP ${response.status}${response.status === 401 ? ': token required' : ''}`);
   return response.json();
 }
@@ -36,10 +44,10 @@ async function load() {
       const link = element('a', 'Download');
       link.href = `/api/skills/${encodeURIComponent(skill.name)}/${encodeURIComponent(skill.version)}/download`;
       link.addEventListener('click', async event => {
-        if (!state.token) return;
+        if (!state.token && !state.sso.authenticated) return;
         event.preventDefault();
         try {
-          const response = await fetch(link.href, { headers: headers() });
+          const response = await fetch(link.href, { credentials: 'same-origin', headers: headers() });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const url = URL.createObjectURL(await response.blob());
           const download = document.createElement('a'); download.href = url;
@@ -156,8 +164,8 @@ async function loadSecurity() {
   securityDetailRequest++;
   const rows = $('security-table'); rows.replaceChildren();
   $('security-detail').hidden = true;
-  if (!state.token) {
-    $('security-status').textContent = 'Administrator API token required for security review and decisions.';
+  if (!canAdmin()) {
+    $('security-status').textContent = 'Administrator SSO role or API token required for security review and decisions.';
     for (const id of ['security-pending', 'security-review', 'security-quarantine', 'security-approved']) $(id).textContent = '—';
     return;
   }
@@ -408,7 +416,7 @@ function populateAiForm(result) {
 async function loadSkillAi() {
   const requestId = ++aiView.requestId;
   const token = state.token;
-  if (!token) { invalidateSkillAi(); return; }
+  if (!canAdmin()) { invalidateSkillAi(); return; }
   $('skill-ai-panel').hidden = false;
   $('ai-status').textContent = 'Loading AI configuration…';
   try {
@@ -489,7 +497,7 @@ async function cancelSkillAiJob(id) {
   } catch (error) { if (state.token === token) $('ai-status').textContent = 'Cancel failed: ' + error.message; }
 }
 async function appendSkillAiReview(item, target, requestId, token) {
-  if (!aiView.configuration || !state.token) return;
+  if (!aiView.configuration || !canAdmin()) return;
   target.append(element('h4', 'Optional AI analysis (separate from static scan)'));
   const content = element('div', '', 'ai-review-results'); target.append(content);
   if (aiView.configuration.enabled && ['NEEDS_REVIEW', 'QUARANTINED', 'APPROVED', 'REVOKED'].includes(item.state)) {
@@ -576,3 +584,35 @@ $('ai-reload').addEventListener('click', loadSkillAi);
 $('ai-jobs-reload').addEventListener('click', loadSkillAiJobs);
 $('token').addEventListener('change', loadSkillAi);
 loadSkillAi();
+
+ 
+// Keep browser credentials only in HttpOnly server-managed cookies; do not
+// place ID/access/refresh tokens in localStorage, URLs, or client-side state.
+async function loadSso() {
+  try {
+    const response = await fetch('/auth/session', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('Session endpoint unavailable');
+    const session = await response.json();
+    state.sso = { enabled: !!session.enabled, authenticated: !!session.authenticated,
+      role: session.role || 'none', csrfToken: session.csrfToken || null };
+    $('sso-login').hidden = !state.sso.enabled || state.sso.authenticated;
+    $('sso-logout').hidden = !state.sso.authenticated;
+    $('sso-status').textContent = !state.sso.enabled ? 'API token access' :
+      state.sso.authenticated ? 'Signed in · ' + state.sso.role : 'Not signed in';
+    await Promise.all([load(), loadSecurity(), loadMcpServers(), loadSkillAi()]);
+  } catch (_) {
+    $('sso-status').textContent = 'SSO status unavailable; API tokens remain supported';
+  }
+}
+$('sso-login').addEventListener('click', () => window.location.assign('/auth/login'));
+$('sso-logout').addEventListener('click', () => {
+  if (!state.sso.authenticated || !state.sso.csrfToken) return;
+  // A regular navigation (not fetch) permits a provider end-session redirect.
+  const form = document.createElement('form');
+  form.method = 'POST'; form.action = '/auth/logout'; form.hidden = true;
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden'; csrf.name = '__RequestVerificationToken';
+  csrf.value = state.sso.csrfToken;
+  form.append(csrf); document.body.append(form); form.submit();
+});
+loadSso();
