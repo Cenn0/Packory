@@ -320,7 +320,7 @@ OpenSSL versions are now recorded separately from client versions.
 This is additional runnable acceptance, **not closure** of the three workstreams
 or issue #133. Check exact-head CI results; the complete host-boot, scanner,
 capacity/fault, prior-release migration, real-provider and independent release
-criteria remain open. No browser BFF, new ecosystem adapter, stable release or
+criteria remain open. No fully qualified browser BFF, new ecosystem adapter, stable release or
 production deployment is introduced. See [the precise automated scope](single-node-qualification.md).
 
 ## Bounded load-probe tranche — 23 October 2026
