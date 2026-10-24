@@ -151,3 +151,6 @@ Native Integrationstests und Nachweise stehen unter [CI-Qualifikation](docs/ci-q
 **Weiterlesen:** [Dokumentationszentrale](docs/README.md) · [Architektur](docs/architecture.md) · [API](docs/api.md) · [Betrieb](docs/operations.md) · [Aktuelle Roadmap V5](docs/roadmap-v5.md) · [Mitwirken](CONTRIBUTING.md).
 
 Lizenziert unter [Apache-2.0](LICENSE). Sicherheitslücken ausschließlich über den vertraulichen Meldeweg in [SECURITY.md](SECURITY.md) melden. Das öffentliche Repository darf keine persönlichen Kontaktdaten, Secrets oder Produktionsartefakte enthalten.
+
+
+> **Optionales Browser-SSO:** Das Dashboard unterstützt nun OIDC Authorization Code + PKCE mit einer kurzlebigen, serverseitig verwalteten Session und CSRF-Schutz. Die Funktion ist nicht durch einen realen Browser-/Keycloak-End-to-End-Test qualifiziert; native Feed- und MCP-Clients bleiben tokenbasiert. Siehe [OIDC/Keycloak](docs/oidc-keycloak.md).
