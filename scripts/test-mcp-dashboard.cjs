@@ -63,6 +63,8 @@ function defaultReply(call) {
     case 'security-status': return { enforcement: true };
     case 'managed-tokens': return { items: [], nextOffset: null };
     case 'detail': return { skill, report: { fixture: `${prefix}-report`, untrustedText: hostile }, history: [] };
+    case 'source': return { sha256: archiveDigest, files: [{ path: 'SKILL.md', bytes: 24, previewable: true }] };
+    case 'source-file': return { sha256: archiveDigest, path: 'SKILL.md', bytes: 24, content: '# Synthetic Skill\n' };
     case 'quality': return qualityReport();
     case 'mcp': return { items: [serverRecord(`${prefix}-server`)], nextCursor: call.cursor ? null : 'fixture-next-page' };
     case 'ai-settings': return { configuration: { revision: 0, enabled: false,
@@ -104,6 +106,8 @@ function classify(url, request) {
   else if (pathname === '/api/security/status') kind = 'security-status';
   else if (pathname === '/api/admin/tokens') kind = 'managed-tokens';
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+$/.test(pathname)) kind = 'detail';
+  else if (/^\/api\/security\/skills\/[^/]+\/[^/]+\/source$/.test(pathname)) kind = 'source';
+  else if (/^\/api\/security\/skills\/[^/]+\/[^/]+\/source\/file$/.test(pathname)) kind = 'source-file';
   else if (/^\/api\/v1\/skills\/[^/]+\/[^/]+\/quality$/.test(pathname)) kind = 'quality';
   else if (pathname === '/api/v1/mcp/servers') kind = 'mcp';
   else if (pathname === '/api/admin/skill-ai/settings') kind = request.method() === 'PUT' ? 'ai-settings-save' : 'ai-settings';
@@ -517,6 +521,72 @@ async function main() {
       assert.equal(put.csrfHeader, 'synthetic-csrf-token');
       assert.equal(put.authorization, '', 'browser session must not synthesize bearer tokens');
     });
+    await scenario('review decision binds digest and clears stale quality', defaultReply, async h => {
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('a[href="#reviews"][data-route]').click();
+      await h.text('security-table', 'old-skill');
+      await h.page.locator('#security-table button').click();
+      await h.page.locator('.inline-detail-panel').getByRole('button', { name: 'Revoke distribution' }).waitFor();
+      assert.match(await h.page.locator('.inline-detail-panel').textContent(), /old-report/);
+      await h.page.locator('a[href="#catalog"][data-route]').click();
+      await h.text('skills', 'old-skill');
+      await h.page.locator('#skills button').click();
+      await h.page.locator('#skills .inline-detail-panel').getByText('Archive SHA-256:', { exact: false }).waitFor();
+      await h.page.locator('a[href="#reviews"][data-route]').click();
+      await h.page.locator('#security-table button').click();
+      await h.page.locator('.inline-detail-panel').getByRole('button', { name: 'Revoke distribution' }).click();
+      await h.page.locator('#decision-reason').fill(reason);
+      const decisionResponse = h.page.waitForResponse(response =>
+        new URL(response.url()).pathname.endsWith('/revoke'));
+      await h.page.locator('#decision-submit').click();
+      await decisionResponse;
+      const decision = h.calls.find(x => x.kind === 'decision' && x.action === 'revoke');
+      assert.ok(decision, 'revocation request must reach its exact revision');
+      assert.equal(decision.authorization, `Bearer ${oldToken}`);
+      assert.deepEqual(decision.body, { sha256: archiveDigest, reason });
+      assert.equal(await h.page.locator('#skills .inline-detail-panel').count(), 0);
+    });
+    await scenario('token change discards an in-flight quality response', defaultReply, async h => {
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('a[href="#catalog"][data-route]').click();
+      await h.text('skills', 'old-skill');
+      const held = h.holdNext('quality');
+      await h.page.locator('#skills button').click();
+      await held.seen;
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(newToken);
+      await h.page.locator('#token').press('Tab');
+      await held.release(); await h.drained();
+      await h.page.locator('a[href="#catalog"][data-route]').click();
+      await h.text('skills', 'new-skill');
+      assert.doesNotMatch(await h.page.locator('#skills').textContent(), /old-skill/);
+      assert.equal(await h.page.locator('#skills .inline-detail-panel').count(), 0);
+    });
+    await scenario('AI settings and assessment content remain inert', defaultReply, async h => {
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('#skill-ai-panel').waitFor({ state: 'visible' });
+      await h.text('ai-jobs', 'old-skill');
+      assert.equal(await h.page.locator('#ai-jobs img, #ai-jobs script').count(), 0);
+      await h.page.locator('#ai-enabled').check();
+      await h.page.locator('#ai-model').fill('example-model');
+      await h.page.locator('#ai-key').fill('synthetic-do-not-store');
+      await h.page.locator('#ai-input-rate').fill('1');
+      await h.page.locator('#ai-output-rate').fill('2');
+      await h.page.locator('#ai-transmission').check();
+      await h.page.locator('#ai-reason').fill('Synthetic opt in');
+      await h.page.locator('#ai-save').click();
+      await h.page.waitForFunction(() => document.getElementById('ai-key').value === '');
+      const put = h.calls.find(x => x.kind === 'ai-settings-save');
+      assert.ok(put, 'AI configuration must reach the admin endpoint');
+      assert.equal(put.body.configuration.enabled, true);
+      assert.equal(put.body.reason, 'Synthetic opt in');
+    });
     await scenario('desktop and mobile layout', call => {
       const result = defaultReply(call);
       const name = 'fixture-' + 'a'.repeat(56);
@@ -534,7 +604,7 @@ async function main() {
           `${width}px layout overflows horizontally: ${size.content}px content / ${size.viewport}px viewport`);
       }
     });
-    process.stdout.write(`PASS MCP dashboard: ${passed}/5 scenarios (mocked API; desktop and mobile).\n`);
+    process.stdout.write(`PASS MCP dashboard: ${passed}/8 scenarios (mocked API; desktop and mobile).\n`);
   } catch (error) {
     process.stderr.write(`FAIL MCP dashboard (${active}): ${String(error.message).replace(/\s+/g, ' ')}\n`);
     process.exitCode = 1;
