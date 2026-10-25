@@ -272,8 +272,8 @@ async function showSkillQuality(skill, row, trigger) {
     detail.scrollIntoView({ block: 'start' });
   } catch (error) {
     if (requestId !== qualityRequest || state.token !== token) return;
-    detail.replaceChildren();
     status.textContent = 'Quality report unavailable: ' + error.message;
+    detail.replaceChildren(status);
     detail.scrollIntoView({ block: 'start' });
   }
 }

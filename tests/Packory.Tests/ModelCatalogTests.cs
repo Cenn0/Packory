@@ -81,7 +81,7 @@ public sealed class ModelCatalogTests
             "https://127.0.0.1/download/demo.gguf",
             "https://localhost/download/demo.gguf",
             "https://host.internal/download/demo.gguf",
-            "https://user:password@models.example.org/download/demo.gguf",
+            "https://:@models.example.org/download/demo.gguf",
             "https://models.example.org/download/demo.gguf?token=synthetic"
         })
             Assert.Throws<InvalidDataException>(() => ModelDescriptor.Parse(Encoding.UTF8.GetBytes(

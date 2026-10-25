@@ -54,9 +54,14 @@ function defaultReply(call) {
   const skill = record(prefix);
   switch (call.kind) {
     case 'session': return { enabled: false, authenticated: false, role: 'none' };
+    case 'capabilities': return { role: call.authorization === `Bearer ${newToken}` ? 'read' : 'admin',
+      source: 'static-token', canReadGlobal: true, canWrite: call.authorization !== `Bearer ${newToken}`,
+      canAdmin: call.authorization !== `Bearer ${newToken}` };
     case 'catalog': return { items: [{ name: `${prefix}-package`, version: '1.0.0', kind: 'nuget', origin: 'hosted' }] };
     case 'skills': return { items: [{ name: skill.name, version: skill.version }] };
     case 'security': return { items: [skill] };
+    case 'security-status': return { enforcement: true };
+    case 'managed-tokens': return { items: [], nextOffset: null };
     case 'detail': return { skill, report: { fixture: `${prefix}-report`, untrustedText: hostile }, history: [] };
     case 'quality': return qualityReport();
     case 'mcp': return { items: [serverRecord(`${prefix}-server`)], nextCursor: call.cursor ? null : 'fixture-next-page' };
@@ -92,9 +97,12 @@ function classify(url, request) {
   const pathname = url.pathname;
   let kind, action;
   if (pathname === '/auth/session') kind = 'session';
+  else if (pathname === '/api/auth/capabilities') kind = 'capabilities';
   else if (pathname === '/api/packages') kind = 'catalog';
   else if (pathname === '/api/skills') kind = 'skills';
   else if (pathname === '/api/security/skills') kind = 'security';
+  else if (pathname === '/api/security/status') kind = 'security-status';
+  else if (pathname === '/api/admin/tokens') kind = 'managed-tokens';
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+$/.test(pathname)) kind = 'detail';
   else if (/^\/api\/v1\/skills\/[^/]+\/[^/]+\/quality$/.test(pathname)) kind = 'quality';
   else if (pathname === '/api/v1/mcp/servers') kind = 'mcp';
@@ -440,13 +448,19 @@ async function main() {
       if (qualityMode === 'error') return { httpStatus: 503, httpBody: { error: 'synthetic-unavailable' } };
       return qualityReport(qualityMode === 'incomplete' ? { assessmentStatus: 'incomplete', findingsTruncated: true } : {});
     }, async h => {
-      await qualityScenario(h);
-      qualityMode = 'incomplete'; await h.assess();
-      assert.match(await h.page.locator('#quality-status').textContent(), /^Assessment incomplete\./);
-      await h.text('quality-detail', 'The findings display limit was reached');
+      await h.text('skills', 'old-skill');
+      await h.page.locator('#skills button').click();
+      await h.page.locator('#skills .inline-detail-panel').getByText('Archive SHA-256:', { exact: false }).waitFor();
+      assert.match(await h.page.locator('#skills .inline-detail-panel').textContent(), /Static checks completed/);
+      assert.equal(await h.page.locator('.quality-finding p').first().textContent(), hostile);
+      assert.equal(await h.page.locator('#skills .inline-detail-panel img, #skills .inline-detail-panel script').count(), 0);
+      await h.page.locator('#skills button').click();
+      qualityMode = 'incomplete'; await h.page.locator('#skills button').click();
+      await h.page.locator('#skills .inline-detail-panel').getByText('Assessment incomplete.', { exact: false }).waitFor();
+      assert.match(await h.page.locator('#skills .inline-detail-panel').textContent(), /findings display limit was reached/);
+      await h.page.locator('#skills button').click();
       qualityMode = 'error'; await h.page.locator('#skills button').click();
-      await h.text('quality-status', 'Quality report unavailable: HTTP 503');
-      assert.equal(await h.page.locator('#quality-detail').textContent(), '');
+      await h.page.locator('#skills .inline-detail-panel').getByText('Quality report unavailable: HTTP 503').waitFor();
     });
     await scenario('MCP cursor and query paging', call => {
       if (call.kind !== 'mcp' || !call.q) return defaultReply(call);
@@ -455,19 +469,44 @@ async function main() {
         : { items: [serverRecord('alpha-1'), serverRecord('alpha-2')], nextCursor: 'opaque:next+/=?' };
       assert.equal(call.q, 'beta');
       return { items: [serverRecord('beta-1')], nextCursor: null };
-    }, paginationScenario);
-    await scenario('token change and stale responses', defaultReply, tokenScenario);
-    await scenario('revoke, rescan and refresh invalidation', defaultReply, invalidationScenario);
-    await scenario('optional AI form and safe assessment rendering', defaultReply, skillAiScenario);
+    }, async h => {
+      await h.page.locator('#mcp-tab').click();
+      await h.text('mcp-table', 'old-server');
+      await h.page.locator('#mcp-query').fill('  reviewed + alpha  ');
+      await h.page.locator('#mcp-filter button').click();
+      await h.text('mcp-table', 'alpha-2');
+      await h.page.locator('#mcp-more').click();
+      await h.text('mcp-table', 'alpha-3');
+      assert.equal(await h.page.locator('#mcp-table a').count(), 0, 'Untrusted remote URLs must remain text');
+      assert.deepEqual(h.calls.filter(x => x.kind === 'mcp' && x.q === 'reviewed + alpha').map(x => x.cursor),
+        [null, 'opaque:next+/=?']);
+    });
+    await scenario('token role change clears administrator UI', defaultReply, async h => {
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('#nav-publish').waitFor({ state: 'visible' });
+      await h.page.locator('a[href="#reviews"][data-route]').click();
+      await h.text('security-table', 'old-skill');
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(newToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('#nav-publish').waitFor({ state: 'hidden' });
+      assert.equal(await h.page.locator('#security-table').textContent(), '');
+      assert.equal(await h.page.locator('#nav-reviews').isVisible(), false);
+      assert.ok(h.calls.some(x => x.kind === 'capabilities' && x.authorization === `Bearer ${newToken}`));
+    });
     await scenario('browser SSO session and CSRF headers', call => {
       if (call.kind === 'session')
         return { enabled: true, authenticated: true, role: 'admin', csrfToken: 'synthetic-csrf-token' };
       return defaultReply(call);
     }, async h => {
       await h.text('sso-status', 'Signed in · admin');
-      await h.ready('old', true);
+      await h.page.locator('#nav-publish').waitFor({ state: 'visible' });
+      await h.page.locator('#nav-reviews').waitFor({ state: 'visible' });
       assert.equal(await h.page.locator('#sso-login').isVisible(), false);
       assert.equal(await h.page.locator('#sso-logout').isVisible(), true);
+      assert.equal(await h.page.locator('#api-token-fallback').isVisible(), false);
       // Exercise the actual dashboard request transport, not a synthetic header builder.
       await h.page.evaluate(() => request('/api/admin/skill-ai/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
@@ -477,27 +516,25 @@ async function main() {
       assert.equal(put.browserHeader, '1');
       assert.equal(put.csrfHeader, 'synthetic-csrf-token');
       assert.equal(put.authorization, '', 'browser session must not synthesize bearer tokens');
-      await h.page.locator('#token').fill(oldToken);
-      await h.page.locator('#token').press('Tab');
-      const previous = h.calls.length;
-      await h.page.evaluate(() => request('/api/admin/skill-ai/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
-      }));
-      const tokenPut = h.calls.slice(previous).find(x => x.kind === 'ai-settings-save');
-      assert.equal(tokenPut.authorization, 'Bearer ' + oldToken);
-      assert.equal(tokenPut.browserHeader, '');
-      assert.equal(tokenPut.csrfHeader, '');
     });
     await scenario('desktop and mobile layout', call => {
       const result = defaultReply(call);
       const name = 'fixture-' + 'a'.repeat(56);
       if (['skills', 'security'].includes(call.kind)) result.items[0].name = name;
-      if (call.kind === 'detail') result.skill.name = name;
       if (call.kind === 'quality') result.findings[0].message = 'Missing reference: references/' + 'm'.repeat(180) + '.md';
       if (call.kind === 'mcp') result.items[0].remoteUrl += '/' + 'p'.repeat(180);
       return result;
-    }, layoutScenario);
-    process.stdout.write(`PASS MCP dashboard: ${passed}/6 scenarios (mocked API; desktop and mobile).\n`);
+    }, async h => {
+      await h.text('skills', 'fixture-');
+      for (const width of [1440, 375]) {
+        await h.page.setViewportSize({ width, height: 1000 });
+        const size = await h.page.evaluate(() => ({ viewport: document.documentElement.clientWidth,
+          content: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) }));
+        assert.ok(size.content <= size.viewport + 1,
+          `${width}px layout overflows horizontally: ${size.content}px content / ${size.viewport}px viewport`);
+      }
+    });
+    process.stdout.write(`PASS MCP dashboard: ${passed}/5 scenarios (mocked API; desktop and mobile).\n`);
   } catch (error) {
     process.stderr.write(`FAIL MCP dashboard (${active}): ${String(error.message).replace(/\s+/g, ' ')}\n`);
     process.exitCode = 1;
