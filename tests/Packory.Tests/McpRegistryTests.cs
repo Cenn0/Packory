@@ -268,6 +268,7 @@ public sealed class McpRegistryTests
         using var client = host.CreateClient();
         const string catalog = "/api/v1/mcp/servers";
         const string detail = "/api/v1/mcp/server?name=org.example%2Fsynthetic-server&version=1.2.3";
+        const string adminDetail = "/api/v1/admin/mcp/server?name=org.example%2Fsynthetic-server&version=1.2.3";
         const string stage = "/api/v1/admin/mcp/servers/stage";
         const string decide = "/api/v1/admin/mcp/servers/decide";
 
@@ -289,6 +290,14 @@ public sealed class McpRegistryTests
         Assert.Empty(empty.RootElement.GetProperty("items").EnumerateArray());
         Assert.Equal(HttpStatusCode.NotFound,
             (await client.SendAsync(Bearer(HttpMethod.Get, detail, ReaderToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(Bearer(HttpMethod.Get, adminDetail, ReaderToken))).StatusCode);
+        using (var pending = JsonDocument.Parse(await (await client.SendAsync(Bearer(
+            HttpMethod.Get, adminDetail, AdminToken))).Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("PENDING", pending.RootElement.GetProperty("entry").GetProperty("reviewState").GetString());
+            Assert.Empty(pending.RootElement.GetProperty("history").EnumerateArray());
+        }
         var store = host.Services.GetRequiredService<McpRegistryStore>();
         Assert.Contains("unavailable", JsonSerializer.Serialize(McpRegistryMcpTools.GetMcpServer(
             "org.example/synthetic-server", "1.2.3", store)));
@@ -308,6 +317,9 @@ public sealed class McpRegistryTests
             published.RootElement.GetProperty("server").GetProperty("name").GetString());
         Assert.False(published.RootElement.GetProperty("publisherVerified").GetBoolean());
         Assert.False(published.RootElement.GetProperty("safeToConnect").GetBoolean());
+        using (var adminPublished = JsonDocument.Parse(await (await client.SendAsync(Bearer(
+            HttpMethod.Get, adminDetail, AdminToken))).Content.ReadAsStringAsync()))
+            Assert.Equal("PUBLISHED", adminPublished.RootElement.GetProperty("history")[0].GetProperty("newState").GetString());
         Assert.Contains("synthetic-server",
             JsonSerializer.Serialize(McpRegistryMcpTools.SearchMcpServers("synthetic", store)));
         Assert.Contains("synthetic-server",
@@ -319,6 +331,9 @@ public sealed class McpRegistryTests
             (await client.SendAsync(Bearer(HttpMethod.Post, decide, AdminToken, revoke))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
             (await client.SendAsync(Bearer(HttpMethod.Get, detail, ReaderToken))).StatusCode);
+        using (var adminRevoked = JsonDocument.Parse(await (await client.SendAsync(Bearer(
+            HttpMethod.Get, adminDetail, AdminToken))).Content.ReadAsStringAsync()))
+            Assert.Equal("REVOKED", adminRevoked.RootElement.GetProperty("history")[0].GetProperty("newState").GetString());
         Assert.DoesNotContain("synthetic-server",
             JsonSerializer.Serialize(McpRegistryMcpTools.SearchMcpServers("synthetic", store)));
         Assert.Contains("unavailable", JsonSerializer.Serialize(McpRegistryMcpTools.GetMcpServer(

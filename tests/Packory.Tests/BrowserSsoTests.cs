@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Packory;
 using Xunit;
 
@@ -130,6 +131,16 @@ public sealed class BrowserSsoTests
         noIssuer.OidcAuthority = null;
         noIssuer.OidcAudience = null;
         Assert.Throws<InvalidOperationException>(noIssuer.Validate);
+
+        var wildcardProxy = Enabled();
+        wildcardProxy.TrustedProxyIp = "0.0.0.0";
+        Assert.Throws<InvalidOperationException>(wildcardProxy.Validate);
+        var networkInsteadOfHost = Enabled();
+        networkInsteadOfHost.TrustedProxyIp = "192.0.2.0/24";
+        Assert.Throws<InvalidOperationException>(networkInsteadOfHost.Validate);
+        var exactProxy = Enabled();
+        exactProxy.TrustedProxyIp = "192.0.2.10";
+        exactProxy.Validate();
     }
 
     [Fact]
@@ -144,6 +155,49 @@ public sealed class BrowserSsoTests
         Assert.False(BrowserSso.WantsBrowser(ctx));
         ctx.Request.Path = "/feeds/team-feed/npm/";
         Assert.False(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Method = "POST";
+        ctx.Request.Path = "/api/go/modules";
+        Assert.False(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Path = "/API/go/modules/";
+        Assert.False(BrowserSso.WantsBrowser(ctx));
+        var enabled = Enabled(); enabled.BrowserNativePublishEnabled = true;
+        ctx.RequestServices = new ServiceCollection().AddSingleton(enabled).BuildServiceProvider();
+        ctx.Request.Method = "PUT";
+        ctx.Request.Path = "/feeds/team-feed/npm/@team/pkg";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Path = "/feeds/team-feed/raw/example/1.0.0";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Path = "/v2/feeds/team-feed/charts/blobs/uploads/session";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Method = "POST";
+        ctx.Request.Path = "/api/go/modules";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Path = "/API/go/modules/";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Method = "GET";
+        Assert.False(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Method = "PUT";
+        ctx.Request.Path = "/feeds/team-feed/cargo/index/config.json";
+        Assert.False(BrowserSso.WantsBrowser(ctx));
+        ctx.Request.Path = "/api/v1/models/stage";
+        Assert.True(BrowserSso.WantsBrowser(ctx));
+    }
+
+    [Fact]
+    public void BrowserGlobalDashboardReadDoesNotGrantNativeMcpAccess()
+    {
+        var settings = Enabled();
+        var reader = ApiSession(new Claim("packory_role", "read"));
+        reader.Request.Path = "/api/v1/mcp/servers";
+        Assert.Null(Access.RequireDashboardGlobalRead(reader, settings));
+        Assert.NotNull(Access.RequireGlobalMcp(reader, settings));
+
+        reader.Request.Path = "/api/v1/skills/example/1.0.0/quality";
+        Assert.Null(SkillQualityEndpoints.RequireRead(reader, settings));
+        reader.Request.Path = "/mcp";
+        Assert.NotNull(Access.RequireDashboardGlobalRead(reader, settings));
+        reader.Request.Path = "/v0.1/servers";
+        Assert.NotNull(Access.RequireDashboardGlobalRead(reader, settings));
     }
 
     [Fact]

@@ -213,7 +213,7 @@ public sealed class RawArtifactTests
         Assert.False(raw.GetProperty("proxy").GetBoolean());
         Assert.False(raw.GetProperty("nativePublish").GetBoolean());
         Assert.True(raw.GetProperty("isolatedHostedFeed").GetBoolean());
-        Assert.All(protocols.Where(entry => entry.GetProperty("ecosystem").GetString() != "skill"),
+        Assert.All(protocols.Where(entry => entry.GetProperty("ecosystem").GetString() is not ("skill" or "model")),
             entry => Assert.True(entry.GetProperty("isolatedHostedFeed").GetBoolean()));
         Assert.All(protocols.Where(entry => entry.GetProperty("ecosystem").GetString() != "go"),
             entry => Assert.Equal("experimental", entry.GetProperty("level").GetString()));

@@ -136,5 +136,88 @@ public static class FeedEndpoints
             ctx.Response.Headers.CacheControl = "no-store";
             return feed is null ? Results.NotFound() : Results.Json(feed);
         });
+
+        // Browser-safe private feed discovery. Native /feeds routes continue
+        // to use their existing client authentication and wire contracts.
+        app.MapGet("/api/v1/feeds/{id}/artifacts", (string id, string? afterPath,
+            string? afterName, string? afterVersion, int? limit,
+            Settings cfg, IPackageDatabase db, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "private, no-store";
+            if (Access.RequireFeed(ctx, cfg, id) is { } denied) return denied;
+            var feed = db.Feed(id);
+            if (feed is null) return Results.NotFound();
+            var admin = Access.Actor(ctx) is "admin-token" or "oidc-admin" or "browser-admin";
+            if (!admin && (feed.Mode != "hosted" || feed.Visibility != "private" || !feed.Enabled))
+                return Results.NotFound();
+            if (limit is < 1 or > 100 ||
+                afterPath is { Length: > 1024 } || (afterPath?.Any(char.IsControl) ?? false) ||
+                (afterName is null) != (afterVersion is null) ||
+                (afterName is not null && (!Names.Nuget(afterName) || !Names.Version(afterVersion ?? ""))))
+                return Results.BadRequest();
+            var size = limit ?? 50;
+            var root = cfg.Base + "/feeds/" + id;
+            var readUrl = feed.Mode == "hosted" ? feed.Kind switch
+            {
+                "nuget" => root + "/nuget/v3/index.json",
+                "npm" => root + "/npm/",
+                "cargo" => "sparse+" + root + "/cargo/index/",
+                "pypi" => root + "/pypi/simple/",
+                "oci" => cfg.Base + "/v2/feeds/" + id + "/",
+                "maven" => root + "/maven/",
+                "go" => root + "/go/",
+                "raw" => root + "/raw/",
+                _ => null
+            } : null;
+            var publishUrl = feed.Mode == "hosted" ? feed.Kind switch
+            {
+                "nuget" => root + "/nuget/v3/push",
+                "npm" => root + "/npm/",
+                "cargo" => root + "/cargo/api/v1/crates/new",
+                "pypi" => root + "/pypi/legacy/",
+                "oci" => cfg.Base + "/v2/feeds/" + id + "/",
+                "maven" => root + "/maven/",
+                "go" => root + "/api/go/modules",
+                "raw" => root + "/raw/",
+                _ => null
+            } : null;
+            var rawUsage = feed.Kind == "raw" ? db.RawFeedUsage(id) : null;
+            object? usage = rawUsage is null ? null : new
+            {
+                rawUsage.Artifacts, rawUsage.Bytes,
+                maxBytes = cfg.MaxRawFeedBytes,
+                maxArtifacts = cfg.MaxRawFeedArtifacts
+            };
+            if (feed.Kind == "nuget")
+            {
+                if (afterPath is not null) return Results.BadRequest();
+                var page = db.FeedNugetPage(id, afterName, afterVersion, size + 1);
+                var items = page.Take(size).ToArray();
+                var last = items.LastOrDefault();
+                return Results.Json(new
+                {
+                    feed = new { feed.Id, feed.DisplayName, feed.Kind, feed.Mode, feed.Visibility, feed.Enabled },
+                    readUrl, publishUrl, usage,
+                    items = items.Select(x => new { x.Name, x.Version, x.Description,
+                        digest = "sha512:" + x.Sha512, x.Size, path = (string?)null }).ToArray(),
+                    nextCursor = page.Count > size && last is not null
+                        ? new { afterName = last.Name, afterVersion = last.Version, afterPath = (string?)null }
+                        : null
+                });
+            }
+            if (afterName is not null || afterVersion is not null) return Results.BadRequest();
+            var assets = db.FeedAssetPage(id, feed.Kind, afterPath, size + 1);
+            var visible = assets.Take(size).ToArray();
+            return Results.Json(new
+            {
+                feed = new { feed.Id, feed.DisplayName, feed.Kind, feed.Mode, feed.Visibility, feed.Enabled },
+                readUrl, publishUrl, usage,
+                items = visible.Select(x => new { x.Name, x.Version, x.Path,
+                    x.MediaType, digest = "sha256:" + x.Sha256, x.Size, x.CreatedAt }).ToArray(),
+                nextCursor = assets.Count > size && visible.Length > 0
+                    ? new { afterPath = visible[^1].Path, afterName = (string?)null, afterVersion = (string?)null }
+                    : null
+            });
+        });
     }
 }

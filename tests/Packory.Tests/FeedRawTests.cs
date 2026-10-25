@@ -110,6 +110,35 @@ public sealed class FeedRawTests
             document.RootElement.GetProperty("token").GetString()!);
     }
 
+    [Fact]
+    public async Task BrowserSafeFeedCatalogIsGrantScopedPagedAndAdminCanInspectInactiveBytes()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        await CreateFeed(client, "page-alpha");
+        foreach (var name in new[] { "first", "second" })
+            Assert.Equal(HttpStatusCode.Created, await Status(client, HttpMethod.Put,
+                "/feeds/page-alpha/raw/" + name + "/1.0.0", Admin, Encoding.UTF8.GetBytes(name)));
+        const string catalog = "/api/v1/feeds/page-alpha/artifacts?limit=1";
+        Assert.Equal(HttpStatusCode.Unauthorized, await Status(client, HttpMethod.Get, catalog));
+        Assert.Equal(HttpStatusCode.Forbidden, await Status(client, HttpMethod.Get, catalog, Reader));
+        var scoped = await Scoped(client, "read", "feed:page-alpha:read");
+        using var first = JsonDocument.Parse(await (await client.SendAsync(Req(HttpMethod.Get,
+            catalog, scoped.Token))).Content.ReadAsStringAsync());
+        Assert.Equal("first", first.RootElement.GetProperty("items")[0].GetProperty("name").GetString());
+        Assert.Equal(2, first.RootElement.GetProperty("usage").GetProperty("artifacts").GetInt64());
+        Assert.EndsWith("/feeds/page-alpha/raw/", first.RootElement.GetProperty("readUrl").GetString());
+        var after = first.RootElement.GetProperty("nextCursor").GetProperty("afterPath").GetString()!;
+        using var second = JsonDocument.Parse(await (await client.SendAsync(Req(HttpMethod.Get,
+            catalog + "&afterPath=" + Uri.EscapeDataString(after), scoped.Token))).Content.ReadAsStringAsync());
+        Assert.Equal("second", second.RootElement.GetProperty("items")[0].GetProperty("name").GetString());
+        Assert.Equal(JsonValueKind.Null, second.RootElement.GetProperty("nextCursor").ValueKind);
+        Assert.Equal(HttpStatusCode.OK, await Status(client, HttpMethod.Post,
+            "/api/v1/admin/feeds/page-alpha/deactivate", Admin));
+        Assert.Equal(HttpStatusCode.NotFound, await Status(client, HttpMethod.Get, catalog, scoped.Token));
+        Assert.Equal(HttpStatusCode.OK, await Status(client, HttpMethod.Get, catalog, Admin));
+    }
+
     [Theory]
     [InlineData(10, 0, 3)]
     [InlineData(100, 2, 2)]

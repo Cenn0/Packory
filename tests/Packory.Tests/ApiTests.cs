@@ -25,6 +25,67 @@ public sealed class ApiTests
     private const string ReadToken = "test-reader-token-which-is-at-least-32-characters";
     private const string WriteToken = "test-writer-token-which-is-at-least-32-characters";
 
+    [Fact]
+    public async Task AccessCapabilitiesDistinguishValidatedReadWriteAdminAndInvalidTokens()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string path = "/api/auth/capabilities";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(WithToken(
+            HttpMethod.Get, path, token: "invalid-test-token"))).StatusCode);
+        foreach (var (token, role, write, admin) in new[]
+        {
+            (ReadToken, "read", false, false),
+            (WriteToken, "write", true, false),
+            (AdminToken, "admin", true, true)
+        })
+        {
+            using var response = await client.SendAsync(WithToken(HttpMethod.Get, path, token: token));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(role, body.RootElement.GetProperty("role").GetString());
+            Assert.True(body.RootElement.GetProperty("canReadGlobal").GetBoolean());
+            Assert.Equal(write, body.RootElement.GetProperty("canWrite").GetBoolean());
+            Assert.Equal(admin, body.RootElement.GetProperty("canAdmin").GetBoolean());
+            Assert.DoesNotContain(token, await response.Content.ReadAsStringAsync());
+        }
+    }
+
+    [Fact]
+    public async Task CatalogAndSkillReviewPagesRemainBoundedAndHideUnapprovedSkills()
+    {
+        using var host = new Host(backgroundSkillScanning: false);
+        using var client = host.CreateClient();
+        var db = host.Services.GetRequiredService<IPackageDatabase>();
+        foreach (var name in new[] { "page-one", "page-two", "page-three" })
+            db.UpsertPackage("raw", name, "1.0.0", "Synthetic page fixture", "hosted");
+        db.UpsertPackage("skill", "unapproved-page-skill", "1.0.0", "Unapproved", "hosted");
+        var security = host.Services.GetRequiredService<SkillSecurityStore>();
+        foreach (var name in new[] { "page-skill-one", "page-skill-two", "page-skill-three" })
+            Assert.True(security.TryStage(name, "1.0.0", "Synthetic", new string('a', 64),
+                "skill-staging/" + new string('a', 64) + ".zip"));
+        var visible = new List<string>();
+        foreach (var offset in new[] { 0, 2 })
+        {
+            using var page = JsonDocument.Parse(await (await client.SendAsync(WithToken(HttpMethod.Get,
+                "/api/packages?limit=2&offset=" + offset))).Content.ReadAsStringAsync());
+            visible.AddRange(page.RootElement.GetProperty("items").EnumerateArray()
+                .Select(item => item.GetProperty("name").GetString()!));
+            Assert.Equal(offset == 0 ? JsonValueKind.Number : JsonValueKind.Null,
+                page.RootElement.GetProperty("nextOffset").ValueKind);
+        }
+        Assert.Equal(3, visible.Count);
+        Assert.DoesNotContain("unapproved-page-skill", visible);
+        using var first = JsonDocument.Parse(await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/security/skills?limit=1&offset=0"))).Content.ReadAsStringAsync());
+        using var next = JsonDocument.Parse(await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/security/skills?limit=1&offset=1"))).Content.ReadAsStringAsync());
+        Assert.Equal(1, first.RootElement.GetProperty("nextOffset").GetInt32());
+        Assert.NotEqual(first.RootElement.GetProperty("items")[0].GetProperty("name").GetString(),
+            next.RootElement.GetProperty("items")[0].GetProperty("name").GetString());
+    }
+
     private sealed class FakeUpstream(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
@@ -413,6 +474,18 @@ public sealed class ApiTests
 
         var database = host.Services.GetRequiredService<IPackageDatabase>();
         Assert.Equal(2, database.FeedNugetRevisions().Count);
+        const string alphaArtifacts = "/api/v1/feeds/alpha-feed/artifacts?limit=1";
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(WithToken(HttpMethod.Get, alphaArtifacts,
+                token: betaReader.Secret))).StatusCode);
+        using (var visible = JsonDocument.Parse(await (await client.SendAsync(WithToken(
+            HttpMethod.Get, alphaArtifacts, token: alphaReader.Secret))).Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("private.package", visible.RootElement.GetProperty("items")[0].GetProperty("name").GetString());
+            Assert.StartsWith("sha512:", visible.RootElement.GetProperty("items")[0].GetProperty("digest").GetString());
+            Assert.EndsWith("/feeds/alpha-feed/nuget/v3/index.json",
+                visible.RootElement.GetProperty("readUrl").GetString());
+        }
         Assert.Empty(database.PendingPublications());
         Assert.NotEqual(FeedNugetEndpoints.BlobKey("alpha-feed", "private.package", "1.0.0"),
             FeedNugetEndpoints.BlobKey("beta-feed", "private.package", "1.0.0"));
@@ -489,7 +562,7 @@ public sealed class ApiTests
         var home = await client.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, home.StatusCode);
         Assert.Contains("frame-ancestors 'none'", home.Headers.GetValues("Content-Security-Policy").Single());
-        Assert.Contains("Your packages.", await home.Content.ReadAsStringAsync());
+        Assert.Contains("Find an artifact, choose its version and check the source.", await home.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -707,6 +780,24 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Accepted, upload.StatusCode);
         using var metadata = JsonDocument.Parse(await upload.Content.ReadAsStringAsync());
         var digest = metadata.RootElement.GetProperty("sha256").GetString()!;
+        var receipt = metadata.RootElement.GetProperty("reviewReceipt").GetString()!;
+        Assert.Equal(64, receipt.Length);
+        async Task<JsonElement> OwnReviewStatus()
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/skills/review-status");
+            request.Headers.Add("X-Packory-Review-Receipt", receipt);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.Clone();
+        }
+        Assert.Equal("QUEUED", (await OwnReviewStatus()).GetProperty("state").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/skills/review-status")).StatusCode);
+        using (var wrong = new HttpRequestMessage(HttpMethod.Get, "/api/skills/review-status"))
+        {
+            wrong.Headers.Add("X-Packory-Review-Receipt", new string('a', 64));
+            Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(wrong)).StatusCode);
+        }
         Assert.Equal("QUEUED", metadata.RootElement.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
             "/api/skills/scan-me/1.0.0/download"))).StatusCode);
@@ -726,6 +817,35 @@ public sealed class ApiTests
             HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/approve", body))).StatusCode);
         var store = host.Services.GetRequiredService<SkillSecurityStore>();
         Assert.True(store.SaveResult("scan-me", "1.0.0", digest, "NEEDS_REVIEW", 0, "SAFE", "{}"));
+        Assert.Equal("NEEDS_REVIEW", (await OwnReviewStatus()).GetProperty("state").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/decline",
+            JsonContent.Create(new { sha256 = digest, reason = "Decline from writer" }), WriteToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/decline",
+            JsonContent.Create(new { sha256 = digest, reason = "no" })))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/decline",
+            JsonContent.Create(new { sha256 = digest, reason = "Declined after synthetic review" })))).StatusCode);
+        var ownDeclined = await OwnReviewStatus();
+        Assert.Equal("DECLINED", ownDeclined.GetProperty("state").GetString());
+        Assert.Equal("Declined after synthetic review", ownDeclined.GetProperty("history")[0].GetProperty("reason").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+        using (var declined = JsonDocument.Parse(await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/security/skills/scan-me/1.0.0"))).Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("DECLINED", declined.RootElement.GetProperty("skill").GetProperty("state").GetString());
+            Assert.Equal("DECLINED", declined.RootElement.GetProperty("history")[0].GetProperty("to").GetString());
+            Assert.Equal("Declined after synthetic review", declined.RootElement.GetProperty("history")[0].GetProperty("reason").GetString());
+        }
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/approve",
+            JsonContent.Create(new { sha256 = digest, reason = "Declined revisions cannot be approved" })))).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await client.SendAsync(WithToken(
+            HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/rescan",
+            JsonContent.Create(new { sha256 = digest, reason = "Reopen the declined review" })))).StatusCode);
+        Assert.True(store.SaveResult("scan-me", "1.0.0", digest, "NEEDS_REVIEW", 0, "SAFE", "{}"));
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(WithToken(
             HttpMethod.Post, "/api/security/skills/scan-me/1.0.0/approve",
             JsonContent.Create(new { sha256 = digest, reason = "Reviewed synthetic harmless example" })))).StatusCode);
@@ -736,6 +856,62 @@ public sealed class ApiTests
             JsonContent.Create(new { sha256 = digest, reason = "Test the revocation gate" })))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(WithToken(
             HttpMethod.Get, "/api/skills/scan-me/1.0.0/download"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Skills_StagedSourcePreviewIsAdminOnlyTextOnlyAndDigestBound()
+    {
+        using var host = new Host(backgroundSkillScanning: false);
+        using var client = host.CreateClient();
+        using var buffer = new MemoryStream();
+        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var writer = new StreamWriter(zip.CreateEntry("SKILL.md").Open()))
+                writer.Write("---\nname: review-preview\ndescription: Inert preview fixture\n---\n# Review me\n");
+            using (var writer = new StreamWriter(zip.CreateEntry("scripts/check.py").Open()))
+                writer.Write("print('inert source text')\n");
+            using var binary = zip.CreateEntry("assets/icon.bin").Open();
+            binary.Write([0, 1, 2]);
+        }
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent("1.0.0"), "version");
+        form.Add(new ByteArrayContent(buffer.ToArray()), "file", "review.zip");
+        var uploaded = await client.SendAsync(WithToken(HttpMethod.Post, "/api/skills", form));
+        Assert.Equal(HttpStatusCode.Accepted, uploaded.StatusCode);
+        using var uploadBody = JsonDocument.Parse(await uploaded.Content.ReadAsStringAsync());
+        var digest = uploadBody.RootElement.GetProperty("sha256").GetString()!;
+        const string source = "/api/security/skills/review-preview/1.0.0/source";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(source)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Get, source, token: ReadToken))).StatusCode);
+        var listed = await client.SendAsync(WithToken(HttpMethod.Get, source));
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        Assert.Contains("no-store", listed.Headers.CacheControl?.ToString());
+        using (var body = JsonDocument.Parse(await listed.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(digest, body.RootElement.GetProperty("sha256").GetString());
+            var files = body.RootElement.GetProperty("files");
+            Assert.Equal(3, files.GetArrayLength());
+            Assert.Equal("SKILL.md", files[0].GetProperty("path").GetString());
+            Assert.True(files[0].GetProperty("previewable").GetBoolean());
+            Assert.False(files[2].GetProperty("previewable").GetBoolean());
+        }
+        var preview = await client.SendAsync(WithToken(HttpMethod.Get, source + "/file?path=SKILL.md"));
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        using (var body = JsonDocument.Parse(await preview.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(digest, body.RootElement.GetProperty("sha256").GetString());
+            Assert.Contains("# Review me", body.RootElement.GetProperty("content").GetString());
+        }
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await client.SendAsync(WithToken(
+            HttpMethod.Get, source + "/file?path=assets%2Ficon.bin"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(WithToken(
+            HttpMethod.Get, source + "/file?path=..%2Fsecret"))).StatusCode);
+        var staged = host.Services.GetRequiredService<BlobStore>().Existing($"skill-staging/{digest}.zip");
+        Assert.NotNull(staged);
+        File.WriteAllText(staged, "tampered archive bytes");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.SendAsync(WithToken(
+            HttpMethod.Get, source))).StatusCode);
     }
 
     [Fact]
@@ -1127,7 +1303,21 @@ public sealed class ApiTests
             JsonSerializer.Serialize(complete), new string('b', 64)));
         var incomplete = JsonSerializer.Serialize(complete).Replace(
             "\"is_complete\":true", "\"is_complete\":false", StringComparison.Ordinal);
-        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(incomplete, digest).State);
+        Assert.Equal("SCAN_INCOMPLETE", SkillScanResult.Parse(incomplete, digest).State);
+        var partialReport = JsonNode.Parse(incomplete)!;
+        partialReport["report"]!["analysis_completeness"]!["status"] = "partial";
+        partialReport["report"]!["analysis_completeness"]!["coverage_percent"] = 100;
+        partialReport["report"]!["analysis_completeness"]!["partially_inspected_files"] = 0;
+        partialReport["report"]!["analysis_completeness"]!["entirely_uninspected_files"] = 0;
+        partialReport["report"]!["analysis_completeness"]!["ledger_exceptions"] = new JsonArray(
+            new JsonObject { ["reason_code"] = "reference_missing" });
+        Assert.Equal("NEEDS_REVIEW", SkillScanResult.Parse(partialReport.ToJsonString(), digest).State);
+        partialReport["report"]!["analysis_completeness"]!["status"] = "unknown";
+        Assert.Equal("SCAN_INCOMPLETE", SkillScanResult.Parse(partialReport.ToJsonString(), digest).State);
+        partialReport["report"]!["analysis_completeness"]!["status"] = "partial";
+        partialReport["report"]!["risk_assessment"]!["severity"] = "CRITICAL";
+        partialReport["report"]!["risk_assessment"]!["recommendation"] = "DO_NOT_INSTALL";
+        Assert.Equal("QUARANTINED", SkillScanResult.Parse(partialReport.ToJsonString(), digest).State);
         var suspicious = JsonSerializer.Serialize(complete).Replace(
             "\"severity\":\"LOW\"", "\"severity\":\"CRITICAL\"", StringComparison.Ordinal);
         Assert.Equal("QUARANTINED", SkillScanResult.Parse(suspicious, digest).State);
@@ -1733,6 +1923,22 @@ public sealed class ApiTests
         var token = doc.RootElement.GetProperty("token").GetString()!;
         Assert.Equal(64, token.Length);
         Assert.True(create.Headers.CacheControl?.NoStore);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(WithToken(
+            HttpMethod.Get, "/api/admin/tokens", token: ReadToken))).StatusCode);
+        using (var list = await client.SendAsync(WithToken(HttpMethod.Get, "/api/admin/tokens?limit=1")))
+        {
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            Assert.True(list.Headers.CacheControl?.NoStore);
+            var text = await list.Content.ReadAsStringAsync();
+            Assert.DoesNotContain(token, text);
+            Assert.DoesNotContain("hash", text, StringComparison.OrdinalIgnoreCase);
+            using var result = JsonDocument.Parse(text);
+            var summary = result.RootElement.GetProperty("items")[0];
+            Assert.Equal(id, summary.GetProperty("id").GetString());
+            Assert.Equal("write", summary.GetProperty("role").GetString());
+            Assert.Equal("nuget:approved.*", summary.GetProperty("namespace").GetString());
+            Assert.False(summary.GetProperty("revoked").GetBoolean());
+        }
 
         static MultipartFormDataContent Package(string name)
         {
@@ -1748,6 +1954,9 @@ public sealed class ApiTests
         Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
         using var revoke = await client.SendAsync(WithToken(HttpMethod.Delete, "/api/admin/tokens/" + id));
         Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
+        using (var list = JsonDocument.Parse(await (await client.SendAsync(WithToken(HttpMethod.Get,
+            "/api/admin/tokens"))).Content.ReadAsStringAsync()))
+            Assert.True(list.RootElement.GetProperty("items")[0].GetProperty("revoked").GetBoolean());
         using var expired = await client.SendAsync(WithToken(HttpMethod.Put, "/nuget/v3/push",
             Package("approved.next"), token));
         Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);

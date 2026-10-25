@@ -22,9 +22,11 @@ Three optional environment variables define independent static permissions:
 | `PACKORY_WRITE_TOKEN` | Global read and publish, subject to configured namespace policy |
 | `PACKORY_READ_TOKEN` | Global read |
 
-Token values must be **at least 32 characters**, distinct, and delivered via `Authorization: Bearer <token>` or (for NuGet publish) `X-NuGet-ApiKey: <token>`. NuGet native restore can also authenticate using HTTP Basic where the password is the token. Tokens are compared in constant time after SHA-256 hashing in memory. No built-in login or browser session is implemented.
+Token values must be **at least 32 characters**, distinct, and delivered via `Authorization: Bearer <token>` or (for NuGet publish) `X-NuGet-ApiKey: <token>`. NuGet native restore can also authenticate using HTTP Basic where the password is the token. Tokens are compared in constant time after SHA-256 hashing in memory.
 
-`PACKORY_ANONYMOUS_READ=true` by default. Setting it to `false` blocks anonymous registry and catalog requests. Health endpoints and the dashboard HTML remain public. Browser clients must supply a Bearer token; some native clients need additional configuration. Authentication must be protected with HTTPS except for loopback testing.
+When confidential OIDC browser SSO is configured, `GET /auth/login` starts code + PKCE sign-in. `GET /auth/session` reports the validated browser role. The dashboard sends its server-managed cookie with `X-Packory-Browser: 1`; unsafe `/api/*` requests also carry the session CSRF token. An `admin` browser role can use administrator APIs without entering a static API token. The dashboard hides its token fallback while signed in. Native registry reads and MCP requests remain bearer-only. Native registry writes accept the browser session only after the operator enables `PACKORY_BROWSER_NATIVE_PUBLISH_ENABLED`; they still require the browser opt-in header, CSRF token and the usual namespace or exact feed grant. The global Go upload under `/api/go/modules` is subject to the same opt-in. A logged-in identity without an explicit Packory role gains no administrator access. See [OIDC browser SSO](oidc-keycloak.md#interactive-dashboard-sso-opt-in).
+
+`PACKORY_ANONYMOUS_READ=true` by default. Setting it to `false` blocks anonymous registry and catalog requests. Health endpoints and the dashboard HTML remain public. Browsers can use an enabled SSO session or a page-memory Bearer token fallback; native clients need their own supported credentials. Authentication must be protected with HTTPS except for loopback testing.
 
 Private hosted routes always authenticate, regardless of anonymous global read configuration. They require an exact managed `feed:{id}:read`/`feed:{id}:publish` grant or a corresponding validated OIDC feed claim; generic static read/write tokens do not grant access. Publish permits same-feed read. When anonymous global reads are disabled, scoped managed credentials cannot read global registries or catalog data. The authenticated OCI `/v2/` handshake does not confer repository permission. See [feed authorization](feeds.md#exact-feed-authorization).
 
@@ -109,6 +111,10 @@ Run `dotnet restore --configfile NuGet.Config` after adding a dependency. Networ
 
 Skill imports validate required `name`/`description` metadata and bounded ZIP contents. MCP returns JSON-compatible YAML frontmatter and exact-byte resources. These implemented checks do not establish complete [Agent Skills specification](https://agentskills.io/specification) conformance or runtime correctness; the [static quality profile](skill-quality.md) describes the additional documentation checks.
 
+When skill security enforcement is enabled, administrator endpoints under `/api/security/skills` expose scan state and the exact revision report. A valid but partially inspected report is `SCAN_INCOMPLETE`; its risk score, recommendation and findings remain available to administrators, while the revision stays unavailable for distribution. A report whose only coverage caveat is a missing external reference can enter `NEEDS_REVIEW` when every bundled file was inspected. Severe findings become `QUARANTINED` even in a partial report. `SCAN_FAILED` means no usable scanner report was accepted. Only `NEEDS_REVIEW` can be approved, and approval always requires an explicit administrator decision and matching archive digest. `SCAN_INCOMPLETE` can be declined or explicitly rescanned.
+
+`GET /api/security/skills/{name}/{version}/source` lists files in the exact SHA-256-verified staged ZIP for an administrator. `GET /api/security/skills/{name}/{version}/source/file?path=<archive-path>` returns one UTF-8 text file (up to 256 KiB) as JSON for inert, line-numbered browser review. Other users cannot use these endpoints; unapproved Skills remain absent from public download and MCP routes. Binary files are listed but not previewed. A missing, corrupt or changed staged ZIP yields 503, and the dashboard withholds its Approve control if `SKILL.md` cannot be inspected.
+
 ## HTTP error codes
 
 Common codes: `400` malformed names or uploads, `401` no/invalid token, `403` insufficient permission, `404` absent package/skill or authorized inactive feed, `409` immutable revision conflict, `413` artifact too large, `502` upstream/error data, `503` unavailable committed content, and `504` upstream timeout. For private routes, authorization precedes feed/package existence checks: a foreign-feed credential receives 403 rather than learning whether the target exists. Corrupted/missing committed private bundles fail closed with 503; they are never replaced from another origin. Existing global adapters retain their documented error profiles. Readiness is 503 if a hosted blob is missing at startup. npm proxy tarballs require upstream SHA-512 integrity or SHA-1 shasum claims that match the bytes.
@@ -176,6 +182,13 @@ Use revocable tokens via `POST /api/admin/tokens` with
 or `role: "write"` and `namespace: "feed:alpha-feed:publish"`.
 Every route below enforces exact feed permission, active kind and hosted mode.
 There is no anonymous, cross-feed, global or upstream fallback.
+
+The administrator dashboard can create these feed-scoped tokens for an active
+private hosted feed. The returned secret is shown once; record it in the
+consumer's secret store because Packory does not return it again. Tokens may be
+revoked immediately with `DELETE /api/admin/tokens/{id}`. The dashboard does not
+list existing managed tokens, so retain the token ID if later revocation is
+needed. Draft and inactive feeds cannot receive grants.
 
 | Adapter | Native private operations | Bounded profile |
 | --- | --- | --- |
@@ -277,6 +290,48 @@ full packument includes `_rev`; a metadata-only PUT must echo it and preserve
 every field except per-version `deprecated`. One atomic transaction applies
 all changed versions and their audit events; stale updates return 409. Missing
 attachments never authorize a new version or arbitrary manifest/tag changes.
+
+### Browser dashboard administration and model metadata
+
+`GET /api/auth/capabilities` reports the verified credential's role, source
+and global-read/write/admin booleans without returning token material. An
+invalid submitted token is 401 even when anonymous reads are enabled.
+`GET /api/admin/tokens?limit&offset` returns bounded metadata and expiry for
+issued managed tokens, never their secret or hash. Administrators may revoke
+an ID with `DELETE /api/admin/tokens/{id}`.
+
+`GET /api/v1/feeds/{id}/artifacts` requires the exact feed read/publish grant
+or administrator role. It returns a bounded artifact page, client read and
+publish endpoints, and logical usage for Raw. Disabled feeds are visible only
+to administrators. A normal feed reader cannot gain access to another feed.
+`GET /api/packages?limit&offset` and
+`GET /api/security/skills?limit&offset` expose `nextOffset` when a further
+page exists; staged or unapproved Skills remain outside the public catalog.
+
+`GET /api/skills/review-status` requires the 64-character
+`X-Packory-Review-Receipt` issued once by `POST /api/skills`. The receipt is
+stored only as a hash, expires after 90 days, and grants access only to that
+exact staged revision's status, report and history. A missing or invalid
+receipt returns 404. Treat the receipt as a private bearer capability.
+
+`GET /api/v1/models` and `GET /api/v1/model?name&version` expose only
+published model descriptors. A writer with a matching `model:{name}`
+namespace grant can stage one bounded descriptor with
+`POST /api/v1/models/stage`. Administrators inspect staged and historical
+records through `GET /api/v1/admin/models` and
+`GET /api/v1/admin/model?name&version`, then publish or revoke the exact
+descriptor digest using `POST /api/v1/admin/models/decide` with a reason.
+Packory validates descriptor shape and HTTPS reference syntax; it neither
+fetches nor verifies external model bytes or publisher claims. See
+[ADR 0003](adr/0003-model-metadata-catalog.md).
+
+The web Publish page prepares native NuGet, npm, Cargo, PyPI, OCI, Maven, Go
+and Raw requests. It does not bypass any native archive, digest, feed or
+namespace validation. The SSO cookie is accepted on those write paths only
+when the default-off operator setting is enabled and the request supplies
+`X-Packory-Browser: 1` plus a valid CSRF header. Browser upload selection is
+limited to 64 MiB per file; server limits can be lower. Native client reads
+and MCP calls never gain cookie authorization from that setting.
 
 ### Private Raw usage and quotas
 

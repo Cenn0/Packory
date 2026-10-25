@@ -161,6 +161,9 @@ public sealed record McpRegistryEntry(
     }
 }
 
+public sealed record McpRegistryDecision(string Sha256, string OldState,
+    string NewState, string Actor, string Reason, string At);
+
 /// <summary>
 /// Persistent immutable, versioned metadata for approved discovery.
 /// A pending or revoked entry never appears in MCP/REST public searches.
@@ -320,6 +323,24 @@ public sealed class McpRegistryStore(Settings settings)
             ("name", name), ("version", version), ("admin", admin ? 1 : 0));
         using var reader = cmd.ExecuteReader();
         return reader.Read() ? Read(reader) : null;
+    }
+
+    public IReadOnlyList<McpRegistryDecision> History(string name, string version)
+    {
+        if (!McpRegistryManifest.ValidName(name) || !McpRegistryManifest.ValidVersion(version)) return [];
+        using var db = Open();
+        using var cmd = Sql(db, """
+            SELECT sha256,old_state,new_state,actor,reason,at
+            FROM mcp_registry_review_audit
+            WHERE name=@name AND version=@version
+            ORDER BY at DESC LIMIT 100
+            """, ("name", name), ("version", version));
+        using var reader = cmd.ExecuteReader();
+        var history = new List<McpRegistryDecision>();
+        while (reader.Read())
+            history.Add(new McpRegistryDecision(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5)));
+        return history;
     }
 
     public IReadOnlyList<McpRegistryEntry> List(string? query, int limit = 25, int skip = 0,

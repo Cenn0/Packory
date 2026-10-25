@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Packory;
 
@@ -9,6 +10,23 @@ public static class SkillEndpoints
     public const long MaxUncompressedBytes = 20L * 1024 * 1024;
     public static void Map(WebApplication app)
     {
+        app.MapGet("/api/skills/review-status", (SkillSecurityStore security, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "private, no-store";
+            var presented = ctx.Request.Headers["X-Packory-Review-Receipt"].ToString();
+            if (presented.Length != 64 || presented.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+                return Results.NotFound();
+            var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(presented)));
+            var revision = security.FindByReceiptHash(hash);
+            return revision is null ? Results.NotFound() : Results.Ok(new
+            {
+                revision.Name, revision.Version, revision.Sha256, revision.State,
+                revision.RiskScore, revision.Recommendation,
+                report = revision.ReportJson is null ? (JsonElement?)null
+                    : JsonSerializer.Deserialize<JsonElement>(revision.ReportJson),
+                history = security.History(revision.Name, revision.Version)
+            });
+        }).RequireRateLimiting("publish");
         app.MapGet("/api/skills", (IPackageDatabase db, SkillSecurityStore security, Settings settings, HttpContext ctx) =>
             Access.Require(ctx, settings) is { } denied ? denied :
             Results.Json(new { items = db.Skills().Where(x => !settings.SkillSecurityEnforced ||
@@ -98,11 +116,16 @@ public static class SkillEndpoints
                 if (staged is null && !await blobs.PutAsync(stagingKey, new MemoryStream(bytes, false),
                     settings.MaxArtifactBytes, ctx.RequestAborted))
                     return Results.Conflict();
-                if (!security.TryStage(manifest.Name, version, manifest.Description, digest, stagingKey))
+                var receipt = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+                var receiptHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(receipt)));
+                var receiptExpiresAt = DateTimeOffset.UtcNow.AddDays(90).ToString("O");
+                if (!security.TryStage(manifest.Name, version, manifest.Description, digest, stagingKey,
+                    receiptHash, receiptExpiresAt))
                     return Results.Conflict();
                 ctx.Response.Headers.CacheControl = "no-store";
                 return Results.Json(new { name = manifest.Name, version,
-                    sha256 = digest, status = "QUEUED", approvalRequired = true },
+                    sha256 = digest, status = "QUEUED", approvalRequired = true,
+                    reviewReceipt = receipt, reviewReceiptExpiresAt = receiptExpiresAt },
                     statusCode: StatusCodes.Status202Accepted);
             }
             db.BeginPublication(key, "skill", manifest.Name, version);

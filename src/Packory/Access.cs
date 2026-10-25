@@ -165,6 +165,15 @@ public static class Access
         return null;
     }
 
+    // Dashboard REST reads may use an explicitly opted-in, CSRF-isolated
+    // browser session. Native MCP and registry routes continue to require
+    // Bearer/static credentials; a cookie alone never authorizes them.
+    public static IResult? RequireDashboardGlobalRead(HttpContext context, Settings settings) =>
+        settings.AnonymousRead ? null :
+        BrowserSso.WantsBrowser(context)
+            ? RequireGlobalRaw(context, settings)
+            : RequireGlobalMcp(context, settings);
+
     // Validation is never authorized by static catalog credentials or general packory.read.
     // The authenticated OIDC token must carry both the ordinary MCP entry scope
     // and the additional, dedicated validation scope.
@@ -327,7 +336,7 @@ public static class Access
         var sep = grant.IndexOf(':');
         if (sep <= 0 || sep == grant.Length - 1) return false;
         var kind = grant[..sep];
-        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw" or "maven" or "go")) return false;
+        if (kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw" or "maven" or "go" or "model")) return false;
         var value = grant[(sep + 1)..];
         var wildcard = value.EndsWith('*');
         if (wildcard) value = value[..^1];

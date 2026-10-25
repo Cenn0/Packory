@@ -18,10 +18,40 @@ public static class BrowserSso
     public const string BrowserPrincipalKey = "packory.browser-validated-principal";
 
     public static bool WantsBrowser(HttpContext ctx) =>
-        ctx.Request.Path.StartsWithSegments("/api") &&
+        ((ctx.Request.Path.StartsWithSegments("/api") &&
+          !string.Equals(ctx.Request.Path.Value?.TrimEnd('/'), "/api/go/modules",
+              StringComparison.OrdinalIgnoreCase)) ||
+         (ctx.RequestServices?.GetService<Settings>()?.BrowserNativePublishEnabled == true &&
+          NativePublishPath(ctx.Request))) &&
         ctx.Request.Headers["X-Packory-Browser"].ToString() == "1" &&
         string.IsNullOrEmpty(ctx.Request.Headers.Authorization.ToString()) &&
         string.IsNullOrEmpty(ctx.Request.Headers["X-NuGet-ApiKey"].ToString());
+
+    private static bool NativePublishPath(HttpRequest request)
+    {
+        var path = request.Path.Value ?? "";
+        var put = HttpMethods.IsPut(request.Method);
+        var post = HttpMethods.IsPost(request.Method);
+        var patch = HttpMethods.IsPatch(request.Method);
+        if ((put || post || patch) && path.StartsWith("/v2/", StringComparison.Ordinal)) return true;
+        if (put && (path.StartsWith("/raw/", StringComparison.Ordinal) ||
+                    path.StartsWith("/npm/", StringComparison.Ordinal) ||
+                    path.StartsWith("/maven/", StringComparison.Ordinal) ||
+                    path == "/cargo/api/v1/crates/new")) return true;
+        if ((put || post) && path == "/nuget/v3/push") return true;
+        if (post && path == "/pypi/legacy/") return true;
+        if (post && string.Equals(path.TrimEnd('/'), "/api/go/modules", StringComparison.OrdinalIgnoreCase)) return true;
+        var parts = path.Split('/');
+        if (parts.Length < 5 || parts[1] != "feeds" || !FeedDefinition.ValidId(parts[2])) return false;
+        var root = "/feeds/" + parts[2];
+        if (put && (path.StartsWith(root + "/raw/", StringComparison.Ordinal) ||
+                    path.StartsWith(root + "/npm/", StringComparison.Ordinal) ||
+                    path.StartsWith(root + "/maven/", StringComparison.Ordinal) ||
+                    path == root + "/cargo/api/v1/crates/new")) return true;
+        if ((put || post) && path == root + "/nuget/v3/push") return true;
+        if (post && (path == root + "/pypi/legacy/" || path == root + "/api/go/modules")) return true;
+        return false;
+    }
 
     public static string Role(ClaimsPrincipal? principal)
     {

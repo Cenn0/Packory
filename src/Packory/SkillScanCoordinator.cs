@@ -213,7 +213,7 @@ public static class SkillScanResult
         return true;
     }
 
-    private static bool CompleteCoverage(JsonElement coverage)
+    private static bool CompleteCoverage(JsonElement coverage, bool allowReferenceMissingOnly = false)
     {
         // In some scanner versions the aggregate is_complete flag can coexist
         // with per-file failures or scope exclusions. Trust the entire record,
@@ -232,6 +232,10 @@ public static class SkillScanResult
         foreach (var field in new[] { "ledger_exceptions", "scope_exclusions", "limitations" })
         {
             if (!coverage.TryGetProperty(field, out var record)) continue;
+            if (field == "ledger_exceptions" && allowReferenceMissingOnly &&
+                record.ValueKind == JsonValueKind.Array && record.GetArrayLength() > 0 &&
+                record.EnumerateArray().All(IsMissingReferenceException))
+                continue;
             if (record.ValueKind != JsonValueKind.Array || record.GetArrayLength() != 0)
                 return false;
         }
@@ -242,6 +246,41 @@ public static class SkillScanResult
             return false;
         return true;
     }
+
+    private static bool WellFormedCoverage(JsonElement coverage)
+    {
+        foreach (var field in new[] { "fully_inspected_files", "partially_inspected_files",
+            "entirely_uninspected_files", "failed_files", "skipped_files" })
+            if (coverage.TryGetProperty(field, out var count) &&
+                (count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out var countValue) || countValue < 0))
+                return false;
+        foreach (var field in new[] { "ledger_exceptions", "scope_exclusions", "limitations" })
+            if (coverage.TryGetProperty(field, out var arrayValue) && arrayValue.ValueKind != JsonValueKind.Array)
+                return false;
+        if (coverage.TryGetProperty("coverage_percent", out var percent) &&
+            (percent.ValueKind != JsonValueKind.Number || !percent.TryGetDouble(out var percentValue) ||
+             !double.IsFinite(percentValue) || percentValue is < 0 or > 100)) return false;
+        return true;
+    }
+
+    private static bool IsMissingReferenceException(JsonElement exception) =>
+        exception.ValueKind == JsonValueKind.Object &&
+        exception.TryGetProperty("reason_code", out var reason) &&
+        reason.ValueKind == JsonValueKind.String &&
+        reason.GetString() == "reference_missing";
+
+    private static bool ReferenceCaveatOnly(JsonElement coverage) =>
+        coverage.TryGetProperty("ledger_exceptions", out var exceptions) &&
+        exceptions.ValueKind == JsonValueKind.Array && exceptions.GetArrayLength() > 0 &&
+        exceptions.EnumerateArray().All(IsMissingReferenceException) &&
+        coverage.TryGetProperty("coverage_percent", out var percent) &&
+        percent.ValueKind == JsonValueKind.Number && percent.TryGetDouble(out var value) &&
+        value == 100.0 &&
+        coverage.TryGetProperty("partially_inspected_files", out var partial) &&
+        partial.ValueKind == JsonValueKind.Number && partial.TryGetInt32(out var partialCount) && partialCount == 0 &&
+        coverage.TryGetProperty("entirely_uninspected_files", out var uninspected) &&
+        uninspected.ValueKind == JsonValueKind.Number && uninspected.TryGetInt32(out var uninspectedCount) && uninspectedCount == 0 &&
+        CompleteCoverage(coverage, allowReferenceMissingOnly: true);
 
     /// <summary>
     /// The scanner's aggregate risk may be lower than an individual HIGH/CRITICAL
@@ -276,13 +315,21 @@ public static class SkillScanResult
             if (!report.TryGetProperty("analysis_completeness", out var completeness) ||
                 completeness.ValueKind != JsonValueKind.Object ||
                 !completeness.TryGetProperty("is_complete", out var complete) ||
-                complete.ValueKind != JsonValueKind.True ||
-                !CompleteCoverage(completeness))
+                complete.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                !WellFormedCoverage(completeness))
                 return Failed;
-            if (completeness.TryGetProperty("status", out var completionStatus) &&
-                (completionStatus.ValueKind != JsonValueKind.String ||
-                 completionStatus.GetString() != "complete"))
-                return Failed;
+            var statusComplete = true;
+            var statusPartial = false;
+            if (completeness.TryGetProperty("status", out var completionStatus))
+            {
+                if (completionStatus.ValueKind != JsonValueKind.String) return Failed;
+                statusComplete = completionStatus.GetString() == "complete";
+                statusPartial = completionStatus.GetString() == "partial";
+            }
+            var referenceCaveatOnly = complete.ValueKind == JsonValueKind.False &&
+                statusPartial && ReferenceCaveatOnly(completeness);
+            var coverageComplete = complete.ValueKind == JsonValueKind.True &&
+                CompleteCoverage(completeness) && statusComplete;
             if (!report.TryGetProperty("metadata", out var metadata) ||
                 metadata.ValueKind != JsonValueKind.Object ||
                 !metadata.TryGetProperty("llm_requested", out var llm) ||
@@ -342,12 +389,16 @@ public static class SkillScanResult
                 if (count != 0) dangerousFinding = true;
             }
 
+            var reportJson = report.GetRawText();
+            if (!coverageComplete && !referenceCaveatOnly && !dangerousFinding && severity is not ("HIGH" or "CRITICAL") &&
+                recommendation != "DO_NOT_INSTALL")
+                return ("SCAN_INCOMPLETE", score, recommendation, reportJson);
             var state = dangerousFinding || severity is "HIGH" or "CRITICAL" ||
                         recommendation == "DO_NOT_INSTALL"
                 ? "QUARANTINED" : "NEEDS_REVIEW";
             // Retain findings for admin review only. The original report must
             // never appear in anonymous REST endpoints or MCP tools.
-            return (state, score, recommendation, report.GetRawText());
+            return (state, score, recommendation, reportJson);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException
                                    or KeyNotFoundException or OverflowException)

@@ -1,105 +1,187 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0e1729">
-  <meta name="description" content="Packory - One home for packages and agent skills">
-  <title>Packory · Package & Skill Hub</title>
+  <meta name="theme-color" content="#f5f7fa">
+  <meta name="description" content="Packory package registry and skill review workspace">
+  <title>Packory · Registry hub</title>
   <link rel="icon" type="image/svg+xml" href="/brand/packory.svg">
+  <link rel="stylesheet" href="/design-tokens.css">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/reviews.css">
   <script defer src="/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="brand"><img class="logo" src="/brand/packory.svg" width="40" height="40" alt="" aria-hidden="true"><span class="brand-lockup"><strong>Packory</strong><small>One hub. Endless possibilities.</small></span></div><span class="tag">Experimental · Single-writer reference</span></header>
-  <main>
-    <section class="hero"><p class="eyebrow">ONE PLACE FOR YOUR ARTIFACTS</p><h1>Your packages. <em>One catalog.</em></h1><p class="lead">NuGet, npm, Cargo, PyPI, OCI, Maven releases, hosted Go modules, Raw artifacts and agent skills in one catalog. Evidence depends on the adapter; see the published support matrix.</p></section>
-    <section class="stats" aria-label="Registry endpoints">
-      <div class="stat"><div class="stat-icon">N</div><div><strong>NuGet</strong><span><code>/nuget/v3/index.json</code></span></div></div>
-      <div class="stat"><div class="stat-icon npm">npm</div><div><strong>npm</strong><span><code>/npm/</code></span></div></div>
-      <div class="stat"><div class="stat-icon cargo">C</div><div><strong>Cargo (hosted)</strong><span><code>/cargo/index/</code></span></div></div>
-      <div class="stat"><div class="stat-icon pypi">Py</div><div><strong>PyPI (hosted)</strong><span><code>/pypi/simple/</code></span></div></div>
-      <div class="stat"><div class="stat-icon oci">O</div><div><strong>OCI (hosted)</strong><span><code>/v2/</code></span></div></div>
-      <div class="stat"><div class="stat-icon">M</div><div><strong>Maven (release)</strong><span><code>/maven/</code></span></div></div>
-      <div class="stat"><div class="stat-icon">G</div><div><strong>Go (hosted)</strong><span><code>/go/</code></span></div></div>
-      <div class="stat"><div class="stat-icon">R</div><div><strong>Raw / Generic</strong><span><code>/raw/</code></span></div></div>
-      <div class="stat"><div class="stat-icon skills">✦</div><div><strong>Agent skills</strong><span><code>/api/skills</code></span></div></div>
-    </section>
-    <section class="workspace">
-      <div class="section-head"><div><p class="eyebrow">DISCOVER</p><h2>Unified catalog</h2></div><div class="auth"><div class="sso-auth" aria-label="Single sign-on"><span id="sso-status" role="status" aria-live="polite">Checking sign-in…</span><button id="sso-login" type="button" hidden>Sign in</button><button id="sso-logout" type="button" hidden>Sign out</button></div><label for="token">API token <span>(optional, kept in memory only)</span></label><input id="token" type="password" autocomplete="off" placeholder="For API access without SSO"></div></div>
-      <div class="filters"><label class="search"><span class="visually-hidden">Search catalog</span><input id="search" type="search" placeholder="Search cached and hosted packages…"></label><label><span class="visually-hidden">Ecosystem</span><select id="kind"><option value="">All ecosystems</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="cargo">Cargo</option><option value="pypi">PyPI</option><option value="oci">OCI</option><option value="maven">Maven</option><option value="go">Go</option><option value="raw">Raw</option><option value="skill">Skills</option></select></label><button type="button" id="refresh">Refresh</button></div>
-      <div id="feedback" class="feedback" role="status" aria-live="polite">Loading catalog…</div>
-      <div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Ecosystem</th><th>Origin</th></tr></thead><tbody id="packages"></tbody></table></div>
-    </section>
-    <section class="grid-bottom"><div class="panel"><p class="eyebrow">SKILLS</p><h2>Agent skills</h2><p>Versioned skill bundles with a validated <code>SKILL.md</code> manifest.</p><div id="skills" class="skills-list"></div></div><div class="panel"><p class="eyebrow">PUBLISH</p><h2>Import a skill</h2><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.+-]*" maxlength="128"><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></div></section>
-    <section id="quality-panel" class="panel quality-panel" aria-labelledby="quality-title" hidden>
-      <p class="eyebrow">SKILL QUALITY</p><h2 id="quality-title">Skill quality</h2>
-      <p id="quality-status" role="status" aria-live="polite"></p>
-      <p class="muted">Checks cover published documentation and local file references. They do not execute the skill or establish behavioral correctness, publisher identity or malware safety.</p>
-      <div id="quality-detail"></div>
-    </section>
-    <section class="panel mcp-panel" aria-labelledby="mcp-title">
-      <div class="section-head">
-        <div><p class="eyebrow">MCP DISCOVERY</p><h2 id="mcp-title">MCP server catalog</h2><p class="muted">Version-pinned remote server descriptions. Metadata review is not publisher verification or permission to connect.</p></div>
-        <form id="mcp-filter" role="search">
-          <label for="mcp-query">Find server metadata</label>
-          <div class="mcp-filter-controls"><input id="mcp-query" type="search" maxlength="100" placeholder="Name or title"><button type="submit">Search</button></div>
-        </form>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Application navigation">
+      <a class="brand" href="#catalog" aria-label="Packory catalog">
+        <img class="logo" src="/brand/packory.svg" width="32" height="32" alt="">
+        <span class="brand-lockup"><strong>Packory</strong><small>Registry hub</small></span>
+      </a>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <p class="nav-label">Workspace</p>
+        <a href="#catalog" data-route="catalog" class="nav-link" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Catalog</a>
+        <a href="#models" data-route="models" class="nav-link"><span class="nav-icon" aria-hidden="true">◫</span>Models</a>
+        <a id="nav-feeds" href="#feeds" data-route="feeds" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">▤</span>Feeds</a>
+        <a id="nav-publish" href="#publish" data-route="publish" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">↑</span>Publish</a>
+        <a id="nav-reviews" href="#reviews" data-route="reviews" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">◇</span>Reviews</a>
+        <a id="nav-activity" href="#activity" data-route="activity" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">≋</span>Activity</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <a href="#settings" data-route="settings" class="nav-link"><span class="nav-icon" aria-hidden="true">⚙</span>Settings</a>
+        <a class="help-link" href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" target="_blank" rel="noopener noreferrer">Help &amp; support <span aria-hidden="true">↗</span></a>
+        <p class="sidebar-note">Package registry and skill distribution<br>Experimental · Single-writer reference</p>
       </div>
-      <p id="mcp-status" role="status" aria-live="polite">Loading reviewed MCP server metadata…</p>
-      <div class="table-wrap">
-        <table aria-label="Reviewed MCP server metadata">
-          <thead><tr><th>Server</th><th>Version</th><th>Streamable HTTP endpoint</th><th>Qualification</th></tr></thead>
-          <tbody id="mcp-table"></tbody>
-        </table>
-      </div>
-      <button id="mcp-more" type="button" aria-controls="mcp-table" hidden>Load more server revisions</button>
-      <p class="muted">No automatic connection, package execution, token forwarding or remote verification. Administrative import and approval are intentionally API-only until a secure browser session/BFF is available.</p>
-    </section>
-    <section class="panel scanner-panel" aria-labelledby="scanner-title">
-      <div class="section-head"><div><p class="eyebrow">SECURITY CENTER</p><h2 id="scanner-title">Agent Skill Security</h2><p class="muted">NVIDIA SkillSpector · Offline static analysis · Manual administrator approval</p></div><button id="security-refresh" type="button">Refresh scans</button></div>
-      <p id="security-status" role="status" aria-live="polite">Enter an administrator token above to review scans. Credentials stay in memory only.</p>
-      <div class="security-metrics" aria-label="Skill approval overview"><div><strong id="security-pending">—</strong><span>Queued</span></div><div><strong id="security-review">—</strong><span>Review</span></div><div><strong id="security-quarantine">—</strong><span>Quarantine</span></div><div><strong id="security-approved">—</strong><span>Approved</span></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Skill version</th><th>State</th><th>Risk / 100</th><th>Last updated</th><th>Review</th></tr></thead><tbody id="security-table"></tbody></table></div>
-      <div id="security-detail" class="security-detail" hidden aria-live="polite"></div>
+    </aside>
 
-      <section id="skill-ai-panel" class="skill-ai-panel" aria-labelledby="skill-ai-title" hidden>
-        <div class="section-head"><div><p class="eyebrow">OPTIONAL ANALYSIS</p><h3 id="skill-ai-title">SkillSpector AI settings</h3><p class="muted">The offline static scanner remains independent. AI never automatically approves a Skill.</p></div><button id="ai-reload" type="button">Refresh AI settings</button></div>
-        <p id="ai-status" role="status" aria-live="polite"></p>
-        <form id="ai-settings">
-          <div class="ai-config-grid">
-            <label class="ai-check"><input id="ai-enabled" type="checkbox"> Enable AI analysis (opt-in)</label>
-            <label for="ai-endpoint">Approved provider endpoint<select id="ai-endpoint"></select></label>
-            <label for="ai-model">Model ID<input id="ai-model" maxlength="160" autocomplete="off" placeholder="Model identifier"></label>
-            <label for="ai-trigger">Scan trigger<select id="ai-trigger"><option value="manual">Manual only</option><option value="suspicious">Automatically for suspicious static scans</option><option value="always">Automatically for reviewed scans</option></select></label>
-            <label class="ai-check"><input id="ai-required" type="checkbox"> Require successful AI scan before approval</label>
-            <label class="ai-check"><input id="ai-transmission" type="checkbox"> I authorize sending skill contents to this external provider</label>
-            <label for="ai-key">Set or rotate provider API key<input id="ai-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="Never displayed after saving"></label>
-            <label class="ai-check"><input id="ai-clear-key" type="checkbox"> Clear saved API key</label>
-            <label for="ai-timeout">Timeout in seconds (15–600)<input id="ai-timeout" type="number" min="15" max="600" step="1"></label>
-            <label for="ai-concurrent">Concurrent scans (1–4)<input id="ai-concurrent" type="number" min="1" max="4" step="1"></label>
-            <label for="ai-requests">Max model requests per scan (1–64)<input id="ai-requests" type="number" min="1" max="64" step="1"></label>
-            <label for="ai-prompt-bytes">Max prompt bytes per request<input id="ai-prompt-bytes" type="number" min="1024" max="131072" step="1"></label>
-            <label for="ai-output-tokens">Max output tokens per request<input id="ai-output-tokens" type="number" min="64" max="16384" step="1"></label>
-            <label for="ai-budget">Monthly reservation budget (USD)<input id="ai-budget" type="number" min="0" max="1000000" step="0.000001"></label>
-            <label for="ai-input-rate">Input price (USD / million tokens)<input id="ai-input-rate" type="number" min="0" max="1000" step="0.000001"></label>
-            <label for="ai-output-rate">Output price (USD / million tokens)<input id="ai-output-rate" type="number" min="0" max="1000" step="0.000001"></label>
-            <label for="ai-language">Report language<select id="ai-language"><option value="English">English</option><option value="German">German</option></select></label>
+    <div class="app-main">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Packory</span><span aria-hidden="true">/</span><strong id="page-context">Catalog</strong></div>
+        <div class="topbar-actions">
+          <span id="sso-status" class="identity-status" role="status" aria-live="polite">Checking sign-in…</span>
+          <button id="sso-login" class="button-secondary" type="button" hidden>Sign in</button>
+          <button id="sso-logout" class="button-secondary" type="button" hidden>Sign out</button>
+          <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark theme" aria-pressed="false">◐</button>
+        </div>
+      </header>
+
+      <main id="main-content" tabindex="-1">
+        <section id="catalog-view" class="page-view" aria-labelledby="catalog-title">
+          <header class="page-heading">
+            <div><p class="eyebrow">REGISTRY</p><h1 id="catalog-title">Catalog</h1><p class="page-description">Find an artifact, choose its version and check the source.</p></div>
+            <button id="jump-to-import" class="button-secondary" type="button" hidden>＋ Import skill</button>
+          </header>
+          <div class="catalog-tabs" role="tablist" aria-label="Catalog content"><button id="packages-tab" role="tab" type="button" aria-selected="true" aria-controls="packages-tab-panel" tabindex="0">Packages &amp; skills</button><button id="mcp-tab" role="tab" type="button" aria-selected="false" aria-controls="mcp-tab-panel" tabindex="-1">MCP metadata</button></div>
+          <div id="packages-tab-panel" role="tabpanel" aria-labelledby="packages-tab">
+          <section class="workspace panel" aria-labelledby="packages-title">
+            <div class="section-head"><div><h2 id="packages-title">Packages &amp; skills</h2><p class="muted">Search the global catalog available to your current credentials.</p></div><button type="button" id="refresh" class="button-secondary">Refresh</button></div>
+            <div class="filters">
+              <label class="search" for="search">Search catalog<input id="search" type="search" placeholder="Package name or description…"></label>
+              <label for="kind">Ecosystem<select id="kind"><option value="">All ecosystems</option><option value="nuget">NuGet</option><option value="npm">npm</option><option value="cargo">Cargo</option><option value="pypi">PyPI</option><option value="oci">OCI</option><option value="maven">Maven</option><option value="go">Go</option><option value="raw">Raw</option><option value="skill">Skills</option></select></label>
+            </div>
+            <p id="feedback" class="feedback" role="status" aria-live="polite">Loading catalog…</p>
+            <button id="clear-filters" class="button-secondary" type="button" hidden>Clear filters</button>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Package</th><th scope="col">Version</th><th scope="col">Ecosystem</th><th scope="col">Origin</th><th scope="col">Details</th></tr></thead><tbody id="packages"></tbody></table></div>
+            <button id="catalog-more" class="button-secondary" type="button" hidden>Load more packages</button>
+            <p class="scope-note">Private hosted feeds use separate feed-scoped endpoints and grants; they are not included in this global catalog search. Results show only the entries returned by the current request.</p>
+          </section>
+          <div class="catalog-lower">
+            <section class="panel" aria-labelledby="skills-title"><div class="section-head"><div><p class="eyebrow">DISTRIBUTION</p><h2 id="skills-title">Agent skills</h2></div></div><p class="muted">Versioned skill bundles. Security approval and documentation quality are separate checks.</p><div id="skills" class="skills-list"></div></section>
+            <section id="upload-panel" class="panel" aria-labelledby="upload-title" hidden><p class="eyebrow">PUBLISHER</p><h2 id="upload-title">Import a skill</h2><p class="muted">An accepted import may still be queued for review.</p><form id="upload"><label for="version">Version</label><input required id="version" name="version" placeholder="1.0.0" pattern="[A-Za-z0-9][A-Za-z0-9.-]*" maxlength="128" aria-describedby="version-help"><span id="version-help" class="field-help">Start with a letter or number; use only letters, numbers, dots and hyphens.</span><label for="file">ZIP archive</label><input required id="file" name="file" type="file" accept=".zip,application/zip"><button type="submit">Import skill</button><p id="upload-result" role="status" aria-live="polite"></p></form></section>
+          <section id="publisher-review-panel" class="panel" aria-labelledby="publisher-review-title"><h2 id="publisher-review-title">Track your Skill upload</h2><p class="muted">A review receipt is shown once after upload. Anyone holding it can read that revision's scan status; keep it private. It expires after 90 days.</p>
+            <form id="publisher-review-form"><label for="publisher-review-receipt">Review receipt<input id="publisher-review-receipt" type="password" maxlength="64" autocomplete="off" placeholder="Paste your review receipt"></label><button type="submit">Check review status</button></form><div id="publisher-review-result" role="status" aria-live="polite"></div>
+          </section>
           </div>
-          <label for="ai-reason">Configuration change reason (audit log)<input id="ai-reason" maxlength="512" minlength="3" required placeholder="Why are these settings changing?"></label>
-          <p class="muted" id="ai-provider-info">Only deployment-approved endpoints are selectable. Prices are operator-provided admission estimates, not a provider billing guarantee. No credential is returned to the browser.</p>
-          <div class="security-actions"><button id="ai-save" type="submit">Save AI configuration</button><button id="ai-probe" type="button">Test provider connection</button><button id="ai-jobs-reload" type="button">Refresh assessment jobs</button></div>
-        </form>
-        <p id="ai-usage" class="muted"></p>
-        <h4>Recent AI assessments and connection tests</h4>
-        <div id="ai-jobs" class="ai-jobs" aria-live="polite"></div>
-        <div id="ai-job-detail" class="ai-job-detail" hidden></div>
-        <h4>Configuration and job audit</h4>
-        <div id="ai-audit" class="ai-audit"></div>
-      </section>
-      <p class="muted">An approved scan is a policy decision, not a guarantee that a Skill is harmless. Scanner errors and incomplete results block publication. Privileged actions require an administrator credential.</p>
-    </section>
-    <footer>Packory experimental · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · <a href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" rel="noopener noreferrer">Support matrix</a> · Apache-2.0</footer>
-  </main>
+          </div>
+          <section id="mcp-tab-panel" class="panel mcp-panel" aria-labelledby="mcp-title" role="tabpanel" hidden>
+            <div class="section-head"><div><p class="eyebrow">DESCRIPTIVE CATALOG</p><h2 id="mcp-title">MCP server metadata</h2><p class="muted">Version-pinned server descriptions. Metadata review is not publisher verification or permission to connect.</p></div>
+              <form id="mcp-filter" role="search"><label for="mcp-query">Find server metadata</label><div class="mcp-filter-controls"><input id="mcp-query" type="search" maxlength="100" placeholder="Name or title"><button type="submit" class="button-secondary">Search</button></div></form></div>
+            <p id="mcp-status" role="status" aria-live="polite">Loading reviewed MCP server metadata…</p>
+            <div class="table-wrap"><table aria-label="Reviewed MCP server metadata"><thead><tr><th scope="col">Server</th><th scope="col">Version</th><th scope="col">Streamable HTTP endpoint</th><th scope="col">Qualification</th></tr></thead><tbody id="mcp-table"></tbody></table></div>
+            <button id="mcp-more" class="button-secondary" type="button" aria-controls="mcp-table" hidden>Load more server revisions</button>
+            <p class="scope-note">No automatic connection, package execution, token forwarding or remote verification.</p>
+            <section id="mcp-admin-panel" class="mcp-admin-panel" aria-labelledby="mcp-admin-title" hidden>
+              <div class="section-head"><div><h3 id="mcp-admin-title">MCP Registry review</h3><p class="muted">Stage inert server.json metadata, inspect the exact digest, then publish or revoke explicitly. Publisher ownership and runtime safety are unverified.</p></div><button id="mcp-admin-refresh" class="button-secondary" type="button">Refresh review queue</button></div>
+              <form id="mcp-stage-form"><label for="mcp-stage-file">Stage server.json<input id="mcp-stage-file" type="file" accept=".json,application/json" required></label><button type="submit">Stage metadata</button></form>
+              <p id="mcp-admin-status" role="status" aria-live="polite"></p>
+              <div class="table-wrap"><table><thead><tr><th scope="col">Server</th><th scope="col">Version</th><th scope="col">Review state</th><th scope="col">SHA-256</th><th scope="col">Details</th></tr></thead><tbody id="mcp-admin-table"></tbody></table></div>
+              <button id="mcp-admin-more" class="button-secondary" type="button" hidden>Load more review entries</button>
+            </section>
+          </section>
+        </section>
+
+        <section id="models-view" class="page-view" aria-labelledby="models-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">REVIEWED METADATA</p><h1 id="models-title">Models</h1><p class="page-description">Versioned references only. Packory does not host, download or verify model bytes.</p></div><button id="models-refresh" class="button-secondary" type="button">Refresh models</button></header>
+          <section class="panel" aria-labelledby="model-catalog-title"><h2 id="model-catalog-title">Published descriptors</h2><p id="models-status" class="feedback" role="status" aria-live="polite"></p><div class="table-wrap"><table><thead><tr><th scope="col">Model</th><th scope="col">Version</th><th scope="col">Format</th><th scope="col">License</th><th scope="col">Size claim</th><th scope="col">Details</th></tr></thead><tbody id="models-table"></tbody></table></div><button id="models-more" class="button-secondary" type="button" hidden>Load more models</button></section>
+          <section id="model-stage-panel" class="panel" aria-labelledby="model-stage-title" hidden><h2 id="model-stage-title">Stage model metadata</h2><p class="muted">No model file is uploaded. The URL and digest are publisher claims until independently checked; staging does not publish.</p><form id="model-stage-form" class="model-stage-form"><label for="model-name">Name (org/model)<input id="model-name" required maxlength="129" placeholder="example/demo"></label><label for="model-version">Version<input id="model-version" required maxlength="128" placeholder="1.0.0"></label><label for="model-format">Format<select id="model-format"><option value="gguf">GGUF</option><option value="safetensors">safetensors</option><option value="onnx">ONNX</option><option value="other">Other</option></select></label><label for="model-sha256">Declared SHA-256<input id="model-sha256" required minlength="64" maxlength="64" autocomplete="off"></label><label for="model-size">Declared bytes<input id="model-size" type="number" min="1" max="1099511627776" step="1" required></label><label for="model-license">License identifier<input id="model-license" required maxlength="64" placeholder="Apache-2.0"></label><label for="model-publisher">Claimed publisher<input id="model-publisher" required maxlength="120"></label><label for="model-source">HTTPS source URL<input id="model-source" type="url" required maxlength="1024" placeholder="https://models.example.org/download/demo.gguf"></label><label for="model-provenance">HTTPS provenance URL (optional)<input id="model-provenance" type="url" maxlength="1024"></label><label for="model-description">Description<textarea id="model-description" required maxlength="1024" rows="3"></textarea></label><button type="submit">Stage descriptor</button></form><p id="model-stage-status" role="status" aria-live="polite"></p></section>
+          <section id="model-admin-panel" class="panel" aria-labelledby="model-admin-title" hidden><div class="section-head"><div><h2 id="model-admin-title">Model metadata review</h2><p class="muted">Review the exact descriptor digest. Publication does not verify the external file or publisher.</p></div><button id="model-admin-refresh" class="button-secondary" type="button">Refresh review queue</button></div><p id="model-admin-status" role="status" aria-live="polite"></p><div class="table-wrap"><table><thead><tr><th scope="col">Model</th><th scope="col">Version</th><th scope="col">State</th><th scope="col">Descriptor SHA-256</th><th scope="col">Details</th></tr></thead><tbody id="model-admin-table"></tbody></table></div><button id="model-admin-more" class="button-secondary" type="button" hidden>Load more review entries</button></section>
+        </section>
+
+        <section id="feeds-view" class="page-view" aria-labelledby="feeds-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">REGISTRY</p><h1 id="feeds-title">Feeds</h1><p class="page-description">Review feed scope and lifecycle. A draft is not active and does not grant access.</p></div><button id="feeds-refresh" class="button-secondary" type="button">Refresh feeds</button></header>
+          <p id="feeds-status" class="feedback" role="status" aria-live="polite">Administrator access is required to view feed definitions.</p>
+          <section id="feed-self-service" class="panel" aria-labelledby="feed-self-service-title" hidden><h2 id="feed-self-service-title">Open an authorized private feed</h2><p class="muted">Enter the exact feed ID from your grant. The server checks read permission before listing artifacts.</p><form id="feed-self-service-form"><label for="feed-self-service-id">Feed ID<input id="feed-self-service-id" autocomplete="off" maxlength="63" placeholder="team-packages" required></label><button type="submit">View feed</button></form><div id="feed-self-service-result" role="status" aria-live="polite"></div></section>
+          <section class="panel feed-create-panel" aria-labelledby="feed-create-title"><details><summary id="feed-create-title">Create a private hosted feed draft</summary><p class="muted">Draft creation does not activate package routes or issue access grants. Only currently supported isolated hosted kinds are selectable.</p><form id="feed-create" class="feed-create-form"><label for="feed-name">Display name<input id="feed-name" name="displayName" maxlength="120" required></label><label for="feed-id">Feed ID<input id="feed-id" name="id" pattern="[a-z][a-z0-9-]{1,62}[a-z0-9]" maxlength="64" required aria-describedby="feed-id-help"><span id="feed-id-help" class="field-help">Lowercase letters, numbers and hyphens; 3–64 characters.</span></label><label for="feed-kind">Package ecosystem<select id="feed-kind" name="kind" required><option value="">Load supported kinds</option></select></label><button type="submit">Create draft</button><p id="feed-create-result" role="status" aria-live="polite"></p></form></details></section>
+          <section class="panel" aria-labelledby="feed-list-title"><div class="section-head"><div><p class="eyebrow">ADMINISTRATION</p><h2 id="feed-list-title">Feed definitions</h2></div></div><div class="table-wrap"><table><thead><tr><th scope="col">Feed</th><th scope="col">Ecosystem</th><th scope="col">Mode</th><th scope="col">Visibility</th><th scope="col">State</th><th scope="col">Details</th></tr></thead><tbody id="feed-table"></tbody></table></div><button id="feed-more" class="button-secondary" type="button" hidden>Load more feeds</button></section>
+        </section>
+
+        <section id="reviews-view" class="page-view" aria-labelledby="reviews-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">SKILL INSPECTION</p><h1 id="reviews-title">Reviews</h1><p class="page-description">Inspect evidence for an exact skill revision before deciding on distribution.</p></div></header>
+          <section class="panel scanner-panel" aria-labelledby="scanner-title">
+            <div class="section-head"><div><h2 id="scanner-title">Skill review queue</h2><p class="muted">Static findings, optional AI analysis and administrative decisions remain separate.</p></div><button id="security-refresh" class="button-secondary" type="button">Refresh reviews</button></div>
+            <p id="security-status" class="feedback" role="status" aria-live="polite">Administrator SSO role or API token required for security review and decisions.</p>
+            <p id="security-policy" class="policy-note">Distribution policy status is not yet confirmed.</p>
+            <p class="scope-note">Static results are evidence for review, not an approval. Scan failures stay blocked while enforcement is on.</p>
+            <div class="security-metrics" aria-label="Loaded skill review states"><div><strong id="security-pending">—</strong><span>Queued</span></div><div><strong id="security-review">—</strong><span>Needs review</span></div><div><strong id="security-scan-failed">—</strong><span>Scan failed</span></div><div><strong id="security-scan-incomplete">—</strong><span>Scan incomplete</span></div><div><strong id="security-quarantine">—</strong><span>Quarantined</span></div><div><strong id="security-declined">—</strong><span>Declined</span></div><div><strong id="security-approved">—</strong><span>Approved</span></div><div><strong id="security-revoked">—</strong><span>Revoked</span></div><div><strong id="security-publishing">—</strong><span>Publishing</span></div></div>
+            <div class="security-controls"><label for="security-search">Find a skill<input id="security-search" type="search" placeholder="Name or version"></label><label for="security-state-filter">Status<select id="security-state-filter"><option value="">All statuses</option><option value="QUEUED">Queued</option><option value="PUBLISHING">Publishing</option><option value="NEEDS_REVIEW">Needs review</option><option value="SCAN_FAILED">Scan failed</option><option value="SCAN_INCOMPLETE">Scan incomplete</option><option value="QUARANTINED">Quarantined</option><option value="DECLINED">Declined</option><option value="APPROVED">Approved</option><option value="REVOKED">Revoked</option></select></label></div>
+            <p id="security-results" class="muted" role="status" aria-live="polite"></p>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Skill revision</th><th scope="col">Status</th><th scope="col">Score</th><th scope="col">Updated</th><th scope="col">Details</th></tr></thead><tbody id="security-table"></tbody></table></div>
+            <button id="security-more" class="button-secondary" type="button" hidden>Load more reviews</button>
+            <p class="scope-note">The score is the static scanner's assessment; it does not grant distribution. Review one revision at a time with Details.</p>
+          </section>
+        </section>
+
+        <section id="activity-view" class="page-view" aria-labelledby="activity-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1 id="activity-title">Activity</h1><p class="page-description">Inspect recorded changes and the operational state available to this administrator.</p></div><button id="activity-refresh" class="button-secondary" type="button">Refresh activity</button></header>
+          <p id="activity-status" class="feedback" role="status" aria-live="polite">Administrator access is required to view activity.</p>
+          <div class="activity-grid"><section class="panel" aria-labelledby="ops-title"><h2 id="ops-title">Operations status</h2><div id="operations-content" class="structured-data"></div></section><section class="panel" aria-labelledby="metrics-title"><h2 id="metrics-title">Recorded metrics</h2><div id="metrics-content" class="structured-data"></div></section></div>
+          <section class="panel" aria-labelledby="maintenance-title"><div class="section-head"><div><h2 id="maintenance-title">Publication and integrity maintenance</h2><p class="muted">Inspect pending intents. Reconciliation and integrity scans require exclusive maintenance mode and a held writer lease.</p></div><button id="pending-refresh" class="button-secondary" type="button">Refresh pending</button></div>
+            <p id="pending-status" role="status" aria-live="polite"></p><div class="table-wrap"><table><thead><tr><th scope="col">Key</th><th scope="col">Artifact</th><th scope="col">Started</th><th scope="col">Action</th></tr></thead><tbody id="pending-table"></tbody></table></div>
+            <div class="button-row"><button id="integrity-start" class="button-secondary" type="button" hidden>Run bounded integrity page</button><button id="integrity-more" class="button-secondary" type="button" hidden>Scan next page</button><button id="cache-evict" class="danger-action" type="button" hidden>Evict recomputable cache metadata</button></div><p id="maintenance-status" role="status" aria-live="polite"></p><pre id="integrity-result" class="report-preview" tabindex="0" hidden></pre>
+          </section>
+          <section class="panel" aria-labelledby="audit-title"><div class="section-head"><div><h2 id="audit-title">Audit events</h2><p class="muted">Latest events returned by the administrator audit API.</p></div><button id="audit-more" class="button-secondary" type="button" hidden>Load earlier events</button></div><div class="table-wrap"><table><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Object</th><th scope="col">Actor</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
+          <section class="panel ai-activity-panel" aria-labelledby="ai-activity-title"><div class="section-head"><div><h2 id="ai-activity-title">AI assessments and connection tests</h2><p class="muted">AI output is an optional assessment; it is not a distribution decision.</p></div><button id="ai-jobs-reload" class="button-secondary" type="button">Refresh assessments</button></div><div id="ai-jobs" class="ai-jobs" aria-live="polite"></div><div id="ai-job-detail" class="ai-job-detail" hidden></div><h3>AI configuration and job audit</h3><div id="ai-audit" class="ai-audit"></div></section>
+        </section>
+
+        <section id="publish-view" class="page-view" aria-labelledby="publish-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">PUBLISHER</p><h1 id="publish-title">Publish a package</h1><p class="page-description">Upload through the native protocol. Server validation and feed grants apply to every upload.</p></div></header>
+          <section class="panel" aria-labelledby="publish-form-title"><h2 id="publish-form-title">Choose destination and format</h2>
+            <form id="native-publish-form" class="settings-groups">
+              <label for="publish-kind">Ecosystem<select id="publish-kind" required><option value="nuget">NuGet package</option><option value="npm">npm tarball</option><option value="cargo">Cargo crate</option><option value="pypi">Python distribution</option><option value="oci">OCI blob or manifest</option><option value="maven">Maven file</option><option value="go">Go module</option><option value="raw">Raw artifact</option></select></label>
+              <label for="publish-feed">Destination<select id="publish-feed"><option value="">Global registry</option><option value="private">Private feed</option></select></label>
+              <label id="publish-feed-id-row" for="publish-feed-id" hidden>Feed ID<input id="publish-feed-id" pattern="[a-z0-9][a-z0-9-]{1,62}" maxlength="63" autocomplete="off" placeholder="team-packages"></label>
+              <p id="publish-format-help" class="muted"></p>
+              <label id="publish-name-row" for="publish-name">Package name or module path<input id="publish-name" maxlength="256" autocomplete="off"></label>
+              <label id="publish-version-row" for="publish-version">Version or OCI tag<input id="publish-version" maxlength="128" autocomplete="off"></label>
+              <label id="publish-path-row" for="publish-path" hidden>Maven repository path<input id="publish-path" maxlength="512" autocomplete="off" placeholder="org/example/demo/1.0/demo-1.0.pom"></label>
+              <label id="publish-media-row" for="publish-media" hidden>Media type<input id="publish-media" maxlength="128" autocomplete="off" placeholder="application/octet-stream"></label>
+              <label id="publish-metadata-row" for="publish-metadata" hidden>Cargo metadata or OCI manifest JSON<textarea id="publish-metadata" rows="6" maxlength="1048576" spellcheck="false"></textarea></label>
+              <label id="publish-file-row" for="publish-file">Package file<input id="publish-file" type="file"></label>
+              <label id="publish-second-file-row" for="publish-second-file" hidden>go.mod file<input id="publish-second-file" type="file" accept=".mod,text/plain"></label>
+              <label id="publish-oci-mode-row" for="publish-oci-mode" hidden>OCI operation<select id="publish-oci-mode"><option value="blob">Upload blob</option><option value="manifest">Publish manifest</option></select></label>
+              <button id="publish-submit" type="submit">Publish</button><p id="publish-result" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+        </section>
+
+        <section id="settings-view" class="page-view" aria-labelledby="settings-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">PREFERENCES &amp; ACCESS</p><h1 id="settings-title">Settings</h1><p class="page-description">Access and inspection options for this Packory instance.</p></div></header>
+          <section class="panel settings-panel" aria-labelledby="access-title"><p class="eyebrow">IDENTITY</p><h2 id="access-title">Access</h2><p id="access-description" class="muted">Access options depend on this instance. API tokens are held in page memory only.</p><div id="api-token-fallback"><label for="token">API token</label><input id="token" type="password" autocomplete="off" placeholder="Enter an API token when needed"><p id="token-status" class="field-help" role="status" aria-live="polite">No API token is stored by this page.</p></div></section>
+          <section id="managed-tokens-panel" class="panel" aria-labelledby="managed-tokens-title" hidden>
+            <div class="section-head"><div><h2 id="managed-tokens-title">Issued access tokens</h2><p class="muted">Review expiry and revoke a token by ID. Secrets are shown only when created.</p></div><button id="managed-tokens-refresh" class="button-secondary" type="button">Refresh tokens</button></div>
+            <p id="managed-tokens-status" class="feedback" role="status" aria-live="polite"></p>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Token ID</th><th scope="col">Role</th><th scope="col">Grant</th><th scope="col">Expires</th><th scope="col">State</th><th scope="col">Action</th></tr></thead><tbody id="managed-tokens-table"></tbody></table></div>
+            <button id="managed-tokens-more" class="button-secondary" type="button" hidden>Load more tokens</button>
+          </section>
+          <section id="skill-ai-panel" class="panel skill-ai-panel" aria-labelledby="skill-ai-title" hidden>
+            <div class="section-head"><div><p class="eyebrow">OPTIONAL EXTERNAL ANALYSIS</p><h2 id="skill-ai-title">Skill inspection settings</h2><p class="muted">Static inspection remains independent. AI never approves a Skill automatically.</p></div><button id="ai-reload" class="button-secondary" type="button">Refresh settings</button></div>
+            <p id="ai-status" class="feedback" role="status" aria-live="polite"></p>
+            <form id="ai-settings"><div class="settings-groups">
+              <fieldset><legend>Provider &amp; data</legend><label for="ai-endpoint">Approved provider endpoint<select id="ai-endpoint"></select></label><label for="ai-model">Model ID<input id="ai-model" maxlength="160" autocomplete="off" placeholder="Model identifier"></label><label for="ai-key">Set or rotate provider API key<input id="ai-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="Never displayed after saving"></label><label class="check-label"><input id="ai-clear-key" type="checkbox"> Clear saved API key</label><label class="check-label"><input id="ai-transmission" type="checkbox"> I authorize sending skill contents to this external provider</label></fieldset>
+              <fieldset><legend>When to analyze</legend><label class="check-label"><input id="ai-enabled" type="checkbox"> Enable AI analysis (opt-in)</label><label for="ai-trigger">Scan trigger<select id="ai-trigger"><option value="manual">Manual only</option><option value="suspicious">Automatically for suspicious static scans</option><option value="always">Automatically for reviewed scans</option></select></label><label class="check-label"><input id="ai-required" type="checkbox"> Require a successful matching AI assessment before approval</label><label for="ai-language">Report language<select id="ai-language"><option value="English">English</option><option value="German">German</option></select></label></fieldset>
+              <fieldset><legend>Limits &amp; estimates</legend><label for="ai-timeout">Timeout in seconds<input id="ai-timeout" type="number" min="15" max="600" step="1"></label><label for="ai-concurrent">Concurrent scans<input id="ai-concurrent" type="number" min="1" max="4" step="1"></label><label for="ai-requests">Maximum requests per scan<input id="ai-requests" type="number" min="1" max="64" step="1"></label><label for="ai-prompt-bytes">Maximum prompt bytes per request<input id="ai-prompt-bytes" type="number" min="1024" max="131072" step="1"></label><label for="ai-output-tokens">Maximum output tokens per request<input id="ai-output-tokens" type="number" min="64" max="16384" step="1"></label><label for="ai-budget">Monthly reservation budget (USD)<input id="ai-budget" type="number" min="0" max="1000000" step="0.000001"></label><label for="ai-input-rate">Input price (USD / million tokens)<input id="ai-input-rate" type="number" min="0" max="1000" step="0.000001"></label><label for="ai-output-rate">Output price (USD / million tokens)<input id="ai-output-rate" type="number" min="0" max="1000" step="0.000001"></label></fieldset>
+              <fieldset><legend>Change record</legend><label for="ai-reason">Configuration change reason<input id="ai-reason" maxlength="512" minlength="3" required placeholder="Why are these settings changing?"></label><p id="ai-provider-info" class="muted">Only deployment-approved endpoints are selectable. Prices are operator-provided estimates, not a billing guarantee. No credential is returned to the browser.</p><div class="button-row"><button id="ai-save" type="submit">Save configuration</button><button id="ai-probe" class="button-secondary" type="button">Test provider connection</button></div></fieldset>
+            </div></form>
+            <p id="ai-usage" class="muted"></p>
+          </section>
+        </section>
+
+        <footer class="app-footer">Experimental · Single-writer reference · <a href="https://github.com/Cenn0/Packory" rel="noopener noreferrer">GitHub</a> · <a href="/health/live">Health</a> · <a href="https://github.com/Cenn0/Packory/blob/main/docs/support-matrix.md" rel="noopener noreferrer">Support matrix</a> · Apache-2.0</footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="decision-dialog" aria-labelledby="decision-title"><form id="decision-form" method="dialog"><p class="eyebrow">ADMINISTRATIVE DECISION</p><h2 id="decision-title">Review skill revision</h2><p id="decision-summary"></p><p id="decision-consequence" class="muted"></p><label for="decision-reason">Reason for this decision (3–512 characters)<textarea id="decision-reason" minlength="3" maxlength="512" required rows="4"></textarea></label><div class="dialog-actions"><button id="decision-cancel" class="button-secondary" type="button">Cancel</button><button id="decision-submit" type="submit">Confirm decision</button></div></form></dialog>
 </body>
 </html>
