@@ -5,7 +5,7 @@ public static class SkillQualityEndpoints
     // The report covers a global Skill revision, so a grant limited to a
     // different feed/namespace must not become a global read credential.
     public static IResult? RequireRead(HttpContext context, Settings settings) =>
-        settings.AnonymousRead ? null : Access.RequireGlobalMcp(context, settings);
+        Access.RequireDashboardGlobalRead(context, settings);
 
     public static void Map(WebApplication app) =>
         app.MapGet("/api/v1/skills/{name}/{version}/quality", (string name, string version,

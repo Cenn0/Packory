@@ -8,6 +8,8 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 using System.Threading.RateLimiting;
 using Packory;
 using System.Text;
@@ -25,6 +27,10 @@ settings.OidcAuthority = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUTHOR
 settings.OidcAudience = Environment.GetEnvironmentVariable("PACKORY_OIDC_AUDIENCE") ?? settings.OidcAudience;
 settings.OidcClientId = Environment.GetEnvironmentVariable("PACKORY_OIDC_CLIENT_ID") ?? settings.OidcClientId;
 settings.OidcClientSecret = RuntimeSecretFiles.Resolve("PACKORY_OIDC_CLIENT_SECRET", settings.OidcClientSecret);
+settings.OidcWebScope = Environment.GetEnvironmentVariable("PACKORY_OIDC_WEB_SCOPE") ?? settings.OidcWebScope;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_BROWSER_NATIVE_PUBLISH_ENABLED"), out var browserPublish))
+    settings.BrowserNativePublishEnabled = browserPublish;
+settings.TrustedProxyIp = Environment.GetEnvironmentVariable("PACKORY_TRUSTED_PROXY_IP") ?? settings.TrustedProxyIp;
 settings.AdminToken = RuntimeSecretFiles.Resolve("PACKORY_ADMIN_TOKEN", settings.AdminToken, blankEnvironmentMeansUnset: true);
 settings.ReadToken = RuntimeSecretFiles.Resolve("PACKORY_READ_TOKEN", settings.ReadToken, blankEnvironmentMeansUnset: true);
 settings.WriteToken = RuntimeSecretFiles.Resolve("PACKORY_WRITE_TOKEN", settings.WriteToken, blankEnvironmentMeansUnset: true);
@@ -95,6 +101,18 @@ if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_APPROVED_EXPORTS") is
 if (Environment.GetEnvironmentVariable("PACKORY_VALIDATION_REVOKED_KEY_IDS") is { } revokedKeys)
     settings.ValidationRevokedKeyIds = revokedKeys.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 settings.Validate();
+if (!string.IsNullOrWhiteSpace(settings.TrustedProxyIp))
+{
+    var proxy = IPAddress.Parse(settings.TrustedProxyIp);
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Add(proxy);
+    });
+}
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = settings.MaxArtifactBytes * 2 + 1024 * 1024);
 builder.Services.Configure<FormOptions>(options =>
 {
@@ -174,6 +192,8 @@ if (settings.OidcEnabled)
             options.MapInboundClaims = false;
             options.Scope.Clear();
             options.Scope.Add("openid");
+            if (!string.IsNullOrWhiteSpace(settings.OidcWebScope) && settings.OidcWebScope != "openid")
+                options.Scope.Add(settings.OidcWebScope);
             options.CallbackPath = "/auth/callback";
             options.SignedOutCallbackPath = "/auth/signed-out";
             options.Events = new OpenIdConnectEvents
@@ -229,6 +249,7 @@ builder.Services.AddSingleton<SkillAiGateway>();
 builder.Services.AddSingleton<SkillAiCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillAiCoordinator>());
 builder.Services.AddSingleton<McpRegistryStore>();
+builder.Services.AddSingleton<ModelCatalogStore>();
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
@@ -331,6 +352,7 @@ if (!readerInstance)
         app.Services.GetRequiredService<SkillSecurityStore>().Initialize();
         app.Services.GetRequiredService<SkillAiStore>().Initialize();
         app.Services.GetRequiredService<McpRegistryStore>().Initialize();
+        app.Services.GetRequiredService<ModelCatalogStore>().Initialize();
         app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
     }
 }
@@ -338,6 +360,7 @@ else if (!app.Services.GetRequiredService<IPackageDatabase>().IsHealthy())
 {
     throw new InvalidOperationException("Read-only replica requires an initialized shared metadata database.");
 }
+if (!string.IsNullOrWhiteSpace(settings.TrustedProxyIp)) app.UseForwardedHeaders();
 app.UseRouting();
 var telemetry = app.Services.GetRequiredService<PackoryTelemetry>();
 app.Use((ctx, next) => telemetry.Observe(ctx, _ => next(ctx)));
@@ -499,6 +522,31 @@ else
         return Results.Json(new { enabled = false, authenticated = false, role = "none" });
     });
 }
+app.MapGet("/api/auth/capabilities", (Settings cfg, HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    var credential = Access.RateLimitPartition(ctx, cfg);
+    if (credential == "unauthenticated")
+    {
+        // Do not turn an invalid submitted token into an apparently valid
+        // anonymous session when public reads are enabled.
+        if (!cfg.AnonymousRead || !string.IsNullOrEmpty(ctx.Request.Headers.Authorization.ToString()) ||
+            !string.IsNullOrEmpty(ctx.Request.Headers["X-NuGet-ApiKey"].ToString()))
+            return Results.Unauthorized();
+        return Results.Ok(new { role = "anonymous", source = "none",
+            canReadGlobal = true, canWrite = false, canAdmin = false });
+    }
+    var admin = credential is "admin-token" or "oidc-admin" or "browser-admin";
+    var write = admin || credential is "write-token" or "oidc-write" or "browser-write" or "managed-write";
+    var readGlobal = Access.RequireGlobalRaw(ctx, cfg) is null;
+    var role = admin ? "admin" : write ? "write" : "read";
+    var source = credential.StartsWith("browser-", StringComparison.Ordinal) ? "browser-sso"
+        : credential.StartsWith("oidc-", StringComparison.Ordinal) ? "oidc-bearer"
+        : credential.StartsWith("managed-", StringComparison.Ordinal) ? "managed-token"
+        : "static-token";
+    return Results.Ok(new { role, source, canReadGlobal = readGlobal,
+        canWrite = write, canAdmin = admin });
+}).RequireRateLimiting("publish");
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
 {
@@ -514,13 +562,22 @@ app.MapGet("/health/ready", (IPackageDatabase db, ArtifactRecovery recovery) =>
             statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { status = "ready" });
 });
-app.MapGet("/api/packages", (string? q, string? kind, int? limit, Settings cfg, IPackageDatabase db, SkillSecurityStore security, HttpContext ctx) =>
+app.MapGet("/api/packages", (string? q, string? kind, int? limit, int? offset,
+    Settings cfg, IPackageDatabase db, SkillSecurityStore security, HttpContext ctx) =>
 {
     if (Access.RequireGlobalRaw(ctx, cfg) is { } denied) return denied;
     if (kind is not null && kind is not ("nuget" or "npm" or "skill" or "cargo" or "pypi" or "oci" or "raw" or "maven" or "go")) return Results.BadRequest(new { error = "Unknown package kind" });
-    return Results.Json(new { items = db.Search(q ?? "", kind, limit ?? 50)
-        .Where(x => x.Kind != "skill" || !cfg.SkillSecurityEnforced ||
-                    security.IsApproved(x.Name, x.Version)).ToList() });
+    if (limit is < 1 or > 100 || offset is < 0 or > 10000 || q is { Length: > 256 } ||
+        (q?.Any(char.IsControl) ?? false)) return Results.BadRequest();
+    var size = limit ?? 50;
+    var start = offset ?? 0;
+    var page = db.SearchPage(q ?? "", kind, size + 1, start);
+    return Results.Json(new
+    {
+        items = page.Take(size).Where(x => x.Kind != "skill" || !cfg.SkillSecurityEnforced ||
+            security.IsApproved(x.Name, x.Version)).ToArray(),
+        nextOffset = page.Count > size ? start + size : (int?)null
+    });
 });
 app.MapGet("/api/admin/operations/status", (Settings cfg, IPackageDatabase db,
     ArtifactRecovery recovery, HttpContext ctx) =>
@@ -531,6 +588,8 @@ app.MapGet("/api/admin/operations/status", (Settings cfg, IPackageDatabase db,
     {
         instanceRole = cfg.InstanceRole,
         strictDeploymentChecksEnabled = cfg.StrictDeployment,
+        recoveryMaintenanceEnabled = cfg.RecoveryMaintenance,
+        writerLeaseHeld = !readerInstance && startupLease.IsHeld(),
         metadataBackend = cfg.MetadataProvider, blobBackend = cfg.BlobProvider,
         pendingPublicationCount = db.PendingPublications().Count,
         staleUnresolvedCount = recovery.StaleUnresolvedCount(),
@@ -557,6 +616,25 @@ app.MapPost("/api/admin/cache/mutable/evict", (Settings cfg, BlobStore blobs, Ht
         return Results.Conflict(new { error = "Local metadata eviction is only supported with filesystem storage" });
     return Results.Ok(new { evictedFiles = blobs.EvictMutableMetadata() });
 }).RequireRateLimiting("publish");
+app.MapGet("/api/admin/tokens", (int? limit, int? offset, Settings cfg,
+    IPackageDatabase db, HttpContext ctx) =>
+{
+    if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
+    if (limit is < 1 or > 100 || offset is < 0 or > 10000) return Results.BadRequest();
+    var size = limit ?? 50;
+    var start = offset ?? 0;
+    var page = db.ManagedTokens(size + 1, start);
+    ctx.Response.Headers.CacheControl = "private, no-store";
+    return Results.Ok(new
+    {
+        items = page.Take(size).Select(item => new
+        {
+            item.Id, item.Role, item.Namespace, item.ExpiresAt, item.Revoked,
+            expired = DateTimeOffset.Parse(item.ExpiresAt) <= DateTimeOffset.UtcNow
+        }),
+        nextOffset = page.Count > size ? start + size : (int?)null
+    });
+});
 app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpContext ctx) =>
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
@@ -584,7 +662,7 @@ app.MapPost("/api/admin/tokens", async (Settings cfg, IPackageDatabase db, HttpC
     var secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
     var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
     var expiry = DateTimeOffset.UtcNow.AddHours(input.ExpiresInHours).ToString("O");
-    db.CreateManagedToken(new ManagedTokenRecord(id, hash, input.Role, input.Namespace, expiry));
+    db.CreateManagedToken(new ManagedTokenRecord(id, hash, input.Role, input.Namespace, expiry), Access.Actor(ctx));
     ctx.Response.Headers.CacheControl = "no-store";
     return Results.Json(new { id, token = secret, expiresAt = expiry },
         statusCode: StatusCodes.Status201Created);
@@ -593,7 +671,7 @@ app.MapDelete("/api/admin/tokens/{id}", (string id, Settings cfg, IPackageDataba
 {
     if (Access.RequireAdmin(ctx, cfg) is { } denied) return denied;
     if (!Guid.TryParseExact(id, "N", out _)) return Results.BadRequest(new { error = "Invalid token id" });
-    return db.RevokeManagedToken(id) ? Results.NoContent() : Results.NotFound();
+    return db.RevokeManagedToken(id, Access.Actor(ctx)) ? Results.NoContent() : Results.NotFound();
 }).RequireRateLimiting("publish");
 // Maintenance-only, administrator-authenticated, bounded inspection of
 // catalog references. It never marks a system as certified or deletes bytes.
@@ -666,6 +744,7 @@ SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
 SkillAiEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
+ModelCatalogEndpoints.Map(app);
 SkillQualityEndpoints.Map(app);
 McpOAuthResourceMetadata.Map(app);
 if (settings.McpEnabled) app.MapMcp("/mcp").RequireRateLimiting("mcp");

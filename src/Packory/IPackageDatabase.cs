@@ -26,6 +26,7 @@ public interface IPackageDatabase
     FeedAssetEntry? GetFeedAsset(string feedId, string kind, string path);
     IReadOnlyList<FeedAssetEntry> FeedAssets();
     IReadOnlyList<FeedAssetEntry> FeedPackageAssets(string feedId, string kind, string? name = null);
+    IReadOnlyList<FeedAssetEntry> FeedAssetPage(string feedId, string kind, string? after, int limit);
     RawFeedUsage RawFeedUsage(string feedId);
     IReadOnlyList<FeedAssetEntry> RawFeedPage(string feedId, string? after, string prefix, int limit);
     // Mutable private Cargo sparse-index state; archive bytes remain immutable.
@@ -55,6 +56,8 @@ public interface IPackageDatabase
     FeedNugetRevision? GetFeedNugetRevision(string feedId, string name, string version);
     IReadOnlyList<FeedNugetRevision> FeedNugetRevisions();
     IReadOnlyList<FeedNugetRevision> FeedNugetRevisions(string feedId);
+    IReadOnlyList<FeedNugetRevision> FeedNugetPage(string feedId,
+        string? afterName, string? afterVersion, int limit);
     bool PublishFeedNuget(string feedId, string name, string version,
         string description, string sha512, long size, string actor);
     void BeginPublication(string key, string kind, string name, string version);
@@ -63,9 +66,10 @@ public interface IPackageDatabase
     QuarantineEvidence? FindQuarantine(string key);
     void PrepareQuarantine(QuarantineEvidence evidence);
     void FinishQuarantine(string key);
-    void CreateManagedToken(ManagedTokenRecord token);
+    void CreateManagedToken(ManagedTokenRecord token, string actor = "admin-token");
     ManagedTokenRecord? FindManagedToken(string sha256);
-    bool RevokeManagedToken(string id);
+    IReadOnlyList<ManagedTokenSummary> ManagedTokens(int limit, int offset);
+    bool RevokeManagedToken(string id, string actor = "admin-token");
     bool IsHealthy();
     void UpsertPackage(string kind, string name, string version, string description, string origin);
     bool PublishNuget(string name, string version, string description, string actor,
@@ -76,6 +80,7 @@ public interface IPackageDatabase
     NugetDigest? GetNugetDigest(string name, string version);
     IReadOnlyList<string> Versions(string kind, string name);
     IReadOnlyList<CatalogEntry> Search(string query, string? kind, int limit);
+    IReadOnlyList<CatalogEntry> SearchPage(string query, string? kind, int limit, int offset);
     bool OciHasBlob(string repository, string digest);
     void OciAddBlob(string repository, string digest);
     OciManifestEntry? OciManifest(string repository, string reference);

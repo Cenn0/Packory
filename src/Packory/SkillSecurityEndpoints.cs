@@ -11,13 +11,18 @@ public static class SkillSecurityEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/security/skills", (Settings settings, SkillSecurityStore security,
-            HttpContext ctx, int? limit) =>
+            HttpContext ctx, int? limit, int? offset) =>
         {
             if (Access.RequireAdmin(ctx, settings) is { } denied) return denied;
+            if (limit is < 1 or > 1000 || offset is < 0 or > 10000) return Results.BadRequest();
             ctx.Response.Headers.CacheControl = "no-store";
+            var size = limit ?? 100;
+            var start = offset ?? 0;
+            var page = security.List(size + 1, start);
             return Results.Ok(new
             {
-                items = security.List(limit ?? 100).Select(Summary)
+                items = page.Take(size).Select(Summary).ToArray(),
+                nextOffset = page.Count > size ? start + size : (int?)null
             });
         });
 
@@ -36,6 +41,9 @@ public static class SkillSecurityEndpoints
                 history = security.History(name, version)
             });
         });
+
+        app.MapGet("/api/security/skills/{name}/{version}/source", SkillReviewSource.ListAsync);
+        app.MapGet("/api/security/skills/{name}/{version}/source/file", SkillReviewSource.FileAsync);
 
         app.MapPost("/api/security/skills/{name}/{version}/approve", async (
             string name, string version, Settings settings, SkillSecurityStore security,
@@ -58,6 +66,24 @@ public static class SkillSecurityEndpoints
                 return Results.Json(new { error = "Publication recovery required." },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
             }
+        }).RequireRateLimiting("publish");
+
+        app.MapPost("/api/security/skills/{name}/{version}/decline", async (
+            string name, string version, Settings settings, SkillSecurityStore security,
+            HttpContext ctx) =>
+        {
+            if (Access.RequireAdmin(ctx, settings) is { } denied) return denied;
+            if (settings.InstanceRole == "reader") return Results.StatusCode(503);
+            var request = await ReadDecision(ctx);
+            if (request is null || !Names.Skill(name) || !Names.Version(version))
+                return Results.BadRequest(new { error = "Valid digest and reason are required." });
+            foreach (var previous in new[] { "NEEDS_REVIEW", "QUARANTINED", "SCAN_FAILED", "SCAN_INCOMPLETE" })
+            {
+                if (security.TryTransition(name, version, request.Sha256, previous,
+                    "DECLINED", Access.Actor(ctx), request.Reason))
+                    return Results.Ok(new { status = "DECLINED" });
+            }
+            return Results.Conflict(new { error = "Revision, digest or state changed." });
         }).RequireRateLimiting("publish");
 
         app.MapPost("/api/security/skills/{name}/{version}/revoke", async (
@@ -83,7 +109,7 @@ public static class SkillSecurityEndpoints
             var request = await ReadDecision(ctx);
             if (request is null || !Names.Skill(name) || !Names.Version(version))
                 return Results.BadRequest();
-            foreach (var previous in new[] { "APPROVED", "NEEDS_REVIEW", "QUARANTINED", "SCAN_FAILED", "REVOKED" })
+            foreach (var previous in new[] { "APPROVED", "NEEDS_REVIEW", "QUARANTINED", "SCAN_FAILED", "SCAN_INCOMPLETE", "REVOKED", "DECLINED" })
             {
                 if (security.TryTransition(name, version, request.Sha256, previous,
                     "QUEUED", Access.Actor(ctx), request.Reason))

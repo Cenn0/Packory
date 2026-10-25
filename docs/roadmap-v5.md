@@ -112,7 +112,7 @@ Implement **hosted → native-client acceptance → private IAM → storage/reco
 ### Wave 5 — conditional product expansion (P3; explicit ADR first)
 
 - V5-50: Research Conda, Swift Package Registry, classic Helm repositories and Windows ecosystems separately; decide demand, spec/version, maintenance and security economics before writing an adapter.
-- V5-51: AI model/large artifact distribution only after a concrete model manifest, licensing/provenance, multipart capacity, resumability and native client/consumer contract is selected. Current model catalog is **not implemented**.
+- V5-51: A metadata-only model catalog with bounded HTTPS references, declared digest, license, staged review and revocation is implemented. Model bytes, publisher identity and remote digest are not verified. Large artifact hosting still requires a concrete client contract, multipart capacity and resumability.
 - V5-52: Active-active/multi-writer only if measured single-writer limits justify complexity; design independent fencing/consensus, partition safety and failure/rejoin; **never** advertise it on the existing lease.
 - V5-53: Evaluate splitting runtimes or adding external brokers only with benchmarks, fault-domain analysis and an ADR. The modular monolith remains the default.
 
@@ -182,8 +182,8 @@ criteria, constitute independent approval, or complete the 37-point roadmap.
 | V5-25 | Maven inherited coordinates/plugin metadata retained; publication boundary/proxy/broader variants remain |
 | V5-26 | Hosted Go profile; safe mirror, checksum trust and archive/version breadth remain |
 | V5-27 | Bounded feed/query-scoped REST keyset discovery added on both providers; logical single-writer quotas and explicit indefinite retention implemented; MCP/UI discovery and physical-provider qualification remain |
-| V5-30 | **Partial:** confidential OIDC browser code/PKCE, short-lived in-process session store, CSRF on opted-in API mutations, explicit web ID-token roles and dashboard login/logout added in PR #154; real Keycloak browser E2E, robust IdP logout, live role revocation, distributed session management and independent security acceptance remain open |
-| V5-31 | Privileged dashboard depends on V5-30; current catalog UI does not satisfy it |
+| V5-30 | **Partial:** confidential OIDC browser code/PKCE, short-lived in-process session store, CSRF on opted-in API mutations, explicit web ID-token roles and dashboard login/logout added in PR #154. A controlled authentik test installation verified admin sign-in, reload, read-only administration and an audited CSRF-protected rescan without a static dashboard token. Robust IdP logout, live role revocation, distributed session management, broader provider acceptance and independent security review remain open |
+| V5-31 | **Partial:** dashboard supports feed draft creation/deletion, private hosted activation/deactivation, exact feed artifact inventory and one-time issuance/listing/revocation of scoped tokens. It exposes eight native web publisher forms behind a default-off browser SSO gate, plus MCP and model metadata review, Skill receipt lookup and bounded catalog/review paging. Native client matrices, comprehensive browser E2E, accessibility and security acceptance remain |
 | V5-32 | Existing static scan/approval does not verify publisher signatures or ownership |
 | V5-33 | Inert reviewed MCP Registry profile exists; full publisher/sync/lifecycle qualification remains |
 | V5-34 | Existing read-only global MCP; private discovery and broader independent clients remain |

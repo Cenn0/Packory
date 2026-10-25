@@ -111,8 +111,16 @@ PACKORY_OIDC_AUTHORITY=https://identity.example.test/realms/packory
 PACKORY_OIDC_AUDIENCE=packory-api
 PACKORY_OIDC_CLIENT_ID=packory-dashboard
 PACKORY_OIDC_CLIENT_SECRET_FILE=/run/secrets/packory_oidc_client_secret
+PACKORY_TRUSTED_PROXY_IP=192.0.2.10
 PACKORY_PUBLIC_BASE_URL=https://packages.example.test
 ```
+
+For an identity provider that emits Packory role claims through a custom scope
+(such as an authentik OAuth2/OIDC scope mapping), also set
+`PACKORY_OIDC_WEB_SCOPE=packory` and assign that scope mapping to the provider.
+The scope must be requested by the browser client and configured to include its
+claims in the signed ID token. Keycloak deployments that map `packory_role`
+directly into the ID token can leave this setting unset.
 
 The API audience is still required for JWT resource-server validation; the
 **web client ID is a different token audience**. Enabling SSO requires a
@@ -121,6 +129,15 @@ origin (HTTP is permitted only on loopback for development). Provide either
 `PACKORY_OIDC_CLIENT_SECRET` or preferably its operator-managed `_FILE`
 alternative, not both. Omit both client ID and secret to disable browser
 login without disabling bearer JWTs.
+
+When TLS terminates at a reverse proxy, set `PACKORY_TRUSTED_PROXY_IP` to the
+proxy's exact IP as seen by Packory. Only that peer can supply
+`X-Forwarded-Proto`; do not use a CIDR, wildcard or arbitrary client address.
+This lets secure antiforgery cookies work behind HTTPS ingress without trusting
+spoofed forwarded headers. An authenticated browser session authorizes dashboard
+API calls through its server-managed cookie and CSRF token; the UI hides the
+API-token fallback while signed in. Native registry and MCP calls retain their
+separate credential requirements.
 
 ### Identity provider mapping
 

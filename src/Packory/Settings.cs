@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Net;
 using Npgsql;
 
 namespace Packory;
@@ -68,6 +69,12 @@ public sealed class Settings
     // A confidential interactive web client is separate from the JWT API audience.
     public string? OidcClientId { get; set; }
     public string? OidcClientSecret { get; set; }
+    // Optional custom OAuth scope requested by the browser client for role claims.
+    public string? OidcWebScope { get; set; }
+    // Opt in only after the browser/native-publish contract has been qualified.
+    public bool BrowserNativePublishEnabled { get; set; }
+    // Only this reverse-proxy IP may supply X-Forwarded-Proto for browser SSO.
+    public string? TrustedProxyIp { get; set; }
     public bool OidcWebEnabled => !string.IsNullOrWhiteSpace(OidcClientId) &&
                                   !string.IsNullOrWhiteSpace(OidcClientSecret);
     public string? AdminToken { get; set; }
@@ -218,6 +225,16 @@ public sealed class Settings
             OidcClientSecret!.Length < 16 ||
             (!string.Equals(origin.Scheme, "https", StringComparison.Ordinal) && !origin.IsLoopback)))
             throw new InvalidOperationException("Browser SSO requires an OIDC issuer, confidential client, and HTTPS public origin (HTTP only on loopback).");
+        if (OidcWebScope is { Length: > 0 } webScope &&
+            (!OidcWebEnabled || webScope.Length > 128 ||
+             webScope.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '_' and not '-' and not '.')))
+            throw new InvalidOperationException("OIDC web scope must be a simple scope name and requires browser SSO.");
+        if (BrowserNativePublishEnabled && !OidcWebEnabled)
+            throw new InvalidOperationException("Browser-native publishing requires confidential browser SSO.");
+        if (TrustedProxyIp is { Length: > 0 } proxyIp &&
+            (!IPAddress.TryParse(proxyIp, out var parsedProxy) ||
+             IPAddress.Any.Equals(parsedProxy) || IPAddress.IPv6Any.Equals(parsedProxy)))
+            throw new InvalidOperationException("Trusted reverse proxy must be one specific IP address.");
         if (WriteNamespaces.Any(x => !Access.ValidNamespaceGrant(x)))
             throw new InvalidOperationException("Invalid WriteNamespaces grant.");
         if (MaxBlobStorageBytes < 0 || MaxBlobStorageBytes > 1_099_511_627_776L ||

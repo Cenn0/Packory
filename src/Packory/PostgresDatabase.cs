@@ -568,6 +568,23 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedAssetEntry> FeedAssetPage(string feedId, string kind, string? after, int limit)
+    {
+        if (limit is < 1 or > 101) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=@feed AND kind=@kind
+              AND (CAST(@after AS TEXT) IS NULL OR path COLLATE "C" > @after)
+            ORDER BY path COLLATE "C" LIMIT @limit
+            """, null, ("feed", feedId), ("kind", kind), ("after", (object?)after ?? DBNull.Value),
+            ("limit", limit));
+        using var reader = cmd.ExecuteReader();
+        var results = new List<FeedAssetEntry>();
+        while (reader.Read()) results.Add(ReadFeedAsset(reader));
+        return results;
+    }
+
     public RawFeedUsage RawFeedUsage(string feedId)
     {
         using var db = Open();
@@ -965,6 +982,28 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return items;
     }
 
+    public IReadOnlyList<FeedNugetRevision> FeedNugetPage(string feedId,
+        string? afterName, string? afterVersion, int limit)
+    {
+        if ((afterName is null) != (afterVersion is null) || limit is < 1 or > 101)
+            throw new ArgumentException("Invalid NuGet feed page.");
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions WHERE feed_id=@feed
+              AND (CAST(@afterName AS TEXT) IS NULL OR name COLLATE "C" > @afterName OR
+                   (name=@afterName AND version COLLATE "C" > @afterVersion))
+            ORDER BY name COLLATE "C",version COLLATE "C" LIMIT @limit
+            """, null, ("feed", feedId), ("afterName", (object?)afterName ?? DBNull.Value),
+            ("afterVersion", (object?)afterVersion ?? DBNull.Value), ("limit", limit));
+        using var reader = cmd.ExecuteReader();
+        var items = new List<FeedNugetRevision>();
+        while (reader.Read()) items.Add(new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)));
+        return items;
+    }
+
     public bool PublishFeedNuget(string feedId, string name, string version,
         string description, string sha512, long size, string actor)
     {
@@ -1162,6 +1201,27 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<CatalogEntry> SearchPage(string query, string? kind, int limit, int offset)
+    {
+        if (limit is < 1 or > 101 || offset is < 0 or > 10000)
+            throw new ArgumentException("Invalid catalog page.");
+        using var db = Open();
+        using var cmd = Command(db, """
+            SELECT kind,name,version,description,origin,updated_at FROM packages
+            WHERE (CAST(@kind AS TEXT) IS NULL OR kind=@kind) AND
+                  (name ILIKE @query ESCAPE '\' OR description ILIKE @query ESCAPE '\')
+            ORDER BY updated_at DESC,kind COLLATE "C",name COLLATE "C",version COLLATE "C"
+            LIMIT @limit OFFSET @offset
+            """, null, ("kind", (object?)kind ?? DBNull.Value),
+            ("query", "%" + query.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%"),
+            ("limit", limit), ("offset", offset));
+        using var reader = cmd.ExecuteReader();
+        var result = new List<CatalogEntry>();
+        while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetString(4), reader.GetString(5)));
+        return result;
+    }
+
     public QuarantineEvidence? FindQuarantine(string key)
     {
         using var db = Open();
@@ -1206,7 +1266,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
         tx.Commit();
     }
 
-    public void CreateManagedToken(ManagedTokenRecord token)
+    public void CreateManagedToken(ManagedTokenRecord token, string actor = "admin-token")
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -1217,7 +1277,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             ("id", token.Id), ("hash", token.Hash), ("role", token.Role),
             ("namespace", token.Namespace), ("expiry", token.ExpiresAt)))
             cmd.ExecuteNonQuery();
-        Audit(db, tx, "create", "managed-token", token.Id, "", "admin-token");
+        Audit(db, tx, "create", "managed-token", token.Id, "", actor);
         tx.Commit();
     }
 
@@ -1235,7 +1295,22 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             : null;
     }
 
-    public bool RevokeManagedToken(string id)
+    public IReadOnlyList<ManagedTokenSummary> ManagedTokens(int limit, int offset)
+    {
+        if (limit is < 1 or > 101 || offset < 0) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var db = Open();
+        using var cmd = Command(db,
+            "SELECT id,role,namespace,expires_at,revoked FROM managed_tokens ORDER BY expires_at DESC,id LIMIT @limit OFFSET @offset",
+            null, ("limit", limit), ("offset", offset));
+        using var reader = cmd.ExecuteReader();
+        var results = new List<ManagedTokenSummary>();
+        while (reader.Read())
+            results.Add(new ManagedTokenSummary(reader.GetString(0), reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3), reader.GetInt32(4) != 0));
+        return results;
+    }
+
+    public bool RevokeManagedToken(string id, string actor = "admin-token")
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -1243,7 +1318,7 @@ public sealed class PostgresDatabase(Settings settings) : IPackageDatabase
             "UPDATE managed_tokens SET revoked=1 WHERE id=@id AND revoked=0",
             tx, ("id", id));
         if (cmd.ExecuteNonQuery() != 1) return false;
-        Audit(db, tx, "revoke", "managed-token", id, "", "admin-token");
+        Audit(db, tx, "revoke", "managed-token", id, "", actor);
         tx.Commit();
         return true;
     }

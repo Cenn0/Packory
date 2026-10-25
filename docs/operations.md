@@ -33,6 +33,9 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_OIDC_AUDIENCE` | *(unset)* | Required JWT resource-server audience; must accompany authority |
 | `PACKORY_OIDC_CLIENT_ID` | *(unset)* | Optional confidential web-client ID for browser code + PKCE |
 | `PACKORY_OIDC_CLIENT_SECRET_FILE` | *(unset)* | Secret file, operator-mounted (or use `PACKORY_OIDC_CLIENT_SECRET`) |
+| `PACKORY_OIDC_WEB_SCOPE` | *(unset)* | Optional custom browser-client scope for role claims; request only a scope assigned to this OIDC provider |
+| `PACKORY_BROWSER_NATIVE_PUBLISH_ENABLED` | `false` | Allow CSRF-protected browser SSO on the existing NuGet, npm, Cargo, PyPI, OCI, Maven, Go and Raw native write paths. Requires confidential OIDC browser SSO; native reads and MCP remain bearer-only. |
+| `PACKORY_TRUSTED_PROXY_IP` | *(unset)* | Exact reverse-proxy IP allowed to supply `X-Forwarded-Proto`; needed for HTTPS browser SSO behind TLS termination |
 | `PACKORY_MAX_RAW_FEED_BYTES` | `0` (disabled) | Logical committed-byte limit independently applied to every private Raw feed; 0–1 TiB. |
 | `PACKORY_MAX_RAW_FEED_ARTIFACTS` | `0` (disabled) | Committed asset-count limit independently applied to every private Raw feed; 0–100,000,000. |
 | `PACKORY_MAX_BLOB_STORAGE_BYTES` | `0` (unlimited) | Optional single-process filesystem blob capacity; writes fail HTTP 507 if exceeded. Not a S3 quota. |

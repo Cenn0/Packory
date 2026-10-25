@@ -139,6 +139,18 @@ public static class McpRegistryEndpoints
             });
         });
 
+        app.MapGet("/api/v1/admin/mcp/server", (string? name, string? version,
+            Settings settings, McpRegistryStore store, HttpContext context) =>
+        {
+            if (Access.RequireAdmin(context, settings) is { } denied) return denied;
+            context.Response.Headers.CacheControl = "no-store";
+            if (name is null || version is null || !McpRegistryManifest.ValidName(name) ||
+                !McpRegistryManifest.ValidVersion(version)) return Results.BadRequest();
+            var entry = store.Find(name, version, admin: true);
+            return entry is null ? Results.NotFound()
+                : Results.Ok(new { entry = entry.Detail, history = store.History(name, version) });
+        });
+
         app.MapPost("/api/v1/admin/mcp/servers/stage", async (
             Settings settings, McpRegistryStore store, HttpContext context) =>
         {
@@ -226,7 +238,7 @@ public static class McpRegistryEndpoints
     // A protected global registry requires a global reader. A managed feed or
     // package-publishing grant must not become a registry-wide metadata grant.
     private static IResult? RequireRead(HttpContext context, Settings settings) =>
-        settings.AnonymousRead ? null : Access.RequireGlobalMcp(context, settings);
+        Access.RequireDashboardGlobalRead(context, settings);
 
     private sealed record DiscoveryQuery(string? Search, int Limit, string? Cursor, string? Version);
 

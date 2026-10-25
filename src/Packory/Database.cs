@@ -11,6 +11,8 @@ public sealed record PendingPublication(string Key, string Kind, string Name, st
 public sealed record QuarantineEvidence(string Key, string RecoveryKey, string Sha256,
     string SourceEtag, string CreatedAt, bool Completed);
 public sealed record ManagedTokenRecord(string Id, string Hash, string Role, string? Namespace, string ExpiresAt);
+public sealed record ManagedTokenSummary(string Id, string Role, string? Namespace,
+    string ExpiresAt, bool Revoked);
 public sealed record PyFileEntry(string Name, string Version, string Filename, string Sha256, long Size);
 public sealed record RawArtifactEntry(string Name, string Version, string MediaType,
     string Sha256, long Size, string CreatedAt);
@@ -607,6 +609,27 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return result;
     }
 
+    public IReadOnlyList<FeedAssetEntry> FeedAssetPage(string feedId, string kind, string? after, int limit)
+    {
+        if (limit is < 1 or > 101) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,kind,path,name,version,media_type,sha256,size,created_at
+            FROM feed_assets WHERE feed_id=$feed AND kind=$kind
+              AND ($after IS NULL OR path COLLATE BINARY > $after)
+            ORDER BY path COLLATE BINARY LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$after", (object?)after ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var reader = cmd.ExecuteReader();
+        var results = new List<FeedAssetEntry>();
+        while (reader.Read()) results.Add(ReadFeedAsset(reader));
+        return results;
+    }
+
     public RawFeedUsage RawFeedUsage(string feedId)
     {
         using var db = Open();
@@ -1077,6 +1100,32 @@ public sealed class Database(Settings settings) : IPackageDatabase
         return items;
     }
 
+    public IReadOnlyList<FeedNugetRevision> FeedNugetPage(string feedId,
+        string? afterName, string? afterVersion, int limit)
+    {
+        if ((afterName is null) != (afterVersion is null) || limit is < 1 or > 101)
+            throw new ArgumentException("Invalid NuGet feed page.");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT feed_id,name,version,description,sha512,size
+            FROM feed_nuget_versions WHERE feed_id=$feed
+              AND ($afterName IS NULL OR name COLLATE BINARY > $afterName OR
+                   (name=$afterName AND version COLLATE BINARY > $afterVersion))
+            ORDER BY name COLLATE BINARY,version COLLATE BINARY LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$feed", feedId);
+        cmd.Parameters.AddWithValue("$afterName", (object?)afterName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$afterVersion", (object?)afterVersion ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var reader = cmd.ExecuteReader();
+        var items = new List<FeedNugetRevision>();
+        while (reader.Read()) items.Add(new FeedNugetRevision(reader.GetString(0),
+            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetInt64(5)));
+        return items;
+    }
+
     public bool PublishFeedNuget(string feedId, string name, string version,
         string description, string sha512, long size, string actor)
     {
@@ -1123,6 +1172,30 @@ public sealed class Database(Settings settings) : IPackageDatabase
         command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
         command.Parameters.AddWithValue("$query", "%" + query.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
         command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 100));
+        using var reader = command.ExecuteReader();
+        var result = new List<CatalogEntry>();
+        while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetString(4), reader.GetString(5)));
+        return result;
+    }
+
+    public IReadOnlyList<CatalogEntry> SearchPage(string query, string? kind, int limit, int offset)
+    {
+        if (limit is < 1 or > 101 || offset is < 0 or > 10000)
+            throw new ArgumentException("Invalid catalog page.");
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            SELECT kind,name,version,description,origin,updated_at FROM packages
+            WHERE ($kind IS NULL OR kind=$kind) AND
+                  (name LIKE $query ESCAPE '\' OR description LIKE $query ESCAPE '\')
+            ORDER BY updated_at DESC,kind COLLATE BINARY,name COLLATE BINARY,version COLLATE BINARY
+            LIMIT $limit OFFSET $offset
+            """;
+        command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
+        command.Parameters.AddWithValue("$query", "%" + query.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
         using var reader = command.ExecuteReader();
         var result = new List<CatalogEntry>();
         while (reader.Read()) result.Add(new CatalogEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2),
@@ -1598,7 +1671,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
         tx.Commit();
     }
 
-    public void CreateManagedToken(ManagedTokenRecord token)
+    public void CreateManagedToken(ManagedTokenRecord token, string actor = "admin-token")
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -1616,7 +1689,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
             cmd.Parameters.AddWithValue("$expiry", token.ExpiresAt);
             cmd.ExecuteNonQuery();
         }
-        InsertAudit(db, tx, "create", "managed-token", token.Id, "", "admin-token");
+        InsertAudit(db, tx, "create", "managed-token", token.Id, "", actor);
         tx.Commit();
     }
 
@@ -1636,7 +1709,23 @@ public sealed class Database(Settings settings) : IPackageDatabase
             : null;
     }
 
-    public bool RevokeManagedToken(string id)
+    public IReadOnlyList<ManagedTokenSummary> ManagedTokens(int limit, int offset)
+    {
+        if (limit is < 1 or > 101 || offset < 0) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT id,role,namespace,expires_at,revoked FROM managed_tokens ORDER BY expires_at DESC,id LIMIT $limit OFFSET $offset";
+        cmd.Parameters.AddWithValue("$limit", limit);
+        cmd.Parameters.AddWithValue("$offset", offset);
+        using var reader = cmd.ExecuteReader();
+        var results = new List<ManagedTokenSummary>();
+        while (reader.Read())
+            results.Add(new ManagedTokenSummary(reader.GetString(0), reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3), reader.GetInt32(4) != 0));
+        return results;
+    }
+
+    public bool RevokeManagedToken(string id, string actor = "admin-token")
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -1645,7 +1734,7 @@ public sealed class Database(Settings settings) : IPackageDatabase
         cmd.CommandText = "UPDATE managed_tokens SET revoked=1 WHERE id=$id AND revoked=0";
         cmd.Parameters.AddWithValue("$id", id);
         if (cmd.ExecuteNonQuery() != 1) return false;
-        InsertAudit(db, tx, "revoke", "managed-token", id, "", "admin-token");
+        InsertAudit(db, tx, "revoke", "managed-token", id, "", actor);
         tx.Commit();
         return true;
     }

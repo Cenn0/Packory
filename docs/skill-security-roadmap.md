@@ -42,7 +42,7 @@ flowchart TD
 **Immutable evidence:** Persist uploaded artifact SHA-256, scan policy revision, scanner name/version/image digest, inspection coverage/completeness, report digest, timestamps, origin information when available, and decision actor. Scan the exact bytes that will later be distributed. A hash is an integrity check, not proof of publisher identity or safety.
 
 **Distinct state machines:**
-- Artifact: PENDING_SCAN -> SCANNING -> APPROVED | NEEDS_REVIEW | QUARANTINED | SCAN_FAILED, with later REVOKED, and explicit controlled rescan/review transitions.
+- Artifact: PENDING_SCAN -> SCANNING -> APPROVED | NEEDS_REVIEW | QUARANTINED | SCAN_FAILED, with later DECLINED or REVOKED and explicit controlled rescan/review transitions.
 - Job: QUEUED -> LEASED/RUNNING -> SUCCEEDED | FAILED | TIMED_OUT | CANCELLED (with durable retries/reconciliation).
 - Scan verdict and human release decision are separate records. A completed scanner run is not automatically an approval.
 
@@ -119,7 +119,7 @@ Each work package is an independently reviewable PR where feasible. Coding agent
 
 **SS-008 — Policy engine, decisions and audit** (depends on SS-004, SS-005, SS-007)
 - Implement deterministic, server-side evaluation over normalized findings and completeness. Maintain independent scan outcome, policy verdict, and release decision.
-- Support APPROVED, NEEDS_REVIEW, QUARANTINED, SCAN_FAILED, REVOKED; record policy revision, reason, actor, timestamp and optimistic concurrency. Permit manual review only where explicit policy allows, and never override a non-complete scan into an apparently scan-approved state.
+- Support APPROVED, NEEDS_REVIEW, QUARANTINED, SCAN_FAILED, DECLINED and REVOKED; record policy revision, reason, actor, timestamp and optimistic concurrency. Permit manual review only where explicit policy allows, and never override a non-complete scan into an apparently scan-approved state.
 - Prevent publisher-supplied suppression rules from automatically affecting policy; scope approvals to immutable artifact digest, never to a mutable skill name alone.
 - **Acceptance:** decision matrix for clean/CAUTION/HIGH/CRITICAL/incomplete/engine failure/manual override/changed digest; auditable transitions and negative authorization cases.
 - **Agent instruction:** "Create a deterministic Packory security policy independent of SkillSpector scoring and gate every release decision with auditable, role-controlled rules."
@@ -147,6 +147,8 @@ Each work package is an independently reviewable PR where feasible. Coding agent
 - Every report notes scanner limitations; report download never contains uncontrolled raw secrets by default.
 - **Acceptance:** synthetic attack payload cannot execute in browser; incomplete analysis prominently displayed; references and line numbers preserve meaning; UI never mistakes a score of zero for a guaranteed safe skill.
 - **Agent instruction:** "Add a reviewer-grade skill security details page with normalized findings, coverage, scan history and safe previews. Test against hostile Markdown/HTML."
+
+Testinstanz-Nachtrag (25 October 2026): Admin-only, digest-verified staged ZIP listing and bounded UTF-8 text previews are implemented. The Review panel opens `SKILL.md` first, permits selecting other files and suppresses its Approve control when the manifest cannot be inspected. A read-only pass covered 27/27 stored revisions and 106 files. Scan-version comparisons, export formats and broader accessibility/XSS acceptance in this roadmap item remain open.
 
 **SS-012 — Browser session/BFF prerequisite for privileged UI** (depends on current parent roadmap M4.1/M4.2)
 - Introduce/reuse secure same-origin server-side session for interactive admin operations; short-lived CSRF protection, secure/HttpOnly/SameSite cookie semantics, idle timeout, logout and role checks.
@@ -275,13 +277,15 @@ For **each** task:
 
 ## SkillSpector verification and repeat-scan hardening (19 October 2026)
 
-Packory's deterministic scanner policy now requires consistent, fully inspected
-coverage, not merely the aggregate `analysis_completeness.is_complete=true`.
-Any nonzero partial/entirely-uninspected/skipped/failed file counter, a nonempty
-scope exclusion or ledger exception, a known analysis limitation, or an explicitly
-reported coverage under 100% yields `SCAN_FAILED` and remains unavailable for
-MCP/REST distribution. Duplicate JSON property names and incompatible LLM
-usage metadata are rejected as ambiguous/untrusted scan results.
+Packory's deterministic scanner policy checks the coverage ledger alongside
+`analysis_completeness.is_complete`. A valid report with partial inspection,
+scope exclusions or analysis limitations remains available to administrators as
+`SCAN_INCOMPLETE`; severe findings remain `QUARANTINED`. Missing external
+references alone are shown as a caveat when every bundled file was inspected,
+and the revision still needs human review. Malformed, ambiguous or failed
+responses without a usable report remain `SCAN_FAILED`. None of these states
+approves MCP/REST distribution automatically. Duplicate JSON property names
+and incompatible LLM metadata are rejected as ambiguous scan results.
 
 Each persistent QUEUED attempt has a result identity tied to its immutable
 artifact digest **and** the revision transition timestamp. Rescanning the same

@@ -57,7 +57,7 @@ public sealed class SkillVerificationTests
     {
         var result = ValidResult();
         result["report"]!["analysis_completeness"]![field] = count;
-        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(result.ToJsonString(), Digest).State);
+        Assert.Equal("SCAN_INCOMPLETE", SkillScanResult.Parse(result.ToJsonString(), Digest).State);
     }
 
     [Theory]
@@ -69,7 +69,7 @@ public sealed class SkillVerificationTests
         var result = ValidResult();
         result["report"]!["analysis_completeness"]![field] =
             new JsonArray(JsonValue.Create("synthetic incomplete coverage"));
-        Assert.Equal("SCAN_FAILED", SkillScanResult.Parse(result.ToJsonString(), Digest).State);
+        Assert.Equal("SCAN_INCOMPLETE", SkillScanResult.Parse(result.ToJsonString(), Digest).State);
     }
 
     [Fact]

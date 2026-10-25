@@ -50,16 +50,20 @@ class StaticDashboardContractTests(unittest.TestCase):
         self.assertIn("element('td', item.remoteUrl || '')", frontend)
         self.assertNotIn("window.open(item.remoteUrl", frontend)
         self.assertNotIn("fetch(item.remoteUrl", frontend)
-        self.assertNotIn("/api/v1/admin/mcp/servers/decide", frontend)
+        self.assertIn('id="mcp-admin-panel"', page)
+        self.assertIn("if (!canAdmin()) { clearMcpAdmin(); return; }", frontend)
+        self.assertIn("/api/v1/admin/mcp/servers/decide", frontend)
 
     def test_experimental_labels_and_real_paths(self):
         page = PAGE.read_text(encoding="utf-8")
         self.assertNotIn("Packory MVP", page)
         self.assertNotIn("hub · MVP", page)
         self.assertIn("Experimental · Single-writer reference", page)
-        for url in ("/nuget/v3/index.json", "/npm/", "/cargo/index/",
-                    "/pypi/simple/", "/v2/", "/maven/", "/go/", "/raw/", "/api/skills"):
-            self.assertIn("<code>" + url + "</code>", page)
+        self.assertIn('id="publish-view"', page)
+        for kind in ("nuget", "npm", "cargo", "pypi", "oci", "maven", "go", "raw"):
+            self.assertIn('<option value="' + kind + '">', page)
+        self.assertIn('id="upload-panel"', page)
+        self.assertIn('id="publisher-review-form"', page)
         self.assertIn("docs/support-matrix.md", page)
 
 
