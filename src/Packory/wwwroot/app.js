@@ -1892,6 +1892,7 @@ const publishHelp = {
 };
 function updatePublisherForm() {
   const kind = $('publish-kind').value;
+  $('publish-result').textContent = '';
   const manifest = kind === 'oci' && $('publish-oci-mode').value === 'manifest';
   $('publish-format-help').textContent = publishHelp[kind];
   $('publish-feed-id-row').hidden = $('publish-feed').value !== 'private';
@@ -1942,7 +1943,7 @@ async function nativePublish(path, options) {
 async function publishSelectedPackage() {
   const kind = $('publish-kind').value;
   const feedId = $('publish-feed').value === 'private' ? $('publish-feed-id').value.trim() : '';
-  if (feedId && !/^[a-z0-9][a-z0-9-]{1,62}$/.test(feedId)) throw new Error('Invalid feed ID');
+  if (feedId && !/^[a-z][a-z0-9-]{1,62}[a-z0-9]$/.test(feedId)) throw new Error('Invalid feed ID');
   const privateRoot = feedId ? '/feeds/' + feedId : '';
   const name = $('publish-name').value.trim();
   const version = $('publish-version').value.trim();

@@ -7,6 +7,7 @@
 // browser can be selected with PACKORY_CHROMIUM_EXECUTABLE.
 // Optional: PACKORY_DASHBOARD_SCREENSHOT=/absolute/path/mobile.png
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
@@ -427,6 +428,118 @@ async function layoutScenario(h) {
   }
 }
 
+async function nativePublisherScenario(h, origin) {
+  await h.page.locator('#nav-publish').waitFor({ state: 'visible' });
+  await h.page.locator('#nav-publish').click();
+  const nativeCalls = [];
+  const nativePath = pathname => pathname.startsWith('/v2/') ||
+    /^(?:\/feeds\/[a-z0-9-]+)?\/(?:nuget\/v3\/push|npm\/.*|cargo\/api\/v1\/crates\/new|pypi\/legacy\/|maven\/.*|raw\/.*|api\/go\/modules)$/.test(pathname);
+  await h.page.route(url => url.origin === origin && nativePath(url.pathname), async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const call = { pathname: url.pathname, search: url.searchParams, method: request.method(),
+      headers: request.headers(), bytes: request.postDataBuffer() || Buffer.alloc(0) };
+    nativeCalls.push(call);
+    const startingOci = call.method === 'POST' && call.pathname.endsWith('/blobs/uploads/');
+    await route.fulfill({ status: startingOci ? 202 : 201,
+      headers: startingOci ? { Location: origin + call.pathname + 'synthetic-session' } : {},
+      contentType: 'application/json', body: '{}' });
+  });
+  const fixture = Buffer.from('synthetic native browser publisher fixture');
+  const upload = async (kind, privateFeed, data = {}) => {
+    await h.page.locator('#publish-kind').selectOption(kind);
+    await h.page.locator('#publish-feed').selectOption(privateFeed ? 'private' : '');
+    if (privateFeed) await h.page.locator('#publish-feed-id').fill('demo-feed');
+    if (kind === 'oci') await h.page.locator('#publish-oci-mode').selectOption(data.mode || 'blob');
+    if (data.name) await h.page.locator('#publish-name').fill(data.name);
+    if (data.version) await h.page.locator('#publish-version').fill(data.version);
+    if (data.path) await h.page.locator('#publish-path').fill(data.path);
+    if (data.media && await h.page.locator('#publish-media').isVisible())
+      await h.page.locator('#publish-media').fill(data.media);
+    if (data.metadata) await h.page.locator('#publish-metadata').fill(JSON.stringify(data.metadata));
+    if (kind !== 'oci' || data.mode !== 'manifest')
+      await h.page.locator('#publish-file').setInputFiles({ name: data.file || kind + '.bin',
+        mimeType: data.media || 'application/octet-stream', buffer: fixture });
+    if (kind === 'go') await h.page.locator('#publish-second-file').setInputFiles({
+      name: 'go.mod', mimeType: 'text/plain', buffer: Buffer.from('module example.test/demo\n') });
+    const before = nativeCalls.length;
+    await h.page.locator('#publish-submit').click();
+    await h.page.locator('#publish-result').getByText(/^Published/).waitFor();
+    const calls = nativeCalls.slice(before);
+    assert.ok(calls.length >= 1, `${kind} did not call a native endpoint`);
+    for (const call of calls) {
+      assert.equal(call.headers['x-packory-browser'], '1', `${kind} omitted browser opt-in`);
+      assert.equal(call.headers['x-packory-csrf'], 'synthetic-csrf-token', `${kind} omitted CSRF`);
+      assert.equal(call.headers.authorization, undefined, `${kind} unexpectedly used a Bearer token`);
+      assert.equal(call.pathname.startsWith('/feeds/demo-feed/') || call.pathname.startsWith('/v2/feeds/demo-feed/'), privateFeed,
+        `${kind} used the wrong feed scope`);
+    }
+    return calls;
+  };
+  for (const privateFeed of [false, true]) {
+    const root = privateFeed ? '/feeds/demo-feed' : '';
+    let calls = await upload('nuget', privateFeed, { file: 'demo.nupkg' });
+    assert.equal(calls[0].pathname, root + '/nuget/v3/push');
+    assert.equal(calls[0].method, 'PUT');
+    assert.match(calls[0].bytes.toString('latin1'), /name="package"/);
+
+    calls = await upload('npm', privateFeed, { name: '@synthetic/demo', version: '1.0.0', file: 'demo-1.0.0.tgz' });
+    assert.equal(decodeURIComponent(calls[0].pathname), root + '/npm/@synthetic/demo');
+    const npm = JSON.parse(calls[0].bytes.toString('utf8'));
+    assert.equal(npm.versions['1.0.0'].name, '@synthetic/demo');
+    assert.deepEqual(Buffer.from(npm._attachments['demo-1.0.0.tgz'].data, 'base64'), fixture);
+    assert.equal(npm.versions['1.0.0'].dist.integrity,
+      'sha512-' + crypto.createHash('sha512').update(fixture).digest('base64'));
+
+    calls = await upload('cargo', privateFeed, { name: 'synthetic-demo', version: '1.0.0', file: 'synthetic-demo-1.0.0.crate',
+      metadata: { name: 'synthetic-demo', vers: '1.0.0', deps: [], features: {} } });
+    assert.equal(calls[0].pathname, root + '/cargo/api/v1/crates/new');
+    const cargo = calls[0].bytes;
+    const metadataLength = cargo.readUInt32LE(0);
+    assert.equal(JSON.parse(cargo.subarray(4, 4 + metadataLength).toString()).name, 'synthetic-demo');
+    assert.equal(cargo.readUInt32LE(4 + metadataLength), fixture.length);
+    assert.deepEqual(cargo.subarray(8 + metadataLength), fixture);
+
+    calls = await upload('pypi', privateFeed, { name: 'synthetic-demo', version: '1.0.0', file: 'synthetic_demo-1.0.0-py3-none-any.whl' });
+    assert.equal(calls[0].pathname, root + '/pypi/legacy/');
+    assert.match(calls[0].bytes.toString('latin1'), /name="sha256_digest"/);
+    assert.ok(calls[0].bytes.toString('latin1').includes(crypto.createHash('sha256').update(fixture).digest('hex')));
+
+    calls = await upload('maven', privateFeed, { path: 'org/synthetic/demo/1.0.0/demo-1.0.0.pom', file: 'demo-1.0.0.pom', media: 'application/xml' });
+    assert.equal(calls[0].pathname, root + '/maven/org/synthetic/demo/1.0.0/demo-1.0.0.pom');
+    assert.deepEqual(calls[0].bytes, fixture);
+
+    calls = await upload('go', privateFeed, { name: 'example.test/demo', version: 'v1.0.0', file: 'demo.zip' });
+    assert.equal(calls[0].pathname, root + '/api/go/modules');
+    assert.match(calls[0].bytes.toString('latin1'), /name="module"/);
+    assert.match(calls[0].bytes.toString('latin1'), /name="mod"/);
+
+    calls = await upload('raw', privateFeed, { name: 'synthetic.demo', version: '1.0.0', file: 'demo.txt', media: 'text/plain' });
+    assert.equal(calls[0].pathname, root + '/raw/synthetic.demo/1.0.0');
+    assert.deepEqual(calls[0].bytes, fixture);
+
+    calls = await upload('oci', privateFeed, { name: 'synthetic/repo', file: 'layer.blob', mode: 'blob' });
+    const ociRoot = '/v2/' + (privateFeed ? 'feeds/demo-feed/' : '') + 'synthetic/repo';
+    assert.equal(calls[0].pathname, ociRoot + '/blobs/uploads/');
+    assert.equal(calls[0].method, 'POST');
+    assert.equal(calls[1].pathname, ociRoot + '/blobs/uploads/synthetic-session');
+    assert.equal(calls[1].search.get('digest'), 'sha256:' + crypto.createHash('sha256').update(fixture).digest('hex'));
+    assert.deepEqual(calls[1].bytes, fixture);
+
+    calls = await upload('oci', privateFeed, { name: 'synthetic/repo', version: 'v1', mode: 'manifest',
+      media: 'application/vnd.oci.image.manifest.v1+json', metadata: { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: {}, layers: [] } });
+    assert.equal(calls[0].pathname, ociRoot + '/manifests/v1');
+    assert.equal(JSON.parse(calls[0].bytes.toString()).schemaVersion, 2);
+  }
+  await h.page.locator('#publish-kind').selectOption('raw');
+  await h.page.locator('#publish-feed').selectOption('private');
+  for (const invalid of ['1demo', 'demo-', 'ab']) {
+    await h.page.locator('#publish-feed-id').fill(invalid);
+    assert.equal(await h.page.locator('#publish-feed-id').evaluate(input => input.checkValidity()), false,
+      `invalid feed ID ${invalid} was accepted by the form`);
+  }
+}
+
 async function main() {
   let assets, browser, active = 'startup', passed = 0;
   try {
@@ -521,6 +634,25 @@ async function main() {
       assert.equal(put.csrfHeader, 'synthetic-csrf-token');
       assert.equal(put.authorization, '', 'browser session must not synthesize bearer tokens');
     });
+    await scenario('native web publisher wire contracts', call => {
+      if (call.kind === 'session')
+        return { enabled: true, authenticated: true, role: 'admin', csrfToken: 'synthetic-csrf-token' };
+      return defaultReply(call);
+    }, h => nativePublisherScenario(h, assets.origin));
+    await scenario('read-only SSO hides publishing', call => {
+      if (call.kind === 'session')
+        return { enabled: true, authenticated: true, role: 'read', csrfToken: 'synthetic-csrf-token' };
+      return defaultReply(call);
+    }, async h => {
+      await h.text('sso-status', 'Signed in · read');
+      assert.equal(await h.page.locator('#nav-publish').isVisible(), false);
+      await h.page.goto(assets.origin + '/#publish');
+      await h.page.locator('#publish-file').setInputFiles({ name: 'denied.nupkg',
+        mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic') });
+      await h.page.locator('#publish-submit').click();
+      assert.equal(await h.page.locator('#publish-result').textContent(), '');
+      assert.equal(h.calls.some(x => x.pathname === '/nuget/v3/push'), false);
+    });
     await scenario('review decision binds digest and clears stale quality', defaultReply, async h => {
       await h.page.locator('a[href="#settings"][data-route]').click();
       await h.page.locator('#token').fill(oldToken);
@@ -604,7 +736,7 @@ async function main() {
           `${width}px layout overflows horizontally: ${size.content}px content / ${size.viewport}px viewport`);
       }
     });
-    process.stdout.write(`PASS MCP dashboard: ${passed}/8 scenarios (mocked API; desktop and mobile).\n`);
+    process.stdout.write(`PASS MCP dashboard: ${passed}/10 scenarios (mocked API; desktop and mobile).\n`);
   } catch (error) {
     process.stderr.write(`FAIL MCP dashboard (${active}): ${String(error.message).replace(/\s+/g, ' ')}\n`);
     process.exitCode = 1;
