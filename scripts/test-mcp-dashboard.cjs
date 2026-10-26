@@ -653,6 +653,28 @@ async function main() {
       assert.equal(await h.page.locator('#publish-result').textContent(), '');
       assert.equal(h.calls.some(x => x.pathname === '/nuget/v3/push'), false);
     });
+    let publisherSessionActive = true;
+    await scenario('expired browser publisher session requests sign-in', call => {
+      if (call.kind === 'session') return publisherSessionActive
+        ? { enabled: true, authenticated: true, role: 'admin', csrfToken: 'synthetic-csrf-token' }
+        : { enabled: true, authenticated: false, role: 'none' };
+      return defaultReply(call);
+    }, async h => {
+      await h.page.locator('#nav-publish').waitFor({ state: 'visible' });
+      await h.page.route(url => url.origin === assets.origin && url.pathname === '/raw/synthetic-expired/1',
+        route => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }));
+      await h.page.locator('#nav-publish').click();
+      await h.page.locator('#publish-kind').selectOption('raw');
+      await h.page.locator('#publish-name').fill('synthetic-expired');
+      await h.page.locator('#publish-version').fill('1');
+      await h.page.locator('#publish-file').setInputFiles({ name: 'expired.txt',
+        mimeType: 'text/plain', buffer: Buffer.from('synthetic expiry test') });
+      publisherSessionActive = false;
+      await h.page.locator('#publish-submit').click();
+      await h.page.locator('#publish-result').getByText('Sign-in expired.', { exact: false }).waitFor();
+      assert.equal(await h.page.locator('#nav-publish').isVisible(), false);
+      assert.match(await h.page.locator('#sso-status').textContent(), /Not signed in/);
+    });
     await scenario('review decision binds digest and clears stale quality', defaultReply, async h => {
       await h.page.locator('a[href="#settings"][data-route]').click();
       await h.page.locator('#token').fill(oldToken);
@@ -736,7 +758,7 @@ async function main() {
           `${width}px layout overflows horizontally: ${size.content}px content / ${size.viewport}px viewport`);
       }
     });
-    process.stdout.write(`PASS MCP dashboard: ${passed}/10 scenarios (mocked API; desktop and mobile).\n`);
+    process.stdout.write(`PASS MCP dashboard: ${passed}/11 scenarios (mocked API; desktop and mobile).\n`);
   } catch (error) {
     process.stderr.write(`FAIL MCP dashboard (${active}): ${String(error.message).replace(/\s+/g, ' ')}\n`);
     process.exitCode = 1;

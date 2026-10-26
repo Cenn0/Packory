@@ -1934,6 +1934,13 @@ async function nativePublish(path, options) {
   if (browser) requestHeaders['X-Packory-Csrf'] = state.sso.csrfToken;
   const response = await fetch(path, { ...options, headers: requestHeaders, credentials: 'same-origin' });
   if (!response.ok) {
+    if (response.status === 401 && browser) {
+      await loadSso();
+      if (!state.sso.enabled)
+        throw new Error('Sign-in status unavailable. Check the connection before retrying.');
+      if (!state.sso.authenticated)
+        throw new Error('Sign-in expired. Sign in again, select the file and retry.');
+    }
     let detail = '';
     try { const body = await response.json(); detail = body.error || body.detail || body.message || ''; } catch (_) { /* native protocol may return an empty body */ }
     throw new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
