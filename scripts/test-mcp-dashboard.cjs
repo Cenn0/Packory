@@ -538,6 +538,15 @@ async function nativePublisherScenario(h, origin) {
     assert.equal(await h.page.locator('#publish-feed-id').evaluate(input => input.checkValidity()), false,
       `invalid feed ID ${invalid} was accepted by the form`);
   }
+  // Test the application-level invariant even when native HTML form validation is bypassed.
+  // A blank private feed ID must never silently route a package to the global registry.
+  await h.page.locator('#publish-feed-id').fill('');
+  await h.page.locator('#native-publish-form').evaluate(form => { form.noValidate = true; });
+  const callsBeforeBlankFeed = nativeCalls.length;
+  await h.page.locator('#publish-submit').click();
+  await h.page.locator('#publish-result').getByText('Publication failed: Invalid feed ID').waitFor();
+  assert.equal(nativeCalls.length, callsBeforeBlankFeed,
+    'blank private feed ID unexpectedly issued a native publish request');
 }
 
 async function main() {

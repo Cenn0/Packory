@@ -1949,9 +1949,10 @@ async function nativePublish(path, options) {
 }
 async function publishSelectedPackage() {
   const kind = $('publish-kind').value;
-  const feedId = $('publish-feed').value === 'private' ? $('publish-feed-id').value.trim() : '';
-  if (feedId && !/^[a-z][a-z0-9-]{1,62}[a-z0-9]$/.test(feedId)) throw new Error('Invalid feed ID');
-  const privateRoot = feedId ? '/feeds/' + feedId : '';
+  const privateFeed = $('publish-feed').value === 'private';
+  const feedId = privateFeed ? $('publish-feed-id').value.trim() : '';
+  if (privateFeed && !/^[a-z][a-z0-9-]{1,62}[a-z0-9]$/.test(feedId)) throw new Error('Invalid feed ID');
+  const privateRoot = privateFeed ? '/feeds/' + feedId : '';
   const name = $('publish-name').value.trim();
   const version = $('publish-version').value.trim();
   const file = $('publish-file').files[0];
@@ -1995,7 +1996,7 @@ async function publishSelectedPackage() {
       { method: 'PUT', body: JSON.stringify(document), headers: { 'Content-Type': 'application/json' } });
   } else if (kind === 'oci') {
     const repository = publishPathPart(name);
-    const root = '/v2/' + (feedId ? 'feeds/' + feedId + '/' : '') + repository;
+    const root = '/v2/' + (privateFeed ? 'feeds/' + feedId + '/' : '') + repository;
     if ($('publish-oci-mode').value === 'blob') {
       const digest = 'sha256:' + publishHex(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
       const started = await nativePublish(root + '/blobs/uploads/', { method: 'POST' });
