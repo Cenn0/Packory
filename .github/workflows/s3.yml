@@ -9,7 +9,9 @@ permissions:
 jobs:
   s3:
     name: S3 backend integration
-    runs-on: ubuntu-latest
+    # Match pg_dump/pg_restore major 16 to the postgres:16 service;
+    # ubuntu-latest can resolve to 26.04 with PostgreSQL client 18.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       PACKORY_TEST_S3: http://127.0.0.1:5000
@@ -59,6 +61,11 @@ jobs:
         run: |
           pg_dump --version
           pg_restore --version
+          # Fail before destructive restore tests if a hosted runner silently changes
+          # its PostgreSQL client: pg_dump >=17 injects transaction_timeout,
+          # which PostgreSQL 16 does not support during restore.
+          pg_dump --version | grep -Eq 'PostgreSQL\\) 16\\.'
+          pg_restore --version | grep -Eq 'PostgreSQL\\) 16\\.'
           python3 -m pip install 'boto3>=1.35,<2' 'psycopg[binary]>=3,<4'
       - name: Test coordinated PostgreSQL and versioned Moto S3 snapshot and isolated restore (emulator only)
         env:
