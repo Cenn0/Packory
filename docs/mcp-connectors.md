@@ -140,8 +140,10 @@ gain authority by being delivered through a gateway.
 
 ## Qualification still required
 
-The included automated tests are *synthetic and networkless*. Before production use,
-run real PostgreSQL TLS and privilege-negative tests, verify cancellation and
+The implementation has both synthetic policy tests and PostgreSQL execution tests against
+a disposable CI database: read-only transactions, typed arguments and bounded outputs
+are verified. This is **not** a live TLS/production credential qualification. Before
+production use, run PostgreSQL VerifyFull/TLS and least-privilege tests, verify cancellation and
 read-only function behavior, inspect audit/redaction under failures, add UI authorization
 coverage, and isolate execution in a dedicated locked-down worker with network policy.
 Remote MCP server proxying is a **separate** follow-up: requires resource-specific
