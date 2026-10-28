@@ -55,6 +55,10 @@ class FakeS3:
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_recovery_guide_tracks_current_snapshot_format(self):
+        guide = (Path(__file__).resolve().parents[1] / "docs" / "pg-s3-offline-recovery.md").read_text(encoding="utf-8")
+        self.assertIn(f"Current snapshot format **{mod.SCHEMA}**", guide)
+
     def test_capture_and_verify_archive_versions_including_quarantine(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
