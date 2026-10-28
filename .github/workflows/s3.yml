@@ -55,13 +55,26 @@ jobs:
           exit 1
       - name: Test offline snapshot S3 object-version inventory against Moto (not real-provider evidence)
         run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
-      # ubuntu-latest may ship PostgreSQL 18 client utilities, whose dump
-      # includes transaction_timeout statements unsupported by PG16.
+      # ubuntu-latest currently exposes PG18 utilities, which emit
+      # transaction_timeout unsupported by the PostgreSQL 16 service.
+      # Use the same major from an isolated postgres:16 client container;
+      # no host APT repository or privileged installation is required.
       - name: Pin PostgreSQL client to the PostgreSQL 16 service major
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-16
-          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/pg16-client"
+          for command in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/pg16-client/$command" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          tool="$(basename "$0")"
+          exec docker run --rm --network host --user "$(id -u):$(id -g)" \
+            --mount type=bind,source=/tmp,target=/tmp \
+            -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE \
+            postgres:16 "$tool" "$@"
+          SH
+            chmod 755 "$RUNNER_TEMP/pg16-client/$command"
+          done
+          echo "$RUNNER_TEMP/pg16-client" >> "$GITHUB_PATH"
       - name: Install offline integration dependencies (PostgreSQL 16 client/server)
         run: |
           pg_dump --version
