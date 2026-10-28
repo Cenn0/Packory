@@ -55,10 +55,18 @@ jobs:
           exit 1
       - name: Test offline snapshot S3 object-version inventory against Moto (not real-provider evidence)
         run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
+      # ubuntu-latest may ship PostgreSQL 18 client utilities, whose dump
+      # includes transaction_timeout statements unsupported by PG16.
+      - name: Pin PostgreSQL client to the PostgreSQL 16 service major
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
       - name: Install offline integration dependencies (PostgreSQL 16 client/server)
         run: |
           pg_dump --version
           pg_restore --version
+          test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "16"
           python3 -m pip install 'boto3>=1.35,<2' 'psycopg[binary]>=3,<4'
       - name: Test coordinated PostgreSQL and versioned Moto S3 snapshot and isolated restore (emulator only)
         env:
