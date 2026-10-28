@@ -70,9 +70,10 @@ Q4 requires the separate execution boundary and threat model; it is not satisfie
 **MCP-G0 (experimental implementation, not a G1–G5 closure):** a single-writer,
 operator-provisioned PostgreSQL read connector with encrypted credentials, exact OIDC
 subject grants, named parameterized SELECT templates, result budgets, audit and a
-separate MCP tool entry point. Synthetic unit/negative tests live in
-`McpManagedConnectorTests`; live PostgreSQL, isolated-runtime and cross-client
-qualification remain required. See [connector operations](mcp-connectors.md).
+separate MCP tool entry point. Synthetic policy tests live in
+`McpManagedConnectorTests` and read-only PostgreSQL queries are exercised against
+a disposable CI service in `McpConnectorPostgresTests`; real TLS, dedicated DB
+role, isolated-runtime and cross-client qualification remain required. See [connector operations](mcp-connectors.md).
 
 
 | ID | Work to finish | Completion criteria |
