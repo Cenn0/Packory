@@ -87,6 +87,8 @@ if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_SKILL_SECURITY_ENF
     settings.SkillSecurityEnforced = skillSecurity;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_MCP_ENABLED"), out var mcpEnabled))
     settings.McpEnabled = mcpEnabled;
+if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_MCP_CONNECTORS_ENABLED"), out var connectorGatewayEnabled))
+    settings.McpConnectorsEnabled = connectorGatewayEnabled;
 if (bool.TryParse(Environment.GetEnvironmentVariable("PACKORY_VALIDATION_ENABLED"), out var validationEnabled))
     settings.ValidationEnabled = validationEnabled;
 settings.ValidationExportDirectory = Environment.GetEnvironmentVariable("PACKORY_VALIDATION_EXPORT_DIRECTORY") ?? settings.ValidationExportDirectory;
@@ -250,6 +252,19 @@ builder.Services.AddSingleton<SkillAiCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillAiCoordinator>());
 builder.Services.AddSingleton<McpRegistryStore>();
 builder.Services.AddSingleton<ModelCatalogStore>();
+if (settings.McpConnectorsEnabled)
+{
+    var deployment = McpConnectorDeployment.FromEnvironment();
+    deployment.Validate();
+    var connectorSecrets = new McpConnectorSecrets(deployment);
+    connectorSecrets.VerifyReady();
+    builder.Services.AddSingleton(deployment);
+    builder.Services.AddSingleton(connectorSecrets);
+    builder.Services.AddSingleton<McpConnectorStore>();
+    builder.Services.AddSingleton<IMcpConnectorExecutor, McpPostgresConnectorExecutor>();
+    builder.Services.AddSingleton<McpConnectorQuota>();
+    builder.Services.AddSingleton<McpConnectorGateway>();
+}
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<SkillScanCoordinator>());
@@ -268,6 +283,8 @@ if (settings.McpEnabled)
         .WithPrompts<PackoryMcpPrompts>();
     if (settings.ValidationEnabled)
         mcpBuilder.WithTools<PackoryValidationMcpTools>();
+    if (settings.McpConnectorsEnabled)
+        mcpBuilder.WithTools<PackoryConnectorMcpTools>();
 }
 builder.Services.AddRateLimiter(options =>
 {
@@ -353,6 +370,8 @@ if (!readerInstance)
         app.Services.GetRequiredService<SkillAiStore>().Initialize();
         app.Services.GetRequiredService<McpRegistryStore>().Initialize();
         app.Services.GetRequiredService<ModelCatalogStore>().Initialize();
+        if (activeSettings.McpConnectorsEnabled)
+            app.Services.GetRequiredService<McpConnectorStore>().Initialize();
         app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
     }
 }
@@ -744,6 +763,7 @@ SkillEndpoints.Map(app);
 SkillSecurityEndpoints.Map(app);
 SkillAiEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
+if (settings.McpConnectorsEnabled) McpConnectorEndpoints.Map(app);
 ModelCatalogEndpoints.Map(app);
 SkillQualityEndpoints.Map(app);
 McpOAuthResourceMetadata.Map(app);

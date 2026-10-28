@@ -36,6 +36,8 @@ public sealed class Settings
     // Security enforcement never trusts the mere existence of a staged ZIP.
     public bool SkillSecurityEnforced { get; set; } = true;
     public bool McpEnabled { get; set; } = true;
+    // Explicit opt-in: managed PostgreSQL connector gateway (never anonymous).
+    public bool McpConnectorsEnabled { get; set; }
     // Independent, opt-in validation evidence: never on by default.
     public bool ValidationEnabled { get; set; }
     public string? ValidationExportDirectory { get; set; }
@@ -106,6 +108,9 @@ public sealed class Settings
 
     public void Validate()
     {
+        if (McpConnectorsEnabled && (!McpEnabled || !OidcEnabled ||
+            InstanceRole != "writer" || RecoveryMaintenance))
+            throw new InvalidOperationException("Managed MCP connectors require OIDC, MCP and an active writer.");
         if (MaxRawFeedBytes is < 0 or > 1_099_511_627_776L ||
             MaxRawFeedArtifacts is < 0 or > 100_000_000)
             throw new InvalidOperationException("Invalid private Raw feed quota.");

@@ -188,6 +188,28 @@ public static class Access
                (scopes.Contains("packory.read") || scopes.Contains("packory.admin"));
     }
 
+    // Connector grants are NOT implied by catalog read, admin, a static
+    // Packory API token, a managed token or a browser cookie. Only a JWT
+    // verified against Packory's configured issuer/audience may use data tools.
+    public static string? ConnectorSubject(HttpContext? context, Settings settings)
+    {
+        if (!settings.McpConnectorsEnabled) return null;
+        var verified = context is null ? null : ValidatedBearer(context, settings);
+        if (verified is null) return null;
+        var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!scopes.Contains("packory.connectors.read") ||
+            !(scopes.Contains("packory.read") || scopes.Contains("packory.admin")))
+            return null;
+        var subjects = verified.FindAll("sub").Select(c => c.Value).ToArray();
+        if (subjects.Length != 1 || subjects[0].Length is < 1 or > 128 ||
+            !System.Text.RegularExpressions.Regex.IsMatch(subjects[0],
+                @"\A[A-Za-z0-9._:-]{1,128}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            return null;
+        return subjects[0];
+    }
+
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;

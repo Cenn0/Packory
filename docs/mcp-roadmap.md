@@ -11,7 +11,7 @@ Packory has four distinct responsibilities:
 | Packory MCP server | Let an authorized client discover Packory artifacts and read approved Skills | Native Streamable HTTP, legacy initialize clients and current stateless protocol, tools/resources/prompts and Skills Extension |
 | MCP Registry | Store, review, revoke and discover immutable server descriptors | Remote-only manifest profile, v0.1 read API, Packory management API and dashboard |
 | Artifact assessment | Explain independently what was checked, found and not checked | Existing offline security scan plus deterministic static Skill quality reports; signed external validation exports remain a separate opt-in feature |
-| Optional MCP gateway | Connect to approved external servers under explicit runtime policy | Not implemented; separate isolated runtime and acceptance criteria below |
+| Optional MCP gateway | Connect to approved external servers under explicit runtime policy | Full remote/isolated gateway **not implemented**; an in-process, OIDC-gated **PostgreSQL-only prototype** is tracked separately as MCP-G0 ([contract](mcp-connectors.md)) |
 
 Registry approval is a local distribution decision. It does not prove publisher identity, signature authenticity, runtime compatibility or execution safety. Quality findings do not alter the approval state or the immutable Skill bytes.
 
@@ -66,6 +66,15 @@ The quality work must expose **what was checked** rather than a single unexplain
 Q4 requires the separate execution boundary and threat model; it is not satisfied by adding a shell command, HTTP proxy or generic `run_tool` endpoint to the application. Existing signed external validation exports remain attestations from a configured independent verifier, not proof that Packory executed their tests.
 
 ## Priority 2 — optional controlled MCP gateway
+
+**MCP-G0 (experimental implementation, not a G1–G5 closure):** a single-writer,
+operator-provisioned PostgreSQL read connector with encrypted credentials, exact OIDC
+subject grants, named parameterized SELECT templates, result budgets, audit and a
+separate MCP tool entry point. Synthetic policy tests live in
+`McpManagedConnectorTests` and read-only PostgreSQL queries are exercised against
+a disposable CI service in `McpConnectorPostgresTests`; real TLS, dedicated DB
+role, isolated-runtime and cross-client qualification remain required. See [connector operations](mcp-connectors.md).
+
 
 | ID | Work to finish | Completion criteria |
 | --- | --- | --- |

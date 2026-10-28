@@ -344,3 +344,23 @@ grant and returns `feedId`, `artifacts`, `bytes`, `maxBytes`, `maxArtifacts`,
 Private npm publication rejects non-string, control-containing or oversized
 `deprecated` fields. The read path also rejects malformed persisted warnings
 instead of treating an invalid archive's metadata as a valid lifecycle state.
+
+
+## Managed MCP connector API (experimental, opt-in)
+
+Requires explicit `PACKORY_MCP_CONNECTORS_ENABLED=true`, a private AEAD keyring,
+deployment hostname allowlist and Packory OIDC; consult
+[managed MCP connectors](mcp-connectors.md) before enabling.
+Administrator-only `GET /api/admin/mcp-connectors/` and
+`GET /api/admin/mcp-connectors/{id}` return sanitized policies and a
+`hasCredential` flag, never a secret. `PUT /api/admin/mcp-connectors/{id}`
+accepts an exact revision, named read-only SQL templates, subject grants and an
+optional write-only `connectionString`. `POST /api/admin/mcp-connectors/{id}/revoke`
+disables the connector and destroys the encrypted credential. Audit summaries:
+`GET /api/admin/mcp-connectors/audit`.
+
+The separate MCP tools `list_connector_queries` and `run_connector_query`
+require a **validated** OIDC subject with both ordinary Packory MCP scope and
+`packory.connectors.read`, then verify that subject against the connector's
+explicit allowlist. Static/managed catalog tokens and cookies are insufficient.
+No free-form SQL, database address or credential is accepted from tool calls.
