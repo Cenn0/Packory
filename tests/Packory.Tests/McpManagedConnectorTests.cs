@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Packory;
+using Microsoft.AspNetCore.Http;
 using Xunit;
 
 namespace Packory.Tests;
