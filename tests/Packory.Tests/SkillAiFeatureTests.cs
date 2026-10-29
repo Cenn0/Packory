@@ -24,6 +24,17 @@ public sealed class SkillAiFeatureTests : IDisposable
             throw new InvalidOperationException("No network call is expected.");
         }
     }
+    private sealed class SyntheticTransport(string response) : ISkillAiTransport
+    {
+        public int Calls { get; private set; }
+        public string? Credential { get; private set; }
+        public string? Body { get; private set; }
+        public Task<string> SendAsync(SkillAiEndpoint endpoint, string body, string? credential, CancellationToken ct)
+        {
+            Calls++; Body = body; Credential = credential;
+            return Task.FromResult(response);
+        }
+    }
 
     public SkillAiFeatureTests()
     {
@@ -130,6 +141,74 @@ public sealed class SkillAiFeatureTests : IDisposable
         Assert.DoesNotContain("synthetic-not-a-real-secret", encrypted);
         Assert.Equal("synthetic-not-a-real-secret", crypt.Unprotect(encrypted, "one"));
         Assert.ThrowsAny<CryptographicException>(() => crypt.Unprotect(encrypted, "two"));
+    }
+
+    [Fact]
+    public async Task SavingOpenAiConfigurationPersistsEncryptedCredentialAndCompletesSyntheticProbe()
+    {
+        var ring = Path.Combine(folder, "synthetic-ring.json");
+        File.WriteAllText(ring, JsonSerializer.Serialize(new {
+            active = "k1", keys = new Dictionary<string, string> { ["k1"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) }
+        }));
+        var endpoint = new SkillAiEndpoint("openai", "openai", "https://api.openai.com/v1");
+        var openAiDeployment = new SkillAiDeployment { Endpoints = [endpoint], KeyRingFile = ring };
+        var secrets = new SkillAiSecrets(openAiDeployment);
+        var openAiStore = new SkillAiStore(new Settings { DataDirectory = folder, MetadataProvider = "sqlite" }, openAiDeployment, secrets);
+        openAiStore.Initialize();
+        var apiKey = "synthetic-test-key-never-real";
+        var cfg = openAiStore.Configuration().Configuration with {
+            Enabled = true, EndpointId = endpoint.Id, Model = "synthetic-model",
+            ExternalTransmissionApproved = true, InputUsdPerMillionTokens = 1m, OutputUsdPerMillionTokens = 1m
+        };
+
+        openAiStore.Save(new(cfg, apiKey, false, "Synthetic integration test"), "synthetic-operator");
+
+        var reloaded = openAiStore.Configuration();
+        Assert.True(reloaded.Configuration.Enabled);
+        Assert.NotNull(reloaded.Ciphertext);
+        Assert.DoesNotContain(apiKey, reloaded.Ciphertext);
+        Assert.Equal(apiKey, secrets.Unprotect(reloaded.Ciphertext!, endpoint.Id));
+
+        var job = openAiStore.Queue(null, Guid.NewGuid().ToString("N"), "synthetic-operator", "Synthetic provider probe");
+        Assert.True(openAiStore.Start(job.Id));
+        const string response = "{\"choices\":[{\"message\":{\"content\":\"OK\"}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1}}";
+        var transport = new SyntheticTransport(response);
+        var lease = new PostgresSingleWriterLease(new Settings { DataDirectory = folder, MetadataProvider = "sqlite" });
+        var gateway = new SkillAiGateway(openAiDeployment, secrets, openAiStore, transport, lease);
+        var providerResponse = await gateway.CompleteAsync(job, Guid.NewGuid().ToString("N"),
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}", CancellationToken.None);
+
+        Assert.Equal(response, providerResponse);
+        Assert.Equal(1, transport.Calls);
+        Assert.Equal(apiKey, transport.Credential);
+        Assert.DoesNotContain(apiKey, transport.Body);
+        Assert.Equal("synthetic-model", JsonNode.Parse(transport.Body!)!["model"]!.GetValue<string>());
+        Assert.True(openAiStore.HasCompletedInference(job.Id));
+        Assert.Equal(1, openAiStore.Budget().Requests);
+    }
+
+    [Fact]
+    public void MissingKeyringHasAStableSafeErrorCode()
+    {
+        var exception = Assert.Throws<SkillAiKeyringException>(() =>
+            new SkillAiSecrets(new SkillAiDeployment()).Protect("synthetic-key", "openai"));
+        Assert.Equal("Operator-managed AI keyring is not configured.", exception.Message);
+
+        var invalidRing = Path.Combine(folder, "invalid-ring.json");
+        File.WriteAllText(invalidRing, "{\"active\":\"k1\",\"keys\":{\"k1\":null}}");
+        var invalid = Assert.Throws<SkillAiKeyringException>(() =>
+            new SkillAiSecrets(new SkillAiDeployment { KeyRingFile = invalidRing }).Protect("synthetic-key", "openai"));
+        Assert.Equal("Operator-managed AI keyring is unavailable or invalid.", invalid.Message);
+    }
+
+    [Fact]
+    public void ProviderProbeErrorsAreClassifiedWithoutProviderResponseText()
+    {
+        Assert.Equal("provider_authentication_failed", SkillAiCoordinator.ProbeErrorCode(new HttpRequestException("secret body", null, HttpStatusCode.Unauthorized)));
+        Assert.Equal("provider_model_or_endpoint_not_found", SkillAiCoordinator.ProbeErrorCode(new HttpRequestException("secret body", null, HttpStatusCode.NotFound)));
+        Assert.Equal("provider_rate_limited", SkillAiCoordinator.ProbeErrorCode(new HttpRequestException("secret body", null, HttpStatusCode.TooManyRequests)));
+        Assert.Equal("provider_unavailable", SkillAiCoordinator.ProbeErrorCode(new HttpRequestException("secret body", null, HttpStatusCode.BadGateway)));
+        Assert.Equal("budget_exceeded", SkillAiCoordinator.ProbeErrorCode(new InvalidOperationException("budget_exceeded")));
     }
 
     [Fact]

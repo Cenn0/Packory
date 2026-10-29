@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -180,7 +181,7 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
         }
         catch (Exception ex)
         {
-            var error = ex is InvalidOperationException && ex.Message == "budget_exceeded" ? "budget_exceeded" : "provider_or_policy_failure";
+            var error = ProbeErrorCode(ex);
             if (writerLease.IsHeld())
                 store.Finish(job.Id, error == "budget_exceeded" ? "BUDGET_EXCEEDED" : "FAILED", error);
             if (reply is not null) await WriteAsync(reply, new { status = 503, body = "{\"error\":{\"message\":\"AI request unavailable\"}}" }, CancellationToken.None);
@@ -196,11 +197,26 @@ public sealed class SkillAiCoordinator(Settings settings, SkillAiStore store, Sk
             if (writerLease.IsHeld())
                 store.Finish(job.Id, "COMPLETED", report: "{\"connectionTest\":true,\"skillAssessment\":false}");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            if (writerLease.IsHeld()) store.Finish(job.Id, "FAILED", "connection_test_failed");
+            var error = ProbeErrorCode(ex);
+            if (writerLease.IsHeld()) store.Finish(job.Id, error == "budget_exceeded" ? "BUDGET_EXCEEDED" : "FAILED", error);
         }
     }
+    public static string ProbeErrorCode(Exception ex) => ex switch
+    {
+        InvalidOperationException { Message: "budget_exceeded" } => "budget_exceeded",
+        SkillAiKeyringException => "credential_keyring_unavailable",
+        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } => "provider_authentication_failed",
+        HttpRequestException { StatusCode: HttpStatusCode.NotFound } => "provider_model_or_endpoint_not_found",
+        HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity } => "provider_model_or_request_incompatible",
+        HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => "provider_rate_limited",
+        HttpRequestException request when request.StatusCode is { } status && (int)status >= 500 => "provider_unavailable",
+        HttpRequestException => "provider_communication_failed",
+        InvalidDataException or JsonException => "provider_response_incompatible",
+        CryptographicException => "credential_unavailable",
+        _ => "provider_communication_failed"
+    };
     private void Cleanup(string id)
     {
         if (!Id(id)) return;

@@ -31,9 +31,13 @@ public static class SkillAiEndpoints
             try { return await next(context); }
             catch (Exception ex) when (ex is InvalidDataException or JsonException or FormatException or
                                        ArgumentException or System.Security.Cryptography.CryptographicException)
-            { return Results.BadRequest(new { error = "Invalid AI configuration, exchange or credential keyring." }); }
+            { return Results.BadRequest(new { code = "invalid_ai_settings", error = "AI settings are invalid. Check the required fields, consent and configured limits." }); }
+            catch (SkillAiKeyringException)
+            { return Results.Json(new { code = "credential_keyring_unavailable", error = "The operator-managed AI credential keyring is missing or invalid." }, statusCode: 503); }
+            catch (InvalidOperationException ex) when (ex.Message == "AI assessment is disabled.")
+            { return Results.Conflict(new { code = "ai_disabled", error = "AI assessment is disabled. Enable and save the AI settings before testing the provider." }); }
             catch (InvalidOperationException)
-            { return Results.Conflict(new { error = "AI policy, revision or job state changed; refresh before retrying." }); }
+            { return Results.Conflict(new { code = "ai_state_conflict", error = "AI policy, revision or job state changed; refresh before retrying." }); }
             catch (IOException)
             { return Results.Json(new { error = "AI configuration storage is unavailable." }, statusCode: 503); }
         });
