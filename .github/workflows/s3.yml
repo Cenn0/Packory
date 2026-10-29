@@ -9,7 +9,8 @@ permissions:
 jobs:
   s3:
     name: S3 backend integration
-    runs-on: ubuntu-latest
+    # PostgreSQL 16 is the service version; keep the runner/client major aligned.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       PACKORY_TEST_S3: http://127.0.0.1:5000
@@ -55,10 +56,14 @@ jobs:
           exit 1
       - name: Test offline snapshot S3 object-version inventory against Moto (not real-provider evidence)
         run: python3 -m unittest discover -s tests -p test_pg_s3_snapshot_s3.py -v
-      - name: Install offline integration dependencies (PostgreSQL 16 client/server)
+      - name: Select PostgreSQL 16 client and install offline integration dependencies
         run: |
-          pg_dump --version
-          pg_restore --version
+          pg16_bin=/usr/lib/postgresql/16/bin
+          test -x "$pg16_bin/pg_dump"
+          test -x "$pg16_bin/pg_restore"
+          echo "$pg16_bin" >> "$GITHUB_PATH"
+          "$pg16_bin/pg_dump" --version | grep -E '^pg_dump \(PostgreSQL\) 16\.'
+          "$pg16_bin/pg_restore" --version | grep -E '^pg_restore \(PostgreSQL\) 16\.'
           python3 -m pip install 'boto3>=1.35,<2' 'psycopg[binary]>=3,<4'
       - name: Test coordinated PostgreSQL and versioned Moto S3 snapshot and isolated restore (emulator only)
         env:
