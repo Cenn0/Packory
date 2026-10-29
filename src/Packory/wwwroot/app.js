@@ -883,6 +883,18 @@ function populateAiForm(result) {
     (Number(usage.reservedMicroUsd || 0) / 1000000).toFixed(6) + ' · Requests ' +
     (usage.requests ?? 0) + ' · Missing provider usage ' + (usage.requestsWithMissingUsage ?? 0);
 }
+function aiHasUnsavedSettings() {
+  if (!aiView.configuration) return false;
+  try {
+    return JSON.stringify(aiConfigurationFromForm(aiView.configuration)) !== JSON.stringify(aiView.configuration) ||
+      $('ai-key').value.length > 0 || $('ai-clear-key').checked;
+  } catch (_) { return true; }
+}
+function updateAiUnsavedStatus() {
+  const status = $('ai-status');
+  if (aiHasUnsavedSettings()) status.textContent = 'Unsaved AI settings. Save configuration before testing the provider.';
+  else if (status.textContent.startsWith('Unsaved AI settings.')) status.textContent = '';
+}
 async function loadSkillAi() {
   const requestId = ++aiView.requestId;
   const token = state.token;
@@ -1037,7 +1049,18 @@ $('ai-settings').addEventListener('submit', async event => {
   } catch (error) { if (state.token === token) $('ai-status').textContent = 'Save failed: ' + error.message; }
   finally { $('ai-save').disabled = false; }
 });
+$('ai-settings').addEventListener('input', updateAiUnsavedStatus);
+$('ai-settings').addEventListener('change', updateAiUnsavedStatus);
 $('ai-probe').addEventListener('click', async () => {
+  if (!aiView.configuration) return;
+  if (aiHasUnsavedSettings()) {
+    $('ai-status').textContent = 'Unsaved AI settings. Save configuration before testing the provider.';
+    return;
+  }
+  if (!aiView.configuration.enabled) {
+    $('ai-status').textContent = 'AI is disabled in the saved configuration. Enable and save AI before testing the provider.';
+    return;
+  }
   const reason = window.prompt('Audit reason for testing the configured AI provider:');
   if (reason === null) return;
   if (!aiValidReason(reason)) { $('ai-status').textContent = '3–512 characters required.'; return; }

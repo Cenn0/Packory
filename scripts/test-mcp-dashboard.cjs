@@ -373,9 +373,15 @@ async function invalidationScenario(h) {
 
 async function skillAiScenario(h) {
   await h.authenticate();
+  h.page.on('dialog', dialog => dialog.accept(dialog.type() === 'prompt' ? reason : undefined));
   await h.text('ai-status', 'AI is disabled');
   assert.equal(await h.page.locator('#skill-ai-panel').isVisible(), true);
   assert.equal(await h.page.locator('#ai-enabled').isChecked(), false);
+  let probeCount = h.calls.filter(call => call.kind === 'ai-probe').length;
+  await h.page.locator('#ai-probe').click();
+  await h.text('ai-status', 'AI is disabled in the saved configuration');
+  assert.equal(h.calls.filter(call => call.kind === 'ai-probe').length, probeCount,
+    'A disabled saved configuration must not queue a probe.');
   await h.text('ai-jobs', 'old-skill');
   await h.page.locator('#ai-jobs button').first().click();
   await h.text('ai-job-detail', hostile);
@@ -392,10 +398,14 @@ async function skillAiScenario(h) {
   await h.page.locator('#ai-output-rate').fill('2');
   await h.page.locator('#ai-transmission').check();
   await h.page.locator('#ai-reason').fill('Synthetic opt in');
+  await h.page.locator('#ai-probe').click();
+  await h.text('ai-status', 'Unsaved AI settings');
+  assert.equal(h.calls.filter(call => call.kind === 'ai-probe').length, probeCount,
+    'Unsaved form values must not queue a probe.');
   const oldCount = h.calls.length;
   await h.page.locator('#ai-save').click();
   await h.page.waitForFunction(() => document.getElementById('ai-key').value === '');
-  await h.text('ai-status', 'AI is disabled');
+  await h.text('ai-status', 'AI enabled; human approval');
   const put = h.calls.slice(oldCount).find(call => call.kind === 'ai-settings-save');
   assert.ok(put, 'AI settings must be sent to backend');
   assert.equal(put.method, 'PUT');
@@ -404,6 +414,13 @@ async function skillAiScenario(h) {
   assert.equal(put.body.reason, 'Synthetic opt in');
   assert.equal(put.body.apiKey, 'synthetic-do-not-store');
   assert.equal(await h.page.locator('#ai-key').inputValue(), '', 'Credential must leave the input after save');
+
+  probeCount = h.calls.filter(call => call.kind === 'ai-probe').length;
+  await h.page.locator('#ai-probe').click();
+  await h.text('ai-status', 'Provider connection test queued');
+  const probe = h.calls.slice(oldCount).find(call => call.kind === 'ai-probe');
+  assert.ok(probe, 'A saved, enabled configuration must be used for the provider probe.');
+  assert.equal(probe.body.reason, reason);
 }
 
 async function layoutScenario(h) {
@@ -720,7 +737,20 @@ async function main() {
       assert.doesNotMatch(await h.page.locator('#skills').textContent(), /old-skill/);
       assert.equal(await h.page.locator('#skills .inline-detail-panel').count(), 0);
     });
-    await scenario('AI settings and assessment content remain inert', defaultReply, async h => {
+    let savedAiConfiguration = null;
+    const aiReply = call => {
+      if (call.kind === 'ai-settings-save') {
+        savedAiConfiguration = { ...call.body.configuration, revision: 1 };
+        return { configuration: savedAiConfiguration, hasApiKey: !!call.body.apiKey };
+      }
+      const result = defaultReply(call);
+      if (call.kind === 'ai-settings' && savedAiConfiguration) {
+        result.configuration = savedAiConfiguration;
+        result.hasApiKey = true;
+      }
+      return result;
+    };
+    await scenario('AI settings and assessment content remain inert', aiReply, async h => {
       await h.page.locator('a[href="#settings"][data-route]').click();
       await h.page.locator('#token').fill(oldToken);
       await h.page.locator('#token').press('Tab');
