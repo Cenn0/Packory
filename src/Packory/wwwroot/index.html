@@ -141,7 +141,7 @@
             <form id="native-publish-form" class="settings-groups">
               <label for="publish-kind">Ecosystem<select id="publish-kind" required><option value="nuget">NuGet package</option><option value="npm">npm tarball</option><option value="cargo">Cargo crate</option><option value="pypi">Python distribution</option><option value="oci">OCI blob or manifest</option><option value="maven">Maven file</option><option value="go">Go module</option><option value="raw">Raw artifact</option></select></label>
               <label for="publish-feed">Destination<select id="publish-feed"><option value="">Global registry</option><option value="private">Private feed</option></select></label>
-              <label id="publish-feed-id-row" for="publish-feed-id" hidden>Feed ID<input id="publish-feed-id" pattern="[a-z0-9][a-z0-9-]{1,62}" maxlength="63" autocomplete="off" placeholder="team-packages"></label>
+              <label id="publish-feed-id-row" for="publish-feed-id" hidden>Feed ID<input id="publish-feed-id" pattern="[a-z][a-z0-9\-]{1,62}[a-z0-9]" minlength="3" maxlength="64" autocomplete="off" placeholder="team-packages"></label>
               <p id="publish-format-help" class="muted"></p>
               <label id="publish-name-row" for="publish-name">Package name or module path<input id="publish-name" maxlength="256" autocomplete="off"></label>
               <label id="publish-version-row" for="publish-version">Version or OCI tag<input id="publish-version" maxlength="128" autocomplete="off"></label>

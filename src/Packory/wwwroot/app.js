@@ -1915,6 +1915,7 @@ const publishHelp = {
 };
 function updatePublisherForm() {
   const kind = $('publish-kind').value;
+  $('publish-result').textContent = '';
   const manifest = kind === 'oci' && $('publish-oci-mode').value === 'manifest';
   $('publish-format-help').textContent = publishHelp[kind];
   $('publish-feed-id-row').hidden = $('publish-feed').value !== 'private';
@@ -1956,6 +1957,13 @@ async function nativePublish(path, options) {
   if (browser) requestHeaders['X-Packory-Csrf'] = state.sso.csrfToken;
   const response = await fetch(path, { ...options, headers: requestHeaders, credentials: 'same-origin' });
   if (!response.ok) {
+    if (response.status === 401 && browser) {
+      await loadSso();
+      if (!state.sso.enabled)
+        throw new Error('Sign-in status unavailable. Check the connection before retrying.');
+      if (!state.sso.authenticated)
+        throw new Error('Sign-in expired. Sign in again, select the file and retry.');
+    }
     let detail = '';
     try { const body = await response.json(); detail = body.error || body.detail || body.message || ''; } catch (_) { /* native protocol may return an empty body */ }
     throw new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
@@ -1965,7 +1973,7 @@ async function nativePublish(path, options) {
 async function publishSelectedPackage() {
   const kind = $('publish-kind').value;
   const feedId = $('publish-feed').value === 'private' ? $('publish-feed-id').value.trim() : '';
-  if (feedId && !/^[a-z0-9][a-z0-9-]{1,62}$/.test(feedId)) throw new Error('Invalid feed ID');
+  if (feedId && !/^[a-z][a-z0-9-]{1,62}[a-z0-9]$/.test(feedId)) throw new Error('Invalid feed ID');
   const privateRoot = feedId ? '/feeds/' + feedId : '';
   const name = $('publish-name').value.trim();
   const version = $('publish-version').value.trim();
