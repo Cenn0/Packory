@@ -24,6 +24,17 @@ public sealed class SkillAiFeatureTests : IDisposable
             throw new InvalidOperationException("No network call is expected.");
         }
     }
+    private sealed class SyntheticTransport(string response) : ISkillAiTransport
+    {
+        public int Calls { get; private set; }
+        public string? Credential { get; private set; }
+        public string? Body { get; private set; }
+        public Task<string> SendAsync(SkillAiEndpoint endpoint, string body, string? credential, CancellationToken ct)
+        {
+            Calls++; Body = body; Credential = credential;
+            return Task.FromResult(response);
+        }
+    }
 
     public SkillAiFeatureTests()
     {
@@ -133,7 +144,7 @@ public sealed class SkillAiFeatureTests : IDisposable
     }
 
     [Fact]
-    public void SavingOpenAiConfigurationPersistsOnlyEncryptedCredentialAndReloadsIt()
+    public async Task SavingOpenAiConfigurationPersistsEncryptedCredentialAndCompletesSyntheticProbe()
     {
         var ring = Path.Combine(folder, "synthetic-ring.json");
         File.WriteAllText(ring, JsonSerializer.Serialize(new {
@@ -157,6 +168,23 @@ public sealed class SkillAiFeatureTests : IDisposable
         Assert.NotNull(reloaded.Ciphertext);
         Assert.DoesNotContain(apiKey, reloaded.Ciphertext);
         Assert.Equal(apiKey, secrets.Unprotect(reloaded.Ciphertext!, endpoint.Id));
+
+        var job = openAiStore.Queue(null, Guid.NewGuid().ToString("N"), "synthetic-operator", "Synthetic provider probe");
+        Assert.True(openAiStore.Start(job.Id));
+        const string response = "{\"choices\":[{\"message\":{\"content\":\"OK\"}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1}}";
+        var transport = new SyntheticTransport(response);
+        var lease = new PostgresSingleWriterLease(new Settings { DataDirectory = folder, MetadataProvider = "sqlite" });
+        var gateway = new SkillAiGateway(openAiDeployment, secrets, openAiStore, transport, lease);
+        var providerResponse = await gateway.CompleteAsync(job, Guid.NewGuid().ToString("N"),
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}", CancellationToken.None);
+
+        Assert.Equal(response, providerResponse);
+        Assert.Equal(1, transport.Calls);
+        Assert.Equal(apiKey, transport.Credential);
+        Assert.DoesNotContain(apiKey, transport.Body);
+        Assert.Equal("synthetic-model", JsonNode.Parse(transport.Body!)!["model"]!.GetValue<string>());
+        Assert.True(openAiStore.HasCompletedInference(job.Id));
+        Assert.Equal(1, openAiStore.Budget().Requests);
     }
 
     [Fact]
