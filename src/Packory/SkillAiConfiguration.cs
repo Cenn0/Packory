@@ -7,6 +7,9 @@ using System.Text.RegularExpressions;
 
 namespace Packory;
 
+public sealed class SkillAiKeyringException(string message, Exception? innerException = null)
+    : Exception(message, innerException);
+
 /// <summary>Deployment policy is intentionally not writable from the browser.</summary>
 public sealed record SkillAiEndpoint(string Id, string Provider, string BaseUrl,
     string[]? AllowedPrivateCidrs = null)
@@ -124,13 +127,18 @@ public sealed class SkillAiSecrets(SkillAiDeployment deployment)
     private Ring ReadRing()
     {
         if (string.IsNullOrWhiteSpace(deployment.KeyRingFile))
-            throw new InvalidDataException("An operator-managed AI keyring is required.");
-        var ring = SkillAiJson.Read<Ring>(File.ReadAllText(deployment.KeyRingFile), 16384);
-        if (ring.Keys is null || ring.Active is null || ring.Keys.Count is < 1 or > 8 || !ring.Keys.ContainsKey(ring.Active) ||
-            ring.Keys.Any(k => !Regex.IsMatch(k.Key, "^[a-zA-Z0-9_-]{1,64}$", RegexOptions.CultureInvariant) ||
-                Convert.FromBase64String(k.Value).Length != 32))
-            throw new InvalidDataException("Invalid AI keyring.");
-        return ring;
+            throw new SkillAiKeyringException("Operator-managed AI keyring is not configured.");
+        try
+        {
+            var ring = SkillAiJson.Read<Ring>(File.ReadAllText(deployment.KeyRingFile), 16384);
+            if (ring.Keys is null || ring.Active is null || ring.Keys.Count is < 1 or > 8 || !ring.Keys.ContainsKey(ring.Active) ||
+                ring.Keys.Any(k => !Regex.IsMatch(k.Key, "^[a-zA-Z0-9_-]{1,64}$", RegexOptions.CultureInvariant) ||
+                    Convert.FromBase64String(k.Value).Length != 32))
+                throw new InvalidDataException("Invalid keyring structure.");
+            return ring;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException or FormatException or ArgumentException)
+        { throw new SkillAiKeyringException("Operator-managed AI keyring is unavailable or invalid.", ex); }
     }
     public string Protect(string value, string endpointId)
     {
