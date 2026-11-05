@@ -22,6 +22,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Publish and serve Packory
+        id: packory_start
         run: |
           dotnet publish src/Packory/Packory.csproj -c Release -o /tmp/packory-server
           mkdir -p /tmp/packory-data
@@ -34,6 +35,7 @@ jobs:
       - name: Restore a real package without fallback source
         run: bash scripts/smoke-nuget.sh
       - name: Install a real npm package through Packory
+        if: ${{ !cancelled() && steps.packory_start.outcome == 'success' }}
         run: PACKORY_PUBLIC_BASE_URL=http://localhost:8080 bash scripts/smoke-npm.sh
       - name: Stop service
         if: always()
