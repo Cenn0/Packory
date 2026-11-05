@@ -6,10 +6,10 @@ WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/smoke-live.
 
 
 def _step(workflow: str, name: str) -> str:
-    marker = f"      - name: {name}\\n"
+    marker = f"      - name: {name}\n"
     if marker not in workflow:
         raise AssertionError(f"Missing live-mirror step: {name}")
-    return workflow.split(marker, 1)[1].split("\\n      - name: ", 1)[0]
+    return workflow.split(marker, 1)[1].split("\n      - name: ", 1)[0]
 
 
 class LiveSmokeIndependenceTests(unittest.TestCase):
