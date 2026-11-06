@@ -34,6 +34,9 @@ jobs:
           exit 1
       - name: Restore a real package without fallback source
         run: bash scripts/smoke-nuget.sh
+      - name: Diagnose NuGet mirror failure with bounded status-only probes
+        if: ${{ !cancelled() && failure() && steps.packory_start.outcome == 'success' }}
+        run: bash scripts/diagnose-live-nuget.sh
       - name: Install a real npm package through Packory
         if: ${{ !cancelled() && steps.packory_start.outcome == 'success' }}
         run: PACKORY_PUBLIC_BASE_URL=http://localhost:8080 bash scripts/smoke-npm.sh
