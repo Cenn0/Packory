@@ -98,8 +98,11 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_capability_consistency.py -v
       - name: Validate shell smoke scripts
         run: bash -n scripts/smoke-nuget.sh scripts/smoke-npm.sh scripts/smoke-hosted.sh scripts/smoke-ecosystems.sh scripts/smoke-oci-docker.sh scripts/smoke-oci-helm.sh scripts/smoke-raw.sh scripts/smoke-maven.sh scripts/smoke-maven-deploy.sh scripts/smoke-go.sh scripts/smoke-feed-nuget.sh scripts/smoke-feed-raw.sh scripts/smoke-feed-maven.sh scripts/smoke-feed-go.sh scripts/smoke-feed-npm.sh scripts/smoke-feed-ecosystems.sh scripts/smoke-feed-oci.sh
-      - name: Check independent live-mirror protocol gates (static regression)
-        run: python3 -m unittest discover -s tests -p test_live_smoke_independence.py -v
+      - name: Check independent live-mirror protocol gates and bounded diagnostics
+        run: |
+          python3 -m unittest discover -s tests -p test_live_smoke_independence.py -v
+          python3 -m unittest discover -s tests -p test_live_nuget_diagnostics.py -v
+          bash -n scripts/diagnose-live-nuget.sh
       - name: Exercise real hosted NuGet and npm clients
         run: bash scripts/smoke-hosted.sh
       - name: Record allowlisted client and runner versions
