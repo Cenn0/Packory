@@ -29,8 +29,16 @@ jobs:
           PACKORY_DATA_DIRECTORY=/tmp/packory-data PACKORY_PUBLIC_BASE_URL=http://localhost:8080 \
             ASPNETCORE_URLS=http://127.0.0.1:8080 dotnet /tmp/packory-server/Packory.dll >/tmp/packory.log 2>&1 &
           echo $! > /tmp/packory.pid
-          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/health/ready && exit 0; sleep 1; done
-          cat /tmp/packory.log
+          # This is a public workflow: readiness must not echo response bodies,
+          # server logs, request details or runtime configuration into CI output.
+          for i in $(seq 1 40); do
+            if curl --fail --silent --output /dev/null --connect-timeout 2 --max-time 3 \
+              --proto '=http' --max-redirs 0 http://127.0.0.1:8080/health/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          printf 'Packory readiness failed; server logs withheld from public CI.\n' >&2
           exit 1
       - name: Restore a real package without fallback source
         run: bash scripts/smoke-nuget.sh
