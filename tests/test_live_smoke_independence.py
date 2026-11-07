@@ -23,6 +23,17 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         self.assertIn("/health/ready", start)
         self.assertIn("exit 1", start)
 
+    def test_public_readiness_suppresses_untrusted_output_and_is_bounded(self) -> None:
+        start = _step(self.workflow, "Publish and serve Packory")
+        # A failed application startup must not dump raw logs into public CI.
+        self.assertNotIn("cat /tmp/packory.log", start)
+        self.assertNotIn("curl -fsS", start)
+        self.assertIn("--fail --silent --output /dev/null", start)
+        self.assertIn("--connect-timeout 2 --max-time 3", start)
+        self.assertIn("--proto '=http' --max-redirs 0", start)
+        self.assertIn("server logs withheld from public CI", start)
+        self.assertIn("exit 1", start)
+
     def test_npm_runs_after_nuget_failure_only_if_packory_started(self) -> None:
         nuget_name = "Restore a real package without fallback source"
         npm_name = "Install a real npm package through Packory"
