@@ -19,4 +19,5 @@ probe_status() {
 probe_status 'Public NuGet artifact' "$PUBLIC_BASE/$PACKAGE" https
 probe_status 'Public NuGet checksum' "$PUBLIC_BASE/$PACKAGE.sha512" https
 probe_status 'Packory loopback artifact' "$LOCAL_BASE/$PACKAGE" http
+probe_status 'Packory loopback checksum' "$LOCAL_BASE/$PACKAGE.sha512" http
 printf 'Diagnostic only: status codes do not establish root cause.\n'
