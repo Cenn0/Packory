@@ -1,5 +1,10 @@
 """Static regressions for independent public NuGet/npm live-mirror acceptance."""
 from pathlib import Path
+import json
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/smoke-live.yml")
@@ -47,6 +52,33 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         self.assertIn("bash scripts/smoke-nuget.sh", nuget)
         self.assertNotIn("continue-on-error:", nuget)
         self.assertIn("if: always()", _step(self.workflow, "Stop service"))
+
+
+    def test_npm_registry_bypass_never_discloses_resolved_origin(self) -> None:
+        # The resolved URL comes from the lockfile and may contain userinfo or
+        # sensitive query parameters. A failing public smoke must not echo it.
+        script = (Path(__file__).resolve().parents[1] / "scripts/smoke-npm.sh").read_text(encoding="utf-8")
+        self.assertIn("resolved source withheld from public logs", script)
+        self.assertNotIn('console.error("Install bypassed Packory:",url)', script)
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable for the runtime diagnostic assertion")
+        # Extract the second node -e block without executing npm or any network request.
+        code = script.split("node -e '\\n", 1)[1].split("\\n'\\n", 1)[0]
+        untrusted = "https://unexpected.example.invalid/package?secret=synthetic-only"
+        with tempfile.TemporaryDirectory() as directory:
+            lock = {"packages": {"node_modules/is-number": {"resolved": untrusted}}}
+            (Path(directory) / "package-lock.json").write_text(
+                json.dumps(lock), encoding="utf-8"
+            )
+            result = subprocess.run(
+                [node, "-e", code], cwd=directory, capture_output=True, text=True,
+                timeout=10, check=False,
+                env={**os.environ, "PACKORY_PUBLIC_BASE_URL": "http://localhost:8080"},
+            )
+        self.assertEqual(1, result.returncode)
+        self.assertIn("resolved source withheld from public logs", result.stderr)
+        self.assertNotIn(untrusted, result.stderr + result.stdout)
 
 
 if __name__ == "__main__":
