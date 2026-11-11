@@ -15,7 +15,7 @@ const raw=lock.packages?.["node_modules/is-number"]?.resolved;
 const base=process.env.PACKORY_PUBLIC_BASE_URL || "http://localhost:8080";
 let sameRegistry=false;
 try {
-  const trusted=new URL(base.replace(/\\/+$/, "") + "/npm/");
+  const trusted=new URL(base + (base.endsWith("/") ? "npm/" : "/npm/"));
   const candidate=new URL(raw);
   // Comparing string prefixes is insufficient: localhost:8080.evil.invalid
   // would pass despite resolving to an unrelated host.
