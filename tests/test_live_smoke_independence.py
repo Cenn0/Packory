@@ -64,7 +64,7 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         if node is None:
             self.skipTest("node is unavailable for the runtime diagnostic assertion")
         # Extract the second node -e block without executing npm or any network request.
-        code = script.split("node -e '\\n", 1)[1].split("\\n'\\n", 1)[0]
+        code = script.split("node -e '\n", 1)[1].split("\n'\n", 1)[0]
         untrusted = "https://unexpected.example.invalid/package?secret=synthetic-only"
         with tempfile.TemporaryDirectory() as directory:
             lock = {"packages": {"node_modules/is-number": {"resolved": untrusted}}}
