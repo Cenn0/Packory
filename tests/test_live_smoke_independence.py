@@ -81,5 +81,43 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         self.assertNotIn(untrusted, result.stderr + result.stdout)
 
 
+    def test_npm_lock_source_requires_exact_registry_origin_and_path(self) -> None:
+        # A string-prefix check accepts lookalike hosts, userinfo and off-registry paths.
+        # Only synthetic URLs are tested; never print a rejected source to CI logs.
+        script = (Path(__file__).resolve().parents[1] / "scripts/smoke-npm.sh").read_text(encoding="utf-8")
+        self.assertIn("candidate.origin === trusted.origin", script)
+        self.assertIn("candidate.pathname.startsWith(trusted.pathname)", script)
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node unavailable")
+        code = script.split("node -e '\\n", 1)[1].split("\\n'\\n", 1)[0]
+        cases = [
+            ("http://localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", True),
+            ("http://localhost:8080.evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
+            ("http://localhost:8080@evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
+            ("http://localhost:8080/other/is-number-7.0.0.tgz", False),
+            ("http://name:synthetic-only@localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", False),
+            ("http://localhost:8080/npm/is-number/-/is-number-7.0.0.tgz?token=synthetic-only", False),
+            ("/npm/is-number/-/is-number-7.0.0.tgz", False),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            lockfile = Path(directory) / "package-lock.json"
+            for resolved, expected_success in cases:
+                with self.subTest(expected_success=expected_success, url_type=cases.index((resolved, expected_success))):
+                    lockfile.write_text(json.dumps({
+                        "packages": {"node_modules/is-number": {"resolved": resolved}}
+                    }), encoding="utf-8")
+                    result = subprocess.run(
+                        [node, "-e", code], cwd=directory, capture_output=True,
+                        text=True, timeout=10, check=False,
+                        env={**os.environ, "PACKORY_PUBLIC_BASE_URL": "http://localhost:8080"},
+                    )
+                    self.assertEqual(result.returncode == 0, expected_success)
+                    self.assertNotIn(resolved, result.stdout + result.stderr)
+                    if not expected_success:
+                        self.assertIn("resolved source withheld from public logs", result.stderr)
+
+
+
 if __name__ == "__main__":
     unittest.main()
