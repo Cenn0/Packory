@@ -13,7 +13,7 @@ const fs=require("node:fs");
 const lock=JSON.parse(fs.readFileSync("package-lock.json","utf8"));
 const url=lock.packages["node_modules/is-number"].resolved;
 if (!url.startsWith(process.env.PACKORY_PUBLIC_BASE_URL || "http://localhost:8080")) {
-  console.error("Install bypassed Packory:",url); process.exit(1);
+  console.error("Install bypassed Packory; resolved source withheld from public logs."); process.exit(1);
 }
 '
 printf 'npm live mirror smoke succeeded (is-number 7.0.0)\n'
