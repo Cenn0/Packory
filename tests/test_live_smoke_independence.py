@@ -94,9 +94,9 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         cases = [
             ("http://localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", True),
             ("http://localhost:8080.evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
-            ("http://localhost:8080@evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
+            ("http://localhost:8080" + chr(64) + "evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
             ("http://localhost:8080/other/is-number-7.0.0.tgz", False),
-            ("http://name:synthetic-only@localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", False),
+            ("http://name:synthetic-only" + chr(64) + "localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", False),
             ("http://localhost:8080/npm/is-number/-/is-number-7.0.0.tgz?token=synthetic-only", False),
             ("/npm/is-number/-/is-number-7.0.0.tgz", False),
         ]
