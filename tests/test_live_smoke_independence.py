@@ -90,7 +90,7 @@ class LiveSmokeIndependenceTests(unittest.TestCase):
         node = shutil.which("node")
         if node is None:
             self.skipTest("node unavailable")
-        code = script.split("node -e '\\n", 1)[1].split("\\n'\\n", 1)[0]
+        code = script.split("node -e '\n", 1)[1].split("\n'\n", 1)[0]
         cases = [
             ("http://localhost:8080/npm/is-number/-/is-number-7.0.0.tgz", True),
             ("http://localhost:8080.evil.invalid/npm/is-number/-/is-number-7.0.0.tgz", False),
