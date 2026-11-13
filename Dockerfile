@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 COPY src/Packory/Packory.csproj src/Packory/
 RUN dotnet restore src/Packory/Packory.csproj
