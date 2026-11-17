@@ -145,11 +145,12 @@ public sealed class McpConnectorMcpTools(IHttpContextAccessor accessor, Settings
     public async Task<object> ListConnectorTools(string connectorId,
         CancellationToken cancellationToken = default)
     {
-        Authorized(connectorId);
+        var ctx = Authorized(connectorId);
         var record = store.Get(connectorId) ?? throw new McpProtocolException(
             "Unknown connector", McpErrorCode.InvalidParams);
         var tools = await runtime.DiscoverAsync(record, cancellationToken);
-        return new { connectorId, tools };
+        return new { connectorId, tools = IsAdmin(ctx) ? tools : tools.Where(t =>
+            t.Allowed && Access.HasConnectorGrant(ctx, settings, connectorId, t.Name)).ToArray() };
     }
 
     [McpServerTool(Name = "call_connector_tool", ReadOnly = false)]
