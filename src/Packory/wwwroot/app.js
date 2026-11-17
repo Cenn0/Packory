@@ -6,7 +6,7 @@ const canWrite = () => state.sso.authenticated ? ['admin', 'write'].includes(sta
 function updateAccessUi() {
   $('nav-publish').hidden = !canWrite();
   $('nav-feeds').hidden = !(canAdmin() || state.sso.authenticated || (state.access && state.access.role !== 'anonymous'));
-  for (const id of ['nav-reviews', 'nav-activity']) $(id).hidden = !canAdmin();
+  for (const id of ['nav-reviews', 'nav-activity', 'nav-connectors']) $(id).hidden = !canAdmin();
   $('upload-panel').hidden = !canWrite();
   $('jump-to-import').hidden = !canWrite();
 }
@@ -1111,6 +1111,8 @@ async function loadSso() {
     await Promise.all([load(), loadSecurity(), loadMcpServers(), loadSkillAi(), loadManagedTokens()]);
     if (activeCatalogTab === 'mcp') await loadMcpAdmin();
     if (activeRoute === 'models') await Promise.all([loadModels(), loadModelAdmin()]);
+  if (activeRoute === 'connectors') await loadConnectors();
+    if (activeRoute === 'connectors') await loadConnectors();
   } catch (_) {
     state.sso = { enabled: false, authenticated: false, role: 'none', csrfToken: null };
     $('api-token-fallback').hidden = false;
@@ -1165,7 +1167,7 @@ loadSso();
 
 
 // Task navigation and product views. Existing API authority remains server-side.
-const appRoutes = ['catalog', 'models', 'feeds', 'publish', 'reviews', 'activity', 'settings'];
+const appRoutes = ['catalog', 'models', 'connectors', 'feeds', 'publish', 'reviews', 'activity', 'settings'];
 let activeRoute = 'catalog';
 function showRoute(route, refresh = true) {
   if (!appRoutes.includes(route)) route = 'catalog';
@@ -1184,6 +1186,7 @@ function showRoute(route, refresh = true) {
   if (!refresh || (!changed && route === 'catalog')) return;
   if (route === 'catalog') { load(); loadMcpServers(); if (activeCatalogTab === 'mcp') loadMcpAdmin(); }
   if (route === 'models') { loadModels(); loadModelAdmin(); }
+  if (route === 'connectors') loadConnectors();
   if (route === 'feeds') loadFeeds();
   if (route === 'reviews') loadSecurity();
   if (route === 'activity') { loadActivity(); loadSkillAiJobs(); }
@@ -1278,7 +1281,7 @@ function clearPrivilegedViews(message = 'Credentials changed. Refresh the curren
   $('mcp-status').textContent = message;
   clearMcpAdmin();
   securityPolicy.enforcement = null; updateSecurityPolicy();
-  clearFeedView(); clearActivityView();
+  clearFeedView(); clearActivityView(); clearConnectors();
   $('feeds-status').textContent = message; $('activity-status').textContent = message;
 }
 const ecosystemLabels = { nuget: 'NuGet', npm: 'npm', cargo: 'Cargo', pypi: 'PyPI', oci: 'OCI', raw: 'Raw', maven: 'Maven', go: 'Go' };
@@ -2058,3 +2061,135 @@ function showPackageDetail(item, row, trigger) {
   note.append(' ', link); content.append(note);
   content.scrollIntoView({ block: 'start' });
 }
+
+
+// MCP connector administration: connection metadata only; credentials are write-only.
+// Remote discovery never grants execution rights.
+const connectorView = { requestId: 0, editingId: null, revision: 0, records: [] };
+function resetConnectorForm() {
+  connectorView.editingId = null; connectorView.revision = 0;
+  $('connector-form').reset();
+  $('connector-id').readOnly = false;
+  $('connector-editor-title').textContent = 'Create connector';
+  $('connector-save').textContent = 'Create connector';
+  $('connector-form-status').textContent = '';
+}
+function clearConnectors() {
+  connectorView.requestId++; connectorView.records = [];
+  $('connector-table').replaceChildren(); $('connector-test-results').replaceChildren();
+  resetConnectorForm();
+  $('connector-egress').textContent = '';
+  $('connector-status').textContent = 'Administrator credentials are required.';
+}
+async function loadConnectors() {
+  const requestId = ++connectorView.requestId, token = state.token;
+  $('connector-table').replaceChildren(); $('connector-test-results').replaceChildren();
+  if (!canAdmin()) { $('connector-status').textContent = 'Administrator access is required.'; return; }
+  $('connector-status').textContent = 'Loading MCP connectors…';
+  try {
+    const response = await request('/api/v1/admin/mcp/connectors');
+    if (requestId !== connectorView.requestId || token !== state.token || !canAdmin()) return;
+    connectorView.records = Array.isArray(response.items) ? response.items : [];
+    const origins = Array.isArray(response.allowedOrigins) ? response.allowedOrigins : [];
+    $('connector-egress').textContent = origins.length
+      ? 'Operator-approved origins: ' + origins.join(', ')
+      : 'No approved origins. Configure PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS in the deployment environment.';
+    $('connector-status').textContent = connectorView.records.length + ' connector definitions. Only explicitly approved tools can be called.';
+    if (!connectorView.records.length) {
+      const row = document.createElement('tr'), cell = element('td', 'No connectors configured.', 'muted');
+      cell.colSpan = 6; row.append(cell); $('connector-table').append(row);
+    }
+    for (const entry of connectorView.records) {
+      const row = document.createElement('tr');
+      row.append(element('td', entry.name + ' (' + entry.id + ')'),
+        element('td', entry.endpoint), element('td', entry.enabled ? 'Enabled' : 'Disabled'),
+        element('td', (entry.allowedTools || []).length + ' approved'),
+        element('td', entry.hasBearerToken ? 'Configured (hidden)' : 'Not configured'));
+      const actions = element('td', '', 'feed-actions');
+      for (const [label, callback, kind] of [
+        ['Edit', () => editConnector(entry), 'button-secondary'],
+        ['Test', button => probeConnector(entry, button), 'button-secondary'],
+        ['Delete', button => deleteConnector(entry, button), 'danger-action']
+      ]) {
+        const button = element('button', label, kind); button.type = 'button';
+        button.addEventListener('click', () => callback(button)); actions.append(button);
+      }
+      row.append(actions); $('connector-table').append(row);
+    }
+  } catch (error) {
+    if (requestId === connectorView.requestId)
+      $('connector-status').textContent = 'Cannot load connectors: ' + error.message;
+  }
+}
+function editConnector(entry) {
+  connectorView.editingId = entry.id; connectorView.revision = entry.revision;
+  $('connector-form').reset(); $('connector-id').value = entry.id; $('connector-id').readOnly = true;
+  $('connector-name').value = entry.name; $('connector-endpoint').value = entry.endpoint;
+  $('connector-enabled').checked = !!entry.enabled;
+  $('connector-tools').value = (entry.allowedTools || []).join('\n');
+  $('connector-editor-title').textContent = 'Edit connector: ' + entry.id;
+  $('connector-save').textContent = 'Save connector';
+  $('connector-form-status').textContent = entry.hasBearerToken
+    ? 'The hidden credential stays unchanged unless rotated, cleared, or the endpoint changes.'
+    : 'No credential configured.';
+  $('connector-name').focus();
+}
+async function probeConnector(entry, button) {
+  button.disabled = true;
+  const host = $('connector-test-results');
+  host.replaceChildren(element('p', 'Checking remote endpoint…', 'muted'));
+  try {
+    const result = await request('/api/v1/admin/mcp/connectors/' + encodeURIComponent(entry.id) + '/probe',
+      { method: 'POST' });
+    host.replaceChildren(element('h3', 'Discovered tools for ' + entry.id));
+    host.append(element('p', String(result.count) + ' tools found. Discovery does not grant permission.', 'muted'));
+    const list = document.createElement('ul');
+    for (const tool of result.tools || [])
+      list.append(element('li', tool.name + ' (' + (tool.allowed ? 'approved' : 'not approved') + ')' +
+        (tool.description ? ': ' + tool.description : '')));
+    host.append(list);
+  } catch (error) {
+    host.replaceChildren(element('p', 'Probe failed: ' + error.message, 'feedback'));
+  } finally { button.disabled = false; }
+}
+async function deleteConnector(entry, button) {
+  if (!window.confirm('Delete connector ' + entry.id + ' and its stored credential?')) return;
+  button.disabled = true;
+  try {
+    await request('/api/v1/admin/mcp/connectors/' + encodeURIComponent(entry.id) +
+      '?revision=' + encodeURIComponent(entry.revision), { method: 'DELETE' });
+    if (connectorView.editingId === entry.id) resetConnectorForm();
+    await loadConnectors(); $('connector-status').textContent = 'Connector deleted.';
+  } catch (error) {
+    $('connector-status').textContent = 'Delete failed: ' + error.message; button.disabled = false;
+  }
+}
+$('connector-refresh').addEventListener('click', () => loadConnectors());
+$('connector-reset').addEventListener('click', resetConnectorForm);
+$('connector-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!canAdmin()) return;
+  const save = $('connector-save'), status = $('connector-form-status'); save.disabled = true;
+  status.textContent = 'Saving connector…';
+  try {
+    const tools = $('connector-tools').value.split(/[\r\n,]+/).map(x => x.trim()).filter(Boolean);
+    if (tools.length > 32 || new Set(tools).size !== tools.length)
+      throw new Error('Use a maximum of 32 unique allowed tools.');
+    const id = $('connector-id').value;
+    const change = {
+      id, name: $('connector-name').value, endpoint: $('connector-endpoint').value,
+      enabled: $('connector-enabled').checked, allowedTools: tools,
+      bearerToken: $('connector-bearer').value || null,
+      clearBearerToken: $('connector-clear-bearer').checked, revision: connectorView.revision
+    };
+    if (change.bearerToken && change.clearBearerToken)
+      throw new Error('Choose credential rotation OR credential removal.');
+    const editing = !!connectorView.editingId;
+    await request('/api/v1/admin/mcp/connectors' + (editing ? '/' + encodeURIComponent(id) : ''), {
+      method: editing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change)
+    });
+    resetConnectorForm(); await loadConnectors();
+    status.textContent = 'Connector saved. No credential was returned.';
+  } catch (error) { status.textContent = 'Save failed: ' + error.message; }
+  finally { save.disabled = false; $('connector-bearer').value = ''; }
+});
