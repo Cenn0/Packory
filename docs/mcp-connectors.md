@@ -25,6 +25,16 @@ with os.fdopen(fd, "w", encoding="utf-8") as f:
 PY
 ~~~
 
+For the included **optional Docker Compose overlay**, set the following host-side variables before starting it:
+
+~~~bash
+export PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS=https://mcp.example.org
+export PACKORY_MCP_CONNECTOR_KEYRING_PATH=/var/lib/packory/private/mcp-keyring.json
+docker compose -f compose.yaml -f compose.mcp-connectors.yaml up -d --build
+~~~
+
+The overlay mounts the keyring read-only inside the Packory container and sets its internal filename. Use the same overlay together with compose.ghcr.yaml when deploying the prebuilt image (omit --build). For internal-only MCP services, any private CIDR exception must be explicitly supplied and reviewed by the operator.
+
 The service process needs permission to read the file. Restart Packory after changing the environment policy. The keyring must be backed up securely; its loss makes encrypted connector credentials unusable. Old keys must remain available until stored values have been re-encrypted. Automatic key re-encryption is not yet provided. Never commit keyrings, bearer tokens, database credentials, or personal information.
 
 ## Dashboard workflow
