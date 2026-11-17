@@ -125,26 +125,27 @@ public static class McpConnectorEndpoints
 
 /// <summary>Explicit administrative MCP gateway; never exposed to general read-only callers.</summary>
 [McpServerToolType]
-public sealed class McpConnectorMcpTools(IHttpContextAccessor accessor, McpConnectorStore store,
+public sealed class McpConnectorMcpTools(IHttpContextAccessor accessor, Settings settings, McpConnectorStore store,
     IMcpConnectorRuntime runtime)
 {
     private static bool IsAdmin(HttpContext? ctx) =>
         ctx is not null && Access.Actor(ctx) is "admin-token" or "oidc-admin";
 
-    private HttpContext Authorized()
+    private HttpContext Authorized(string connectorId, string? toolName = null)
     {
         var ctx = accessor.HttpContext;
-        if (!IsAdmin(ctx))
-            throw new McpProtocolException("Connector tools require an administrator Bearer token",
+        if (ctx is null || (!IsAdmin(ctx) &&
+            !Access.HasConnectorGrant(ctx, settings, connectorId, toolName)))
+            throw new McpProtocolException("An explicit connector tool capability is required",
                 McpErrorCode.InvalidParams);
-        return ctx!;
+        return ctx;
     }
 
     [McpServerTool(Name = "list_connector_tools", ReadOnly = true)]
     public async Task<object> ListConnectorTools(string connectorId,
         CancellationToken cancellationToken = default)
     {
-        Authorized();
+        Authorized(connectorId);
         var record = store.Get(connectorId) ?? throw new McpProtocolException(
             "Unknown connector", McpErrorCode.InvalidParams);
         var tools = await runtime.DiscoverAsync(record, cancellationToken);
@@ -155,7 +156,7 @@ public sealed class McpConnectorMcpTools(IHttpContextAccessor accessor, McpConne
     public async Task<object> CallConnectorTool(string connectorId, string toolName,
         string argumentsJson, CancellationToken cancellationToken = default)
     {
-        var ctx = Authorized();
+        var ctx = Authorized(connectorId, toolName);
         var record = store.Get(connectorId) ?? throw new McpProtocolException(
             "Unknown connector", McpErrorCode.InvalidParams);
         if (!record.Enabled || !McpConnectorPolicy.ValidTool(toolName) ||
