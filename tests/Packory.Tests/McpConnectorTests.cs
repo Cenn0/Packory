@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -248,6 +250,43 @@ public sealed class McpConnectorTests
                 secrets.Unprotect(envelope, "one", "https://mcp.example.org/other"));
         }
         finally { Directory.Delete(folder, true); }
+    }
+
+
+    [Fact]
+    public void ScopedMcpCapabilityRequiresValidatedBearerAndExactToolClaim()
+    {
+        var settings = new Settings
+        {
+            OidcAuthority = "https://issuer.example.org",
+            OidcAudience = "synthetic-resource"
+        };
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Authorization = "Bearer synthetic-oidc-token";
+        var unverified = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("scope", "packory.read packory.connector.call"),
+            new Claim("packory_connector", "team-database:query_readonly")
+        ], "jwt"));
+        ctx.User = unverified;
+        Assert.False(Access.HasConnectorGrant(ctx, settings, "team-database", "query_readonly"));
+        Access.RecordValidatedJwt(ctx, unverified);
+        Assert.True(Access.HasConnectorGrant(ctx, settings, "team-database", "query_readonly"));
+        Assert.True(Access.HasConnectorGrant(ctx, settings, "team-database"));
+        Assert.False(Access.HasConnectorGrant(ctx, settings, "team-database", "drop_all"));
+        Assert.False(Access.HasConnectorGrant(ctx, settings, "other-database", "query_readonly"));
+
+        ctx.Request.Headers.Authorization = "";
+        Assert.False(Access.HasConnectorGrant(ctx, settings, "team-database", "query_readonly"));
+        ctx.Request.Headers.Authorization = "Bearer synthetic-oidc-token";
+
+        var noDedicatedScope = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("scope", "packory.read"),
+            new Claim("packory_connector", "team-database:query_readonly")
+        ], "jwt"));
+        Access.RecordValidatedJwt(ctx, noDedicatedScope);
+        Assert.False(Access.HasConnectorGrant(ctx, settings, "team-database", "query_readonly"));
     }
 
     [Fact]
