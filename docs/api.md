@@ -344,3 +344,26 @@ grant and returns `feedId`, `artifacts`, `bytes`, `maxBytes`, `maxArtifacts`,
 Private npm publication rejects non-string, control-containing or oversized
 `deprecated` fields. The read path also rejects malformed persisted warnings
 instead of treating an invalid archive's metadata as a valid lifecycle state.
+
+
+## Managed MCP connectors (administrator-only, optional)
+
+The inert MCP Registry endpoints and active connector APIs are separate. See [Managed MCP connectors](mcp-connectors.md) for deployment policy, OIDC grants and security limits.
+
+All paths below require Packory administrator authorization (static administrator Bearer, verified OIDC admin scope, or CSRF-protected browser administrator SSO). For mutation, the normal writer lease and publish rate limit apply. The connector capability is not an anonymous or generic write-token operation.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | /api/v1/admin/mcp/connectors | List redacted connector definitions and deployment-approved origins |
+| GET | /api/v1/admin/mcp/connectors/{id} | Inspect one redacted definition |
+| POST | /api/v1/admin/mcp/connectors | Create a connector (revision=0) |
+| PUT | /api/v1/admin/mcp/connectors/{id} | Replace configuration using the current revision |
+| DELETE | /api/v1/admin/mcp/connectors/{id}?revision=N | Delete only the matching revision |
+| POST | /api/v1/admin/mcp/connectors/{id}/probe | Handshake and discover remote MCP tool names; never enables tools |
+| POST | /api/v1/admin/mcp/connectors/{id}/call | Controlled administrator invocation, only if connector and exact tool are allowed |
+
+Create/update JSON shape (camelCase): id, name, endpoint, enabled, allowedTools (string array), bearerToken (optional, write-only), clearBearerToken (boolean), revision (integer). Every mutation returns a revision. Credential presence is returned only as hasBearerToken, never plaintext or encrypted bytes. Tool-call JSON shape: tool (approved tool name), arguments (JSON object). Malformed requests return 400; stale revisions 409; insufficient privileges 401/403; invalid operator keyring 503; failed remote handshake 502/504.
+
+**MCP client-facing invocation:** An existing authenticated bearer at /mcp can invoke list_connector_tools and call_connector_tool. A non-administrator must present a cryptographically validated OIDC token with packory.read, packory.connector.call and exact packory_connector=connector-id:tool-name claim(s). These claims never authorize editing a connector or reading its remote credential. Tool call argumentsJson is a JSON object encoded as a string.
+
+This API supports only explicitly approved remote HTTPS Streamable HTTP MCP servers. It does not connect directly to a database or launch local processes.
