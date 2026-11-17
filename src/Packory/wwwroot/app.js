@@ -2041,7 +2041,7 @@ $('native-publish-form').addEventListener('submit', async event => {
   finally { submit.disabled = false; }
 });
 
-routeFromHash();
+// Initial route is resolved after all dashboard handlers have been initialized.
 
 
 function showPackageDetail(item, row, trigger) {
@@ -2193,3 +2193,5 @@ $('connector-form').addEventListener('submit', async event => {
   } catch (error) { status.textContent = 'Save failed: ' + error.message; }
   finally { save.disabled = false; $('connector-bearer').value = ''; }
 });
+
+routeFromHash();
