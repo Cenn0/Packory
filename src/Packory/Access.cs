@@ -188,6 +188,32 @@ public static class Access
                (scopes.Contains("packory.read") || scopes.Contains("packory.admin"));
     }
 
+    /// <summary>
+    /// A connector caller gets an exact tool capability from a validated OIDC bearer.
+    /// The token must already carry packory.read for the /mcp transport gate, plus
+    /// packory.connector.call and packory_connector = "connector-id:tool-name".
+    /// Static read/write tokens and browser sessions never acquire this capability.
+    /// </summary>
+    public static bool HasConnectorGrant(HttpContext context, Settings settings,
+        string connectorId, string? toolName = null)
+    {
+        if (!McpConnectorPolicy.ValidId(connectorId) ||
+            (toolName is not null && !McpConnectorPolicy.ValidTool(toolName)))
+            return false;
+        var verified = ValidatedBearer(context, settings);
+        if (verified is null) return false;
+        var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!scopes.Contains("packory.connector.call")) return false;
+        var prefix = connectorId + ":";
+        return verified.FindAll("packory_connector").Take(64)
+            .Select(c => c.Value)
+            .Any(grant => grant.StartsWith(prefix, StringComparison.Ordinal) &&
+                McpConnectorPolicy.ValidTool(grant[prefix.Length..]) &&
+                (toolName is null || grant == prefix + toolName));
+    }
+
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
