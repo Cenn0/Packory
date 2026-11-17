@@ -205,7 +205,7 @@ public static class Access
         var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
             .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .ToHashSet(StringComparer.Ordinal);
-        if (!scopes.Contains("packory.connector.call")) return false;
+        if (!scopes.Contains("packory.read") || !scopes.Contains("packory.connector.call")) return false;
         var prefix = connectorId + ":";
         return verified.FindAll("packory_connector").Take(64)
             .Select(c => c.Value)
