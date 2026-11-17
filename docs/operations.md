@@ -569,3 +569,16 @@ connection. A terminated session releases it server-side. This coordinates
 initialization only, with a distinct lock key space; it does not permit multiple
 active application writers or supply independent failover fencing.
 See [PostgreSQL advisory locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
+
+
+### Remote MCP connectors (explicit opt-in)
+
+The administrator dashboard contains **MCP Connectors** for managing outbound Streamable HTTP connections. This is separate from the inert MCP Registry catalog. Outbound access is disabled unless the deployment operator configures exact approved HTTPS origins.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS | empty | Comma-separated HTTPS origin allowlist; the browser cannot change it |
+| PACKORY_MCP_CONNECTOR_ALLOWED_PRIVATE_CIDRS | empty | Explicit, security-sensitive private-address exceptions; no private egress by default |
+| PACKORY_MCP_CONNECTOR_KEYRING_FILE | unset | Absolute path to private JSON AES-256-GCM keyring, necessary for stored bearer credentials |
+
+Do not put the keyring, database passwords, or bearer credentials into the public repository or a Docker image. The keyring path must be mounted and readable by the Packory service account, with appropriate filesystem ACLs and encrypted backups. No automatic credential re-encryption occurs when switching key IDs. For setup, capability grants, rotation and limitations see [MCP connectors](mcp-connectors.md).
