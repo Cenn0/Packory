@@ -1,0 +1,76 @@
+# Managed MCP connectors
+
+Packory has two separate MCP concepts: the **inert MCP Registry** stores reviewed server.json metadata; **MCP Connectors** are administrator-managed outbound connections. Publishing a catalog entry does not establish a connection.
+
+## Operator-owned deployment policy
+
+Outbound connector connectivity is **off by default**. Configure these environment variables outside the public repository:
+
+| Variable | Meaning |
+| --- | --- |
+| PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS | Comma-separated approved HTTPS origins, for example https://mcp.example.org. No paths or wildcards. |
+| PACKORY_MCP_CONNECTOR_ALLOWED_PRIVATE_CIDRS | Optional explicit internal network exceptions. Default: none. Avoid unless private-network access is needed and controlled. |
+| PACKORY_MCP_CONNECTOR_KEYRING_FILE | Absolute path to a private AES-256-GCM keyring; required when storing bearer credentials. |
+
+Create the keyring outside the repository, on a private deployment volume:
+
+~~~bash
+install -d -m 0700 /var/lib/packory/private
+python3 - <<'PY'
+import base64, json, os
+path = "/var/lib/packory/private/mcp-keyring.json"
+fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump({"active": "k1", "keys": {"k1": base64.b64encode(os.urandom(32)).decode("ascii")}}, f)
+PY
+~~~
+
+The service process needs permission to read the file. Restart Packory after changing the environment policy. The keyring must be backed up securely; its loss makes encrypted connector credentials unusable. Old keys must remain available until stored values have been re-encrypted. Automatic key re-encryption is not yet provided. Never commit keyrings, bearer tokens, database credentials, or personal information.
+
+## Dashboard workflow
+
+1. Sign in as a Packory administrator, then open **MCP Connectors**.
+2. Create an ID, name and HTTPS Streamable HTTP endpoint within an approved origin. Add an optional bearer credential.
+3. Save the new connector disabled, with no allowed tools.
+4. Use **Test** to discover remote tool names via the MCP handshake. Discovery does not enable tools or verify their safety.
+5. Review tool behavior and remote service permissions. Add only deliberately approved tool names to the allowlist. Enable the connector separately.
+6. Edit, deactivate, rotate/remove bearer credentials or delete the connector as required. Optimistic revisions prevent overwriting concurrent updates.
+
+Credentials are encrypted at rest with AES-256-GCM and bound to connector ID and endpoint URL. The API returns only hasBearerToken. Changing endpoint URLs clears existing credentials. Tool calls and configuration updates are audited without recording sensitive arguments or credentials.
+
+## Calling connector tools without giving AI database credentials
+
+The database password stays on the **independently secured remote MCP server**, not in the model's context. Packory holds only an optional credential for that remote MCP service and enforces an exact local tool allowlist.
+
+Do not give an AI an administrator token. Instead issue a validated OIDC access token carrying all of:
+
+- packory.read — authenticates to Packory's existing /mcp endpoint.
+- packory.connector.call — grants the connector-invocation permission.
+- A packory_connector claim for each specific tool: connector-id:tool-name (example: team-database:query_readonly).
+
+The access token must be verified using Packory's configured OIDC issuer, audience and signature. It must not be an unverified request claim, browser cookie, or static read/write token.
+
+Packory's authenticated MCP server exposes:
+
+- list_connector_tools(connectorId) — connection discovery restricted to allowed connector callers or Packory administrators.
+- call_connector_tool(connectorId, toolName, argumentsJson) — invokes one enabled, locally approved remote MCP tool. argumentsJson is a JSON object serialized as a string.
+
+The administrator-only REST API also permits probe/call for controlled operational verification; the dashboard UI intentionally provides connection testing but not a general arbitrary tool execution console.
+
+### Database example
+
+Deploy a trusted MCP server in front of PostgreSQL with a restricted read-only database role, selected read-only operations, tenant checks, query timeouts and result limits. Packory connects only to this MCP endpoint. An AI can call the explicitly approved query tool using the scoped Packory token, without ever receiving PostgreSQL credentials.
+
+**Direct SQL database connectors and automatic SQL-tool generation are not included.** Database-specific adapters must undergo separate authorization and injection reviews.
+
+## Security boundaries and limitations
+
+- Only remote **MCP Streamable HTTP over HTTPS** is supported. No stdio/subprocess execution, SSE fallback, user-supplied request headers, or dynamic upstream OAuth handling.
+- Exact origin allowlist is deployed out-of-band; configured endpoints are checked again on every use. System HTTP proxies, redirects, cookies and transparent compression are disabled. All returned DNS answers must pass the address policy; the selected numeric address is pinned before connection.
+- Private-network access needs an explicit deployment-owned CIDR exception. Link-local and metadata addresses remain blocked.
+- MCP server metadata and returned tool descriptions are untrusted. Tool discovery never creates access grants and remote tools may perform side effects.
+- Tool arguments are bounded at 64 KiB and serialized results at 128 KiB. Calls have a 25-second deadline and 8-second connect timeout. Discovery through the SDK aggregates remote pagination before the response list is truncated, so hostile/untrusted servers still require network isolation and operational monitoring.
+- Packory cannot enforce object-, tenant- or row-level authorization inside remote services. Those checks must be implemented by each remote MCP gateway.
+- Treat administrator capabilities as privileged; use dedicated model-facing OIDC tokens and minimal per-tool grants. Successful connectivity does not imply a security certification.
+
+See [API reference](api.md). The existing inert MCP Registry and read-only package/skill features remain separate.
