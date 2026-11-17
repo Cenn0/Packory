@@ -85,6 +85,7 @@ This launches the app only. Use the Docker Compose stack when you also need the 
 | **Agent Skills** | ZIP staging, offline SkillSpector inspection, approval/revocation and static quality findings | [Skill security](docs/mcp-security-integration.md) · [Quality](docs/skill-quality.md) |
 | **Optional AI review** | Opt-in LLM assessment with separate networkless worker and operator-controlled provider access; human approval remains required | [Skill AI](docs/skill-ai.md) |
 | **MCP discovery** | Authenticated read-only `/mcp`, global catalog traversal and approved Skill access; reviewed inert MCP Registry descriptors | [MCP roadmap](docs/mcp-roadmap.md) · [Registry catalog](docs/mcp-registry-catalog.md) |
+| **MCP connectors (opt-in)** | Administrator-managed HTTPS remote MCP connections, encrypted bearer credentials, tool discovery and exact per-tool OIDC grants; separate from inert Registry metadata | [MCP connectors](docs/mcp-connectors.md) |
 | **Platform** | Dashboard, REST API, exact private-feed grants, optional OIDC JWT validation and browser SSO, SQLite/filesystem or PostgreSQL/S3 | [API](docs/api.md) · [Operations](docs/operations.md) |
 
 **Private hosted E0:** isolated native feed routes for all eight package kinds are implemented with explicit activation and exact `feed:{id}:read` or `feed:{id}:publish` grants. Private requests do not fall back to global or upstream packages. The [E0 acceptance record](docs/e0-acceptance.md) is evidence for its named test versions and providers, **not** a blanket interoperability or production claim. Proxy/group feeds, private Skills and feed-aware MCP discovery remain separate work.
@@ -108,7 +109,7 @@ Publishing requires the appropriate token and namespace/feed grants. See the [AP
 flowchart LR
     Native["NuGet, npm, Cargo, PyPI, OCI, Maven, Go, Raw clients"] --> App["Packory · ASP.NET Core"]
     Browser["Dashboard / REST clients"] --> App
-    MCP["MCP clients"] --> API["Read-only MCP"]
+    MCP["MCP clients"] --> API["Packory MCP: discovery + gated connector tools"]
     API --> App
     OIDC["Optional OIDC issuer"] -.-> App
     App --> Registry["Native protocol adapters"]
