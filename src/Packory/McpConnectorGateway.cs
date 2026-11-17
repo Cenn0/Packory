@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 
 namespace Packory;
 
@@ -91,17 +92,28 @@ public sealed class McpConnectorGateway(McpConnectorPolicy policy, McpConnectorS
         {
             if (client.ServerCapabilities.Tools is null)
                 return (IReadOnlyList<McpConnectorToolSummary>)[];
-            // ListToolsAsync aggregates pages; a hostile remote could return unbounded pages.
-            // Individual response guards and deadline in the transport bound the request,
-            // while only the first 100 names are returned to callers.
-            var tools = await client.ListToolsAsync(cancellationToken: ct);
-            return tools.Where(t => McpConnectorPolicy.ValidTool(t.Name))
-                .Take(100)
-                .Select(t => new McpConnectorToolSummary(
-                    t.Name,
-                    t.Description is { Length: > 512 } ? t.Description[..512] : t.Description,
-                    connector.AllowedTools.Contains(t.Name, StringComparer.Ordinal)))
-                .ToArray();
+            // Fetch only a fixed number of pages instead of allowing SDK auto-pagination
+            // to loop through an unbounded remote catalog.
+            var result = new List<McpConnectorToolSummary>();
+            var cursors = new HashSet<string>(StringComparer.Ordinal);
+            string? cursor = null;
+            for (var pageNumber = 0; pageNumber < 4; pageNumber++)
+            {
+                var page = await client.ListToolsAsync(new ListToolsRequestParams { Cursor = cursor }, ct);
+                foreach (var tool in page.Tools)
+                {
+                    if (result.Count >= 100) break;
+                    if (!McpConnectorPolicy.ValidTool(tool.Name)) continue;
+                    result.Add(new McpConnectorToolSummary(tool.Name,
+                        tool.Description is { Length: > 512 } ? tool.Description[..512] : tool.Description,
+                        connector.AllowedTools.Contains(tool.Name, StringComparer.Ordinal)));
+                }
+                if (result.Count >= 100 || page.NextCursor is null) break;
+                if (page.NextCursor.Length > 512 || !cursors.Add(page.NextCursor))
+                    throw new InvalidDataException("Remote MCP pagination cursor is invalid.");
+                cursor = page.NextCursor;
+            }
+            return result;
         }, cancellationToken);
 
     public Task<JsonElement> CallAsync(McpConnectorRecord connector, string tool,
