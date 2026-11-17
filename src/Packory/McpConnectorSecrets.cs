@@ -60,7 +60,7 @@ public sealed class McpConnectorSecrets
             using var aes = new AesGcm(key, 16);
             aes.Encrypt(nonce, clear, ciphertext, tag, Context(id, endpoint));
             return JsonSerializer.Serialize(new Envelope(ring.Active, Convert.ToBase64String(nonce),
-                Convert.ToBase64String(ciphertext), Convert.ToBase64String(tag)));
+                Convert.ToBase64String(ciphertext), Convert.ToBase64String(tag)), SkillAiJson.Options);
         }
         finally
         {
