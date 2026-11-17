@@ -24,6 +24,7 @@
         <p class="nav-label">Workspace</p>
         <a href="#catalog" data-route="catalog" class="nav-link" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Catalog</a>
         <a href="#models" data-route="models" class="nav-link"><span class="nav-icon" aria-hidden="true">◫</span>Models</a>
+        <a id="nav-connectors" href="#connectors" data-route="connectors" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">◇</span>MCP Connectors</a>
         <a id="nav-feeds" href="#feeds" data-route="feeds" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">▤</span>Feeds</a>
         <a id="nav-publish" href="#publish" data-route="publish" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">↑</span>Publish</a>
         <a id="nav-reviews" href="#reviews" data-route="reviews" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">◇</span>Reviews</a>
@@ -152,6 +153,42 @@
               <label id="publish-second-file-row" for="publish-second-file" hidden>go.mod file<input id="publish-second-file" type="file" accept=".mod,text/plain"></label>
               <label id="publish-oci-mode-row" for="publish-oci-mode" hidden>OCI operation<select id="publish-oci-mode"><option value="blob">Upload blob</option><option value="manifest">Publish manifest</option></select></label>
               <button id="publish-submit" type="submit">Publish</button><p id="publish-result" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+        </section>
+
+        <section id="connectors-view" class="page-view" aria-labelledby="connectors-title" hidden>
+          <header class="page-heading">
+            <div><p class="eyebrow">MCP / ADMINISTRATION</p><h1 id="connectors-title">MCP connectors</h1>
+              <p class="page-description">Create, test and manage connections to approved remote MCP servers. Remote tools are not enabled automatically.</p></div>
+            <button id="connector-refresh" class="button-secondary" type="button">Refresh connectors</button>
+          </header>
+          <p id="connector-status" class="feedback" role="status" aria-live="polite">Administrator access is required.</p>
+          <section class="panel" aria-labelledby="connector-list-title">
+            <div class="section-head"><div><h2 id="connector-list-title">Configured connections</h2>
+            <p class="muted">Only administrator credentials can see or change connector definitions. Stored bearer tokens are never displayed.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Connector</th><th scope="col">Endpoint</th><th scope="col">State</th><th scope="col">Permitted tools</th><th scope="col">Credential</th><th scope="col">Actions</th></tr></thead>
+            <tbody id="connector-table"></tbody></table></div>
+            <div id="connector-test-results" role="status" aria-live="polite"></div>
+          </section>
+          <section class="panel" aria-labelledby="connector-editor-title">
+            <div class="section-head"><div><h2 id="connector-editor-title">Create connector</h2><p class="muted">Streamable HTTP over HTTPS only. The destination origin must be approved by the server operator before it can be saved.</p></div></div>
+            <p id="connector-egress" class="scope-note">Loading approved destination origins…</p>
+            <form id="connector-form">
+              <div class="connector-form-grid">
+                <label for="connector-id">Connector ID<input id="connector-id" maxlength="64" pattern="[a-z][a-z0-9-]{1,62}" placeholder="team-database" autocomplete="off" required></label>
+                <label for="connector-name">Display name<input id="connector-name" maxlength="120" placeholder="Team database MCP" autocomplete="off" required></label>
+                <label for="connector-endpoint">MCP endpoint URL<input id="connector-endpoint" type="url" maxlength="512" placeholder="https://mcp.example.org/mcp" autocomplete="off" required></label>
+                <label for="connector-bearer">Set or rotate bearer token<input id="connector-bearer" type="password" maxlength="4096" autocomplete="new-password" placeholder="Optional · not returned after saving"></label>
+              </div>
+              <label for="connector-tools">Allowed tool names, one per line<textarea id="connector-tools" maxlength="8192" rows="4" spellcheck="false" placeholder="list_tables&#10;query_readonly"></textarea></label>
+              <p class="muted">Start with no allowed tools. Add only specific reviewed names, then enable the connector. Tool calls may modify external data depending on what the remote server does.</p>
+              <div class="button-row">
+                <label class="connector-check"><input id="connector-enabled" type="checkbox"> Enable this connector</label>
+                <label class="connector-check"><input id="connector-clear-bearer" type="checkbox"> Remove saved bearer token</label>
+              </div>
+              <div class="button-row"><button id="connector-save" type="submit">Create connector</button><button id="connector-reset" type="button" class="button-secondary">Cancel edit</button></div>
+              <p id="connector-form-status" role="status" aria-live="polite"></p>
             </form>
           </section>
         </section>
