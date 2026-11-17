@@ -66,6 +66,15 @@ function defaultReply(call) {
     case 'source': return { sha256: archiveDigest, files: [{ path: 'SKILL.md', bytes: 24, previewable: true }] };
     case 'source-file': return { sha256: archiveDigest, path: 'SKILL.md', bytes: 24, content: '# Synthetic Skill\n' };
     case 'quality': return qualityReport();
+    case 'connector-list': return { items: [{
+      id: 'team-database', name: 'Synthetic remote MCP', endpoint: 'https://mcp.example.org/mcp',
+      enabled: false, allowedTools: [], hasBearerToken: true, revision: 1, updatedAt: 123456789
+    }], allowedOrigins: ['https://mcp.example.org'], egressConfigured: true };
+    case 'connector-probe': return { id: 'team-database',
+      tools: [{ name: 'query_readonly', description: hostile, allowed: false }], count: 1 };
+    case 'connector-update': return { id: 'team-database', revision: 2, hasBearerToken: true };
+    case 'connector-save': return { id: 'team-database', revision: 1, hasBearerToken: true };
+    case 'connector-delete': return { deleted: true };
     case 'mcp': return { items: [serverRecord(`${prefix}-server`)], nextCursor: call.cursor ? null : 'fixture-next-page' };
     case 'ai-settings': return { configuration: { revision: 0, enabled: false,
       endpointId: 'openai', model: '', trigger: 'manual', requireForApproval: false,
@@ -110,6 +119,11 @@ function classify(url, request) {
   else if (/^\/api\/security\/skills\/[^/]+\/[^/]+\/source\/file$/.test(pathname)) kind = 'source-file';
   else if (/^\/api\/v1\/skills\/[^/]+\/[^/]+\/quality$/.test(pathname)) kind = 'quality';
   else if (pathname === '/api/v1/mcp/servers') kind = 'mcp';
+  else if (pathname === '/api/v1/admin/mcp/connectors')
+    kind = request.method() === 'POST' ? 'connector-save' : 'connector-list';
+  else if (/^\/api\/v1\/admin\/mcp\/connectors\/[^/]+\/probe$/.test(pathname)) kind = 'connector-probe';
+  else if (/^\/api\/v1\/admin\/mcp\/connectors\/[^/]+$/.test(pathname))
+    kind = request.method() === 'DELETE' ? 'connector-delete' : 'connector-update';
   else if (pathname === '/api/admin/skill-ai/settings') kind = request.method() === 'PUT' ? 'ai-settings-save' : 'ai-settings';
   else if (pathname === '/api/admin/skill-ai/audit') kind = 'ai-audit';
   else if (pathname === '/api/admin/skill-ai/assessments') kind = request.method() === 'POST' ? 'ai-queue' : (url.searchParams.has('name') ? 'ai-assessments' : 'ai-jobs');
@@ -501,6 +515,36 @@ async function main() {
       assert.equal(await h.page.locator('#mcp-table a').count(), 0, 'Untrusted remote URLs must remain text');
       assert.deepEqual(h.calls.filter(x => x.kind === 'mcp' && x.q === 'reviewed + alpha').map(x => x.cursor),
         [null, 'opaque:next+/=?']);
+    });
+    await scenario('MCP connector UI keeps credentials write-only and escapes remote output', defaultReply, async h => {
+      await h.page.locator('a[href="#settings"][data-route]').click();
+      await h.page.locator('#token').fill(oldToken);
+      await h.page.locator('#token').press('Tab');
+      await h.page.locator('#nav-connectors').waitFor({ state: 'visible' });
+      await h.page.locator('#nav-connectors').click();
+      await h.text('connector-table', 'team-database');
+      assert.doesNotMatch(await h.page.locator('#connector-table').textContent(), /synthetic-connector-credential/);
+      await h.page.locator('#connector-table button').filter({ hasText: 'Test' }).click();
+      await h.text('connector-test-results', 'query_readonly');
+      assert.match(await h.page.locator('#connector-test-results').textContent(), /<img/);
+      assert.equal(await h.page.locator('#connector-test-results img, #connector-test-results script').count(), 0);
+      await h.page.locator('#connector-table button').filter({ hasText: 'Edit' }).click();
+      assert.equal(await h.page.locator('#connector-bearer').inputValue(), '');
+      await h.page.locator('#connector-bearer').fill('synthetic-connector-credential-browser-only');
+      await h.page.locator('#connector-tools').fill('query_readonly');
+      await h.page.locator('#connector-enabled').check();
+      await h.page.locator('#connector-save').click();
+      await h.text('connector-form-status', 'Connector saved');
+      const write = h.calls.find(x => x.kind === 'connector-update');
+      assert.ok(write, 'The dashboard must send an administrator update');
+      assert.equal(write.method, 'PUT');
+      assert.equal(write.authorization, 'Bearer ' + oldToken);
+      assert.equal(write.body.bearerToken, 'synthetic-connector-credential-browser-only');
+      assert.equal(write.body.enabled, true);
+      assert.deepEqual(write.body.allowedTools, ['query_readonly']);
+      assert.equal(await h.page.locator('#connector-bearer').inputValue(), '');
+      assert.equal(await h.page.locator('#nav-connectors').isVisible(), true);
+      await h.healthy();
     });
     await scenario('token role change clears administrator UI', defaultReply, async h => {
       await h.page.locator('a[href="#settings"][data-route]').click();
