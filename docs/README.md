@@ -38,6 +38,7 @@ Packory is a self-hosted distribution platform in **active development**. Docume
 | Deterministic documentation quality assessment | [Skill quality](skill-quality.md) |
 | Read-only MCP endpoint and remaining work | [MCP delivery roadmap](mcp-roadmap.md) · [MCP validation](mcp-validation-results.md) |
 | Reviewed inert MCP Registry metadata | [MCP Registry catalog](mcp-registry-catalog.md) |
+| Administrator-managed remote MCP connections and scoped AI tool use | [Managed MCP connectors](mcp-connectors.md) |
 | OIDC resource server / Keycloak test profile | [OIDC and Keycloak](oidc-keycloak.md) |
 
 ## Architecture, operations and verification
