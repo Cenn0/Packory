@@ -69,7 +69,7 @@ Deploy a trusted MCP server in front of PostgreSQL with a restricted read-only d
 - Exact origin allowlist is deployed out-of-band; configured endpoints are checked again on every use. System HTTP proxies, redirects, cookies and transparent compression are disabled. All returned DNS answers must pass the address policy; the selected numeric address is pinned before connection.
 - Private-network access needs an explicit deployment-owned CIDR exception. Link-local and metadata addresses remain blocked.
 - MCP server metadata and returned tool descriptions are untrusted. Tool discovery never creates access grants and remote tools may perform side effects.
-- Tool arguments are bounded at 64 KiB and serialized results at 128 KiB. Calls have a 25-second deadline and 8-second connect timeout. Discovery through the SDK aggregates remote pagination before the response list is truncated, so hostile/untrusted servers still require network isolation and operational monitoring.
+- Tool arguments are bounded at 64 KiB and serialized results at 128 KiB. Calls have a 25-second deadline and 8-second connect timeout. Discovery is limited to four MCP protocol pages and 100 returned tool names. A hostile server could still send an oversized individual page before deserialization, so external network isolation and operational monitoring remain necessary.
 - Packory cannot enforce object-, tenant- or row-level authorization inside remote services. Those checks must be implemented by each remote MCP gateway.
 - Treat administrator capabilities as privileged; use dedicated model-facing OIDC tokens and minimal per-tool grants. Successful connectivity does not imply a security certification.
 
