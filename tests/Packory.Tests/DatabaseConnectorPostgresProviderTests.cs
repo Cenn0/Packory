@@ -66,7 +66,7 @@ public sealed class DatabaseConnectorPostgresProviderTests
         Assert.Equal(2, moved.Definition.Revision);
         Assert.Null(moved.SecretCiphertext);
         Assert.Throws<UnauthorizedAccessException>(() => reopened.Password(moved));
-        Assert.Throws<CryptographicException>(() => fixture.Secrets.Unprotect(persisted.SecretCiphertext!,
+        Assert.Throws<AuthenticationTagMismatchException>(() => fixture.Secrets.Unprotect(persisted.SecretCiphertext!,
             "db:" + moved.Definition.Id, DatabaseConnectorPolicy.CredentialContext(moved.Definition)));
         Assert.Throws<InvalidDataException>(() => reopened.Save(
             new(moved.Definition with { Enabled = true }, null, false), Actor));
