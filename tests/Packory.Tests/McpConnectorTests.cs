@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Packory;
+using ModelContextProtocol;
 using Xunit;
 
 namespace Packory.Tests;
@@ -205,6 +206,57 @@ public sealed class McpConnectorTests
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         Assert.Equal(1, host.Runtime.ToolCalls);
         Assert.DoesNotContain(Secret, await result.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DisabledConnectorCannotDiscoverThroughMcpEvenWithScopedGrant()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string root = "/api/v1/admin/mcp/connectors";
+        using var created = await client.SendAsync(WithToken(HttpMethod.Post, root, Admin, Payload));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Authorization = "Bearer synthetic-scoped-connector-token";
+        Access.RecordValidatedJwt(ctx, new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("scope", "packory.read packory.connector.call"),
+            new Claim("packory_connector", "team-database:query_readonly")
+        ], "jwt")));
+        var scopedSettings = new Settings
+        {
+            OidcAuthority = "https://issuer.example.org",
+            OidcAudience = "synthetic-resource"
+        };
+        Assert.True(Access.HasConnectorGrant(ctx, scopedSettings, "team-database"));
+        var tools = new McpConnectorMcpTools(
+            new HttpContextAccessor { HttpContext = ctx }, scopedSettings,
+            host.Services.GetRequiredService<McpConnectorStore>(), host.Runtime);
+
+        // A disabled connector must not use its saved bearer to contact a remote MCP server.
+        await Assert.ThrowsAsync<McpProtocolException>(
+            () => tools.ListConnectorTools("team-database"));
+        Assert.Equal(0, host.Runtime.DiscoverCalls);
+
+        // Administrators can still explicitly test a disabled endpoint via the REST probe.
+        using var probe = await client.SendAsync(WithToken(
+            HttpMethod.Post, root + "/team-database/probe", Admin));
+        Assert.Equal(HttpStatusCode.OK, probe.StatusCode);
+        Assert.Equal(1, host.Runtime.DiscoverCalls);
+
+        var update = JsonSerializer.Serialize(new
+        {
+            id = "team-database", name = "Synthetic database MCP",
+            endpoint = "https://mcp.example.org/mcp", enabled = true,
+            allowedTools = new[] { "query_readonly" }, bearerToken = (string?)null,
+            clearBearerToken = false, revision = 1
+        });
+        using var enabled = await client.SendAsync(WithToken(
+            HttpMethod.Put, root + "/team-database", Admin, update));
+        Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+        await tools.ListConnectorTools("team-database");
+        Assert.Equal(2, host.Runtime.DiscoverCalls);
     }
 
     [Fact]
