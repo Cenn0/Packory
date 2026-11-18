@@ -47,10 +47,18 @@ MAVEN_METADATA_TABLES = ("maven_metadata",)
 SECURITY_REGISTRY_TABLES = ("skill_security_revisions", "skill_security_audit",
                             "mcp_registry_manifests", "mcp_registry_review_audit")
 AI_TABLES = ("skill_ai_configuration", "skill_ai_jobs", "skill_ai_requests", "skill_ai_audit")
+# Connector credentials, approved definitions and retired authorization identities
+# are authoritative together. Optional groups preserve pre-connector snapshots;
+# the presence of any table requires every table in that connector ledger.
+MCP_CONNECTOR_TABLES = ("mcp_connectors", "mcp_connector_audit", "mcp_connector_ids")
+DATABASE_CONNECTOR_TABLES = ("database_connector_schema", "database_connector_ids",
+                             "database_connectors", "database_connector_audit")
+CONNECTOR_TABLE_GROUPS = (MCP_CONNECTOR_TABLES, DATABASE_CONNECTOR_TABLES)
 ALLOWED_TABLES = frozenset((
     *CORE_TABLES, "packory_schema_version", *FEED_TABLES,
     *DIGEST_TABLES, *ISOLATED_FEED_TABLES, *RAW_TABLES, *MAVEN_TABLES,
-    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *FEED_NPM_DEPRECATION_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES, *AI_TABLES))
+    *GO_TABLES, *FEED_ASSET_TABLES, *FEED_OCI_TABLES, *FEED_NPM_TAG_TABLES, *FEED_CARGO_YANK_TABLES, *FEED_NPM_DEPRECATION_TABLES, *MAVEN_METADATA_TABLES, *SECURITY_REGISTRY_TABLES, *AI_TABLES,
+    *MCP_CONNECTOR_TABLES, *DATABASE_CONNECTOR_TABLES))
 SHA = re.compile(r"[0-9a-f]{64}")
 PAYLOAD = re.compile(r"objects/[0-9a-f]{64}\.bin")
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -147,6 +155,12 @@ def metadata_tables(connection):
     """Select all authoritative tables for a supported Packory schema version."""
     version = database_schema_version(connection)
     if version == 0:
+        # Connector-capable releases always have a versioned core database.
+        # Losing that marker must not downgrade a connector dump to the weaker
+        # historical package-only profile and silently omit retired identities.
+        if any(connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is not None
+               for group in CONNECTOR_TABLE_GROUPS for table in group):
+            raise SnapshotError("Connector ledgers require a versioned core metadata schema")
         return CORE_TABLES
     if version >= 7:
         for table in SECURITY_REGISTRY_TABLES:
@@ -156,6 +170,13 @@ def metadata_tables(connection):
                       if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is not None)
     if ai_tables and len(ai_tables) != len(AI_TABLES):
         raise SnapshotError("Incomplete authoritative AI policy/job/budget/audit ledger")
+    connector_tables = ()
+    for group in CONNECTOR_TABLE_GROUPS:
+        present = tuple(table for table in group
+                        if connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is not None)
+        if present and len(present) != len(group):
+            raise SnapshotError("Incomplete authoritative connector definition/credential/identity/audit ledger")
+        connector_tables += present
     return (CORE_TABLES + ("packory_schema_version",) +
             (FEED_TABLES if version >= 2 else ()) +
             (DIGEST_TABLES if version >= 3 else ()) +
@@ -169,7 +190,7 @@ def metadata_tables(connection):
             (FEED_CARGO_YANK_TABLES if version >= 14 else ()) +
             (FEED_NPM_DEPRECATION_TABLES if version >= 15 else ()) +
             (MAVEN_METADATA_TABLES if version >= 11 else ()) +
-            (SECURITY_REGISTRY_TABLES if version >= 7 else ()) + ai_tables)
+            (SECURITY_REGISTRY_TABLES if version >= 7 else ()) + ai_tables + connector_tables)
 
 
 def feed_references(connection):
@@ -818,6 +839,9 @@ def verify(folder):
         if (("maven_metadata" in table_counts or pg.get("database_schema_version", 0) >= 11) and
                 manifest["schema"] < 4):
             raise SnapshotError("V11 requires the Maven metadata snapshot format")
+        if manifest["schema"] < 2 and any(set(table_counts).intersection(group)
+                                          for group in CONNECTOR_TABLE_GROUPS):
+            raise SnapshotError("Connector ledgers require complete row fingerprint evidence")
         if manifest["schema"] >= 2:
             fingerprints, db_version = pg["table_fingerprints"], pg["database_schema_version"]
             if type(db_version) is not int or db_version not in range(16):
@@ -860,6 +884,9 @@ def verify(folder):
             # evidence is present, all four ledgers are mandatory.
             if set(table_counts).intersection(AI_TABLES):
                 required.update(AI_TABLES)
+            for group in CONNECTOR_TABLE_GROUPS:
+                if set(table_counts).intersection(group):
+                    required.update(group)
             if (not isinstance(fingerprints, dict) or set(fingerprints) != required or
                     set(fingerprints) != set(table_counts) or
                     any(not isinstance(entry, dict) or not nonnegative_integer(entry.get("count")) or
@@ -1005,6 +1032,11 @@ def restore(directory, s3, target_bucket):
                 manifest["postgres"].get("database_schema_version") != restored_version):
             raise SnapshotError("Restored database requires its complete schema-versioned snapshot evidence")
         expected, actual = manifest["postgres"]["table_counts"], counts(pg)
+        # A legacy manifest cannot hide connector ledgers present in the dump by
+        # simply omitting their table names and downgrading the evidence format.
+        if any(set(actual).intersection(group) and not set(group).issubset(expected)
+               for group in CONNECTOR_TABLE_GROUPS):
+            raise SnapshotError("Restored connector ledgers are absent from snapshot evidence")
         if {name: actual.get(name) for name in expected} != expected:
             raise SnapshotError("Restored PostgreSQL row counts disagree with snapshot")
         if manifest["schema"] >= 2:

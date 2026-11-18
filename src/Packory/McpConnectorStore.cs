@@ -84,6 +84,12 @@ public sealed class McpConnectorStore(Settings settings, McpConnectorPolicy poli
                 );
                 CREATE INDEX IF NOT EXISTS mcp_connector_audit_latest
                     ON mcp_connector_audit(connector_id,created_at);
+                CREATE TABLE IF NOT EXISTS mcp_connector_ids (id TEXT PRIMARY KEY);
+                INSERT INTO mcp_connector_ids(id)
+                    SELECT id FROM mcp_connectors WHERE 1=1 ON CONFLICT(id) DO NOTHING;
+                INSERT INTO mcp_connector_ids(id)
+                    SELECT DISTINCT connector_id FROM mcp_connector_audit WHERE 1=1
+                    ON CONFLICT(id) DO NOTHING;
                 """);
             cmd.ExecuteNonQuery();
         }
@@ -156,6 +162,14 @@ public sealed class McpConnectorStore(Settings settings, McpConnectorPolicy poli
                 throw new InvalidOperationException("Connector revision is stale.");
             if (previous is null)
             {
+                // Connector IDs are authorization identities. Retire them permanently,
+                // including IDs reconstructed from pre-upgrade audit history, so an old
+                // OIDC tool grant cannot authorize a newly created connector.
+                using var reserved = Sql(db, "SELECT COUNT(*) FROM mcp_connector_ids WHERE id=@id",
+                    ("id", change.Id));
+                reserved.Transaction = tx;
+                if (Convert.ToInt64(reserved.ExecuteScalar()) != 0)
+                    throw new InvalidOperationException("Connector ID is permanently reserved.");
                 using var count = Sql(db, "SELECT COUNT(*) FROM mcp_connectors");
                 count.Transaction = tx;
                 if (Convert.ToInt64(count.ExecuteScalar()) >= 100)
@@ -171,6 +185,9 @@ public sealed class McpConnectorStore(Settings settings, McpConnectorPolicy poli
             var allowed = JsonSerializer.Serialize(change.AllowedTools);
             if (previous is null)
             {
+                using var reserve = Sql(db, "INSERT INTO mcp_connector_ids(id) VALUES(@id)", ("id", change.Id));
+                reserve.Transaction = tx;
+                reserve.ExecuteNonQuery();
                 using var insert = Sql(db, """
                     INSERT INTO mcp_connectors
                     (id,name,endpoint,enabled,allowed_tools,secret_ciphertext,revision,updated_at)

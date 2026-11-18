@@ -1,0 +1,43 @@
+name: Native database connectors
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  database:
+    name: TLS database connector (${{ matrix.provider }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [postgresql, mysql, mariadb, sqlserver, oracle]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore and build
+        run: |
+          dotnet restore Packory.slnx
+          dotnet build Packory.slnx -c Release --no-restore -warnaserror
+      - name: Validate fixture harness
+        run: bash -n scripts/qualify-database-connectors.sh
+      - name: Verify native provider with TLS and least-privilege credentials
+        env:
+          QUALIFY_PROVIDER: ${{ matrix.provider }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PACKORY_DB_QUALIFICATION_OUTPUT: ${{ runner.temp }}/database-qualification.json
+        run: bash scripts/qualify-database-connectors.sh "$QUALIFY_PROVIDER"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: database-${{ matrix.provider }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/database-qualification.json
+          if-no-files-found: error
+          retention-days: 7

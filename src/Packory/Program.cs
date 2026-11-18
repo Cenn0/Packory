@@ -253,6 +253,11 @@ builder.Services.AddSingleton(_ => McpConnectorPolicy.FromEnvironment());
 builder.Services.AddSingleton<McpConnectorSecrets>();
 builder.Services.AddSingleton<McpConnectorStore>();
 builder.Services.AddSingleton<IMcpConnectorRuntime, McpConnectorGateway>();
+builder.Services.AddSingleton<ConnectorOperationGate>();
+builder.Services.AddSingleton(_ => DatabaseConnectorPolicy.FromEnvironment());
+builder.Services.AddSingleton<DatabaseConnectorStore>();
+builder.Services.AddSingleton<IDatabaseConnectorExecutor, DatabaseConnectorExecutor>();
+builder.Services.AddSingleton<DatabaseConnectorService>();
 builder.Services.AddSingleton<ModelCatalogStore>();
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();
 builder.Services.AddSingleton<SkillScanCoordinator>();
@@ -268,6 +273,7 @@ if (settings.McpEnabled)
         .WithTools<PackorySkillQualityTools>()
         .WithTools<McpRegistryMcpTools>()
         .WithTools<McpConnectorMcpTools>()
+        .WithTools<DatabaseConnectorMcpTools>()
         .WithResources<PackoryMcpResources>()
         .WithResources<McpRegistryMcpResources>()
         .WithPrompts<PackoryMcpPrompts>();
@@ -358,6 +364,7 @@ if (!readerInstance)
         app.Services.GetRequiredService<SkillAiStore>().Initialize();
         app.Services.GetRequiredService<McpRegistryStore>().Initialize();
         app.Services.GetRequiredService<McpConnectorStore>().Initialize();
+        app.Services.GetRequiredService<DatabaseConnectorStore>().Initialize();
         app.Services.GetRequiredService<ModelCatalogStore>().Initialize();
         app.Services.GetRequiredService<ArtifactRecovery>().Reconcile();
     }
@@ -751,6 +758,7 @@ SkillSecurityEndpoints.Map(app);
 SkillAiEndpoints.Map(app);
 McpRegistryEndpoints.Map(app);
 McpConnectorEndpoints.Map(app);
+DatabaseConnectorEndpoints.Map(app);
 ModelCatalogEndpoints.Map(app);
 SkillQualityEndpoints.Map(app);
 McpOAuthResourceMetadata.Map(app);

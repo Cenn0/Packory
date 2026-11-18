@@ -48,6 +48,13 @@ The service process needs permission to read the file. Restart Packory after cha
 
 Credentials are encrypted at rest with AES-256-GCM and bound to connector ID and endpoint URL. The API returns only hasBearerToken. Changing endpoint URLs clears existing credentials. Tool calls and configuration updates are audited without recording sensitive arguments or credentials.
 
+Deleted connector IDs remain reserved, including after restart and restore. An old
+OIDC tool grant must not attach to a newly created connector. Use a fresh ID for a
+new connection. Calls, probes and edits for the same connector share a bounded
+operation gate: a successful disable/delete follows preceding operations and blocks
+later ones. A busy edit returns `429` and `Retry-After`; retry after the active call
+finishes. An already dispatched remote side effect cannot be rolled back by Packory.
+
 ## Calling connector tools without giving AI database credentials
 
 The database password stays on the **independently secured remote MCP server**, not in the model's context. Packory holds only an optional credential for that remote MCP service and enforces an exact local tool allowlist.
@@ -62,7 +69,7 @@ The access token must be verified using Packory's configured OIDC issuer, audien
 
 Packory's authenticated MCP server exposes:
 
-- list_connector_tools(connectorId) — connection discovery restricted to allowed connector callers or Packory administrators.
+- list_connector_tools(connectorId) — bounded names, descriptions and input schemas for an enabled connector. Scoped callers see only tools both locally approved and explicitly granted; administrators can inspect all discovered tools.
 - call_connector_tool(connectorId, toolName, argumentsJson) — invokes one enabled, locally approved remote MCP tool. argumentsJson is a JSON object serialized as a string.
 
 The administrator-only REST API also permits probe/call for controlled operational verification; the dashboard UI intentionally provides connection testing but not a general arbitrary tool execution console.
@@ -71,7 +78,11 @@ The administrator-only REST API also permits probe/call for controlled operation
 
 Deploy a trusted MCP server in front of PostgreSQL with a restricted read-only database role, selected read-only operations, tenant checks, query timeouts and result limits. Packory connects only to this MCP endpoint. An AI can call the explicitly approved query tool using the scoped Packory token, without ever receiving PostgreSQL credentials.
 
-**Direct SQL database connectors and automatic SQL-tool generation are not included.** Database-specific adapters must undergo separate authorization and injection reviews.
+Packory also provides **native database connectors** for PostgreSQL, MySQL/MariaDB,
+Microsoft SQL Server and Oracle. These use a separate administrator workflow,
+parameterized SELECT templates and distinct database grants. See
+[Native database connectors](database-connectors.md). Remote MCP service credentials
+and native database passwords are separate capabilities; the inert Registry grants neither.
 
 ## Security boundaries and limitations
 
@@ -79,8 +90,27 @@ Deploy a trusted MCP server in front of PostgreSQL with a restricted read-only d
 - Exact origin allowlist is deployed out-of-band; configured endpoints are checked again on every use. System HTTP proxies, redirects, cookies and transparent compression are disabled. All returned DNS answers must pass the address policy; the selected numeric address is pinned before connection.
 - Private-network access needs an explicit deployment-owned CIDR exception. Link-local and metadata addresses remain blocked.
 - MCP server metadata and returned tool descriptions are untrusted. Tool discovery never creates access grants and remote tools may perform side effects.
-- Tool arguments are bounded at 64 KiB and serialized results at 128 KiB. Calls have a 25-second deadline and 8-second connect timeout. Discovery is limited to four MCP protocol pages and 100 returned tool names. A hostile server could still send an oversized individual page before deserialization, so external network isolation and operational monitoring remain necessary.
+- Tool arguments are bounded at 64 KiB and redacted serialized results at 128 KiB.
+  A streaming guard rejects HTTP JSON/SSE responses over 256 KiB **before SDK
+  deserialization**, with a cumulative 1 MiB wire budget per operation. Calls have
+  a 25-second deadline and 8-second connect timeout. A shared, zero-queue budget
+  admits four operations per process. Discovery has at most four protocol pages,
+  100 tools, 16 KiB per input schema and 128 KiB across schemas. Oversized data is
+  rejected; it is not returned as an apparently complete result.
+- TLS validates system trust and the endpoint hostname. Certificate issuer downloads
+  and online revocation lookups are disabled on the remote HTTP transport to avoid
+  implicit network destinations. Servers must send their complete certificate chain;
+  manage certificate revocation/rotation through the deployment trust policy.
+- Literal bearer reflection in decoded JSON strings, property names and discovery
+  metadata is redacted or rejected. An upstream that deliberately transforms or
+  encodes the credential can still disclose it: only connect a credential to a
+  trusted service for which it was issued. Provider errors are returned as opaque
+  failures, not upstream diagnostics.
 - Packory cannot enforce object-, tenant- or row-level authorization inside remote services. Those checks must be implemented by each remote MCP gateway.
 - Treat administrator capabilities as privileged; use dedicated model-facing OIDC tokens and minimal per-tool grants. Successful connectivity does not imply a security certification.
+- Execution remains inside the Packory application process. These controls are not
+  process isolation, a hostile-code sandbox or a production certification. Deploy
+  network/resource isolation appropriate to the approved service; full isolated
+  gateway execution and per-user upstream OAuth delegation remain separate work.
 
 See [API reference](api.md). The existing inert MCP Registry and read-only package/skill features remain separate.

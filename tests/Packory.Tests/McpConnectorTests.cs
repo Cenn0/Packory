@@ -8,6 +8,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -35,10 +36,17 @@ public sealed class McpConnectorTests
     {
         public int DiscoverCalls { get; private set; }
         public int ToolCalls { get; private set; }
+        public Exception? DiscoveryError { get; set; }
+        public Exception? CallError { get; set; }
+        public Action? BeforeDiscovery { get; set; }
+        public Action? BeforeCall { get; set; }
         public Task<IReadOnlyList<McpConnectorToolSummary>> DiscoverAsync(
             McpConnectorRecord connector, CancellationToken cancellationToken)
         {
             DiscoverCalls++;
+            BeforeDiscovery?.Invoke();
+            if (DiscoveryError is not null)
+                return Task.FromException<IReadOnlyList<McpConnectorToolSummary>>(DiscoveryError);
             return Task.FromResult<IReadOnlyList<McpConnectorToolSummary>>(
                 [new("query_readonly", "Synthetic tool", connector.AllowedTools.Contains("query_readonly"))]);
         }
@@ -46,6 +54,8 @@ public sealed class McpConnectorTests
             JsonElement arguments, CancellationToken cancellationToken)
         {
             ToolCalls++;
+            BeforeCall?.Invoke();
+            if (CallError is not null) return Task.FromException<JsonElement>(CallError);
             return Task.FromResult(JsonDocument.Parse("{\"ok\":true}").RootElement.Clone());
         }
     }
@@ -164,6 +174,22 @@ public sealed class McpConnectorTests
         Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(WithToken(
             HttpMethod.Delete, path + "/team-database?revision=2", Admin))).StatusCode);
         Assert.Null(host.Services.GetRequiredService<McpConnectorStore>().Get("team-database"));
+        // An old OIDC grant must never attach to a new connector that reuses the ID.
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Post, path, Admin, Payload))).StatusCode);
+        // Simulate upgrading the earlier preview: its audit survives a deletion,
+        // but the permanent-ID table did not yet exist.
+        using (var metadata = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = Path.Combine(Path.GetDirectoryName(host.Keyring)!, "packory.sqlite") }.ToString()))
+        {
+            metadata.Open();
+            using var command = metadata.CreateCommand();
+            command.CommandText = "DROP TABLE mcp_connector_ids";
+            command.ExecuteNonQuery();
+        }
+        host.Services.GetRequiredService<McpConnectorStore>().Initialize();
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(WithToken(
+            HttpMethod.Post, path, Admin, Payload))).StatusCode);
     }
 
     [Fact]
@@ -260,6 +286,148 @@ public sealed class McpConnectorTests
     }
 
     [Fact]
+    public async Task HostileRemoteProtocolErrorsAreOpaqueForMcpAndRest()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        const string root = "/api/v1/admin/mcp/connectors";
+        using var created = await client.SendAsync(WithToken(HttpMethod.Post, root, Admin, Payload));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var update = JsonSerializer.Serialize(new
+        {
+            id = "team-database", name = "Synthetic remote MCP",
+            endpoint = "https://mcp.example.org/mcp", enabled = true,
+            allowedTools = new[] { "query_readonly" }, bearerToken = (string?)null,
+            clearBearerToken = false, revision = 1
+        });
+        using var enabled = await client.SendAsync(WithToken(HttpMethod.Put,
+            root + "/team-database", Admin, update));
+        Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+        host.Runtime.DiscoveryError = new McpProtocolException(
+            "Upstream credential " + Secret + "; SELECT private_data FROM synthetic_table", McpErrorCode.InternalError);
+        host.Runtime.CallError = host.Runtime.DiscoveryError;
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Authorization = "Bearer " + Admin;
+        var settings = host.Services.GetRequiredService<Settings>();
+        Assert.Null(Access.RequireAdmin(ctx, settings));
+        var tools = new McpConnectorMcpTools(new HttpContextAccessor { HttpContext = ctx }, settings,
+            host.Services.GetRequiredService<McpConnectorStore>(), host.Runtime,
+            host.Services.GetRequiredService<ConnectorOperationGate>(),
+            host.Services.GetRequiredService<PostgresSingleWriterLease>());
+        var discovery = await Assert.ThrowsAsync<McpProtocolException>(() => tools.ListConnectorTools("team-database"));
+        var call = await Assert.ThrowsAsync<McpProtocolException>(() =>
+            tools.CallConnectorTool("team-database", "query_readonly", "{}"));
+        foreach (var error in new[] { discovery, call })
+        {
+            Assert.Equal("Remote connector failed or is unavailable", error.Message);
+            Assert.DoesNotContain(Secret, error.Message);
+            Assert.DoesNotContain("SELECT", error.Message);
+        }
+        using var rest = await client.SendAsync(WithToken(HttpMethod.Post,
+            root + "/team-database/probe", Admin));
+        Assert.Equal(HttpStatusCode.BadGateway, rest.StatusCode);
+        var body = await rest.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(Secret, body);
+        Assert.DoesNotContain("SELECT", body);
+    }
+
+    private static McpConnectorMcpTools EnabledTools(Host host)
+    {
+        var store = host.Services.GetRequiredService<McpConnectorStore>();
+        store.Save(new McpConnectorChange("team-database", "Synthetic remote MCP",
+            "https://mcp.example.org/mcp", true, ["query_readonly"], Secret, false, 0), "admin-token");
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Authorization = "Bearer " + Admin;
+        var settings = host.Services.GetRequiredService<Settings>();
+        Assert.Null(Access.RequireAdmin(ctx, settings));
+        return new McpConnectorMcpTools(new HttpContextAccessor { HttpContext = ctx }, settings,
+            store, host.Runtime, host.Services.GetRequiredService<ConnectorOperationGate>(),
+            host.Services.GetRequiredService<PostgresSingleWriterLease>());
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("deadline")]
+    [InlineData("busy")]
+    public async Task RemoteRuntimeTimeoutsAndBusyErrorsHaveOpaqueResponses(string failure)
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var tools = EnabledTools(host);
+        var sensitiveMessage = Secret + "; SELECT private_data FROM synthetic_table";
+        host.Runtime.DiscoveryError = failure switch
+        {
+            "timeout" => new TimeoutException(sensitiveMessage),
+            "deadline" => new OperationCanceledException(sensitiveMessage),
+            _ => new ConnectorBusyException()
+        };
+        host.Runtime.CallError = host.Runtime.DiscoveryError;
+        var expectedMessage = failure == "busy" ? "Connector is busy; retry shortly" : "Remote MCP request timed out";
+        var discovery = await Assert.ThrowsAsync<McpProtocolException>(() => tools.ListConnectorTools("team-database"));
+        var call = await Assert.ThrowsAsync<McpProtocolException>(() =>
+            tools.CallConnectorTool("team-database", "query_readonly", "{}"));
+        Assert.Equal(expectedMessage, discovery.Message);
+        Assert.Equal(expectedMessage, call.Message);
+        foreach (var operation in new[] { "probe", "call" })
+        {
+            using var rest = await client.SendAsync(WithToken(HttpMethod.Post,
+                "/api/v1/admin/mcp/connectors/team-database/" + operation, Admin,
+                operation == "call" ? "{\"tool\":\"query_readonly\",\"arguments\":{}}" : null));
+            Assert.Equal(failure == "busy" ? HttpStatusCode.TooManyRequests : HttpStatusCode.GatewayTimeout, rest.StatusCode);
+            using var body = JsonDocument.Parse(await rest.Content.ReadAsStringAsync());
+            Assert.Equal(expectedMessage + ".", body.RootElement.GetProperty("error").GetString());
+            if (failure == "busy") Assert.Equal(TimeSpan.FromSeconds(2), rest.Headers.RetryAfter!.Delta);
+        }
+    }
+
+    [Fact]
+    public async Task ContendedAdmissionGateReturnsExplicitBusyErrorsWithoutCallingRemote()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var tools = EnabledTools(host);
+        using var held = await host.Services.GetRequiredService<ConnectorOperationGate>()
+            .EnterAsync("mcp:team-database", CancellationToken.None);
+        var discovery = Assert.ThrowsAsync<McpProtocolException>(() => tools.ListConnectorTools("team-database"));
+        var call = Assert.ThrowsAsync<McpProtocolException>(() =>
+            tools.CallConnectorTool("team-database", "query_readonly", "{}"));
+        var restTask = client.SendAsync(WithToken(HttpMethod.Post,
+            "/api/v1/admin/mcp/connectors/team-database/probe", Admin));
+        await Task.WhenAll(discovery, call, restTask);
+        Assert.Equal("Connector is busy; retry shortly", (await discovery).Message);
+        Assert.Equal("Connector is busy; retry shortly", (await call).Message);
+        using var rest = await restTask;
+        Assert.Equal(HttpStatusCode.TooManyRequests, rest.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(2), rest.Headers.RetryAfter!.Delta);
+        Assert.Equal(0, host.Runtime.DiscoverCalls);
+        Assert.Equal(0, host.Runtime.ToolCalls);
+    }
+
+    [Fact]
+    public async Task CallerCancellationRemainsCancellationAtRuntimeAndAdmission()
+    {
+        using var host = new Host();
+        using var client = host.CreateClient();
+        var tools = EnabledTools(host);
+        using var discoveryCancellation = new CancellationTokenSource();
+        host.Runtime.BeforeDiscovery = discoveryCancellation.Cancel;
+        host.Runtime.DiscoveryError = new OperationCanceledException(discoveryCancellation.Token);
+        var discovery = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tools.ListConnectorTools("team-database", discoveryCancellation.Token));
+        Assert.Same(host.Runtime.DiscoveryError, discovery);
+        using var callCancellation = new CancellationTokenSource();
+        host.Runtime.BeforeCall = callCancellation.Cancel;
+        host.Runtime.CallError = new OperationCanceledException(callCancellation.Token);
+        var call = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tools.CallConnectorTool("team-database", "query_readonly", "{}", callCancellation.Token));
+        Assert.Same(host.Runtime.CallError, call);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tools.ListConnectorTools("team-database", discoveryCancellation.Token));
+        Assert.Equal(1, host.Runtime.DiscoverCalls);
+        Assert.Equal(1, host.Runtime.ToolCalls);
+    }
+
+    [Fact]
     public async Task RejectsUnapprovedOriginsAndCrossSiteRequests()
     {
         using var host = new Host();
@@ -300,6 +468,20 @@ public sealed class McpConnectorTests
                 secrets.Unprotect(envelope, "two", "https://mcp.example.org/mcp"));
             Assert.ThrowsAny<CryptographicException>(() =>
                 secrets.Unprotect(envelope, "one", "https://mcp.example.org/other"));
+            foreach (var malformed in new[] {
+                "{}", "null", "{\"keyId\":null}",
+                "{\"keyId\":\"k1\",\"nonce\":null,\"ciphertext\":\"AA==\",\"tag\":\"AA==\"}",
+                "{\"keyId\":\"k1\",\"nonce\":\"!\",\"ciphertext\":\"AA==\",\"tag\":\"AA==\"}",
+                "{\"keyId\":\"k1\",\"nonce\":\"AA==\",\"ciphertext\":\"AA==\",\"tag\":\"AA==\"}"
+            })
+                Assert.ThrowsAny<CryptographicException>(() =>
+                    secrets.Unprotect(malformed, "one", "https://mcp.example.org/mcp"));
+            File.WriteAllText(path, new string(' ', 16385));
+            Assert.Throws<McpConnectorKeyringException>(() =>
+                secrets.Protect(Secret, "one", "https://mcp.example.org/mcp"));
+            File.WriteAllText(path, "{\"active\":\"k1\",\"keys\":{\"k1\":null}}");
+            Assert.Throws<McpConnectorKeyringException>(() =>
+                secrets.Protect(Secret, "one", "https://mcp.example.org/mcp"));
         }
         finally { Directory.Delete(folder, true); }
     }

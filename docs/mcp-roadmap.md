@@ -1,6 +1,6 @@
 # MCP delivery roadmap
 
-**Updated: 17 November 2026.** This is the actionable MCP continuation of [V3 MS5](roadmap.md#ms5--ai-distribution-skills-and-mcp-p1p2) and [V4 E10](roadmap-v4.md). It incorporates the protocol, Registry, quality-assessment and optional gateway gaps identified in the MCP completeness review. A task is complete only for its stated behavior, including failure cases and reproducible tests. A parser, schema or disabled placeholder alone does not complete a feature.
+**Updated: 18 November 2026.** This is the actionable MCP continuation of [V3 MS5](roadmap.md#ms5--ai-distribution-skills-and-mcp-p1p2) and [V4 E10](roadmap-v4.md). It incorporates the protocol, Registry, quality-assessment and optional gateway gaps identified in the MCP completeness review. A task is complete only for its stated behavior, including failure cases and reproducible tests. A parser, schema or disabled placeholder alone does not complete a feature.
 
 ## Product boundaries
 
@@ -34,7 +34,7 @@ Tests are evidence for the exact source revision and environment that ran them. 
 The browser job pins Node 22 and Playwright 1.62.1, serves the actual dashboard assets with the application's CSP, and checks completed/incomplete/error quality reports, cursor continuation, delayed-response invalidation and 1440/375-pixel layouts. Its synthetic API responses isolate UI behavior; the .NET/native-client and PostgreSQL suites establish the backend contracts separately.
 
 
-**17 November 2026 — scoped initial connector delivery (PR #174, pending CI):** The administrator can create, edit, disable, probe and delete remote HTTPS Streamable HTTP connectors; tokens are encrypted in an operator keyring, egress is exact-origin/CIDR restricted and tools require per-connector allowlists and scoped validated OIDC claims. This does **not** implement the remaining separate-process sandbox, per-principal upstream OAuth brokerage, upstream automatic credential rotation, circuit breakers, database-specific data policy or multi-server native end-to-end qualification. See [Managed MCP connectors](mcp-connectors.md). Do not consider G1–G5 closed.
+**18 November 2026 — approved connector implementation (PR #174; qualification is tied to the exact commit):** The administrator can create, edit, disable, probe and delete remote HTTPS Streamable HTTP connectors; tokens are encrypted in an operator keyring, egress is exact-origin/CIDR restricted and tools require per-connector allowlists and scoped validated OIDC claims. This does **not** implement the remaining separate-process sandbox, per-principal upstream OAuth brokerage, upstream automatic credential rotation, circuit breakers, database-specific data policy or multi-server native end-to-end qualification. Native PostgreSQL, MySQL/MariaDB, SQL Server and Oracle connectors now add a complete administrative lifecycle, typed SELECT templates, a distinct OIDC query capability, TLS validation, limits, audit, UI and a five-engine native test matrix. See [Managed MCP connectors](mcp-connectors.md), [Database connectors](database-connectors.md) and [ADR-004](adr/0004-approved-connectors.md). An official driver and an implemented native fixture do not by themselves establish a passed deployment qualification. Do not consider G1–G5 closed.
 
 ## Priority 1 — remaining Registry and protocol work
 

@@ -6,7 +6,7 @@ const canWrite = () => state.sso.authenticated ? ['admin', 'write'].includes(sta
 function updateAccessUi() {
   $('nav-publish').hidden = !canWrite();
   $('nav-feeds').hidden = !(canAdmin() || state.sso.authenticated || (state.access && state.access.role !== 'anonymous'));
-  for (const id of ['nav-reviews', 'nav-activity', 'nav-connectors']) $(id).hidden = !canAdmin();
+  for (const id of ['nav-reviews', 'nav-activity', 'nav-connectors', 'nav-databases']) $(id).hidden = !canAdmin();
   $('upload-panel').hidden = !canWrite();
   $('jump-to-import').hidden = !canWrite();
 }
@@ -1111,8 +1111,8 @@ async function loadSso() {
     await Promise.all([load(), loadSecurity(), loadMcpServers(), loadSkillAi(), loadManagedTokens()]);
     if (activeCatalogTab === 'mcp') await loadMcpAdmin();
     if (activeRoute === 'models') await Promise.all([loadModels(), loadModelAdmin()]);
-  if (activeRoute === 'connectors') await loadConnectors();
     if (activeRoute === 'connectors') await loadConnectors();
+    if (activeRoute === 'databases') await loadDatabases();
   } catch (_) {
     state.sso = { enabled: false, authenticated: false, role: 'none', csrfToken: null };
     $('api-token-fallback').hidden = false;
@@ -1148,6 +1148,8 @@ async function refreshTokenAccess() {
   if (activeRoute === 'models') await Promise.all([loadModels(), loadModelAdmin()]);
   if (activeRoute === 'feeds') await loadFeeds();
   if (activeRoute === 'activity') await loadActivity();
+  if (activeRoute === 'connectors') await loadConnectors();
+  if (activeRoute === 'databases') await loadDatabases();
 }
 $('sso-login').addEventListener('click', () => window.location.assign('/auth/login'));
 $('sso-logout').addEventListener('click', () => {
@@ -1167,7 +1169,7 @@ loadSso();
 
 
 // Task navigation and product views. Existing API authority remains server-side.
-const appRoutes = ['catalog', 'models', 'connectors', 'feeds', 'publish', 'reviews', 'activity', 'settings'];
+const appRoutes = ['catalog', 'models', 'connectors', 'databases', 'feeds', 'publish', 'reviews', 'activity', 'settings'];
 let activeRoute = 'catalog';
 function showRoute(route, refresh = true) {
   if (!appRoutes.includes(route)) route = 'catalog';
@@ -1175,6 +1177,8 @@ function showRoute(route, refresh = true) {
   const changed = route !== activeRoute;
   activeRoute = route;
   if (changed && previousRoute === 'feeds' && route !== 'feeds') clearFeedView();
+  if (changed && previousRoute === 'connectors') clearConnectors();
+  if (changed && previousRoute === 'databases') clearDatabases();
   for (const view of document.querySelectorAll('.page-view')) view.hidden = view.id !== route + '-view';
   for (const link of document.querySelectorAll('[data-route]')) {
     if (link.dataset.route === route) link.setAttribute('aria-current', 'page');
@@ -1187,6 +1191,7 @@ function showRoute(route, refresh = true) {
   if (route === 'catalog') { load(); loadMcpServers(); if (activeCatalogTab === 'mcp') loadMcpAdmin(); }
   if (route === 'models') { loadModels(); loadModelAdmin(); }
   if (route === 'connectors') loadConnectors();
+  if (route === 'databases') loadDatabases();
   if (route === 'feeds') loadFeeds();
   if (route === 'reviews') loadSecurity();
   if (route === 'activity') { loadActivity(); loadSkillAiJobs(); }
@@ -1281,7 +1286,7 @@ function clearPrivilegedViews(message = 'Credentials changed. Refresh the curren
   $('mcp-status').textContent = message;
   clearMcpAdmin();
   securityPolicy.enforcement = null; updateSecurityPolicy();
-  clearFeedView(); clearActivityView(); clearConnectors();
+  clearFeedView(); clearActivityView(); clearConnectors(); clearDatabases();
   $('feeds-status').textContent = message; $('activity-status').textContent = message;
 }
 const ecosystemLabels = { nuget: 'NuGet', npm: 'npm', cargo: 'Cargo', pypi: 'PyPI', oci: 'OCI', raw: 'Raw', maven: 'Maven', go: 'Go' };
@@ -2065,17 +2070,22 @@ function showPackageDetail(item, row, trigger) {
 
 // MCP connector administration: connection metadata only; credentials are write-only.
 // Remote discovery never grants execution rights.
-const connectorView = { requestId: 0, editingId: null, revision: 0, records: [] };
+const connectorView = { requestId: 0, epoch: 0, editor: 0, saveId: 0, editingId: null, revision: 0, records: [] };
+function connectorTicket() { return { epoch: connectorView.epoch, token: state.token }; }
+function connectorCurrent(ticket) { return ticket.epoch === connectorView.epoch && ticket.token === state.token && canAdmin(); }
+function connectorDraftChanged() { connectorView.editor++; $('connector-form-status').textContent = ''; }
 function resetConnectorForm() {
+  connectorView.editor++; connectorView.saveId++;
   connectorView.editingId = null; connectorView.revision = 0;
   $('connector-form').reset();
   $('connector-id').readOnly = false;
   $('connector-editor-title').textContent = 'Create connector';
   $('connector-save').textContent = 'Create connector';
+  $('connector-save').disabled = false;
   $('connector-form-status').textContent = '';
 }
 function clearConnectors() {
-  connectorView.requestId++; connectorView.records = [];
+  connectorView.requestId++; connectorView.epoch++; connectorView.records = [];
   $('connector-table').replaceChildren(); $('connector-test-results').replaceChildren();
   resetConnectorForm();
   $('connector-egress').textContent = '';
@@ -2122,6 +2132,7 @@ async function loadConnectors() {
   }
 }
 function editConnector(entry) {
+  resetConnectorForm();
   connectorView.editingId = entry.id; connectorView.revision = entry.revision;
   $('connector-form').reset(); $('connector-id').value = entry.id; $('connector-id').readOnly = true;
   $('connector-name').value = entry.name; $('connector-endpoint').value = entry.endpoint;
@@ -2135,12 +2146,14 @@ function editConnector(entry) {
   $('connector-name').focus();
 }
 async function probeConnector(entry, button) {
+  const ticket = connectorTicket(), requestId = ++connectorView.requestId;
   button.disabled = true;
   const host = $('connector-test-results');
   host.replaceChildren(element('p', 'Checking remote endpoint…', 'muted'));
   try {
     const result = await request('/api/v1/admin/mcp/connectors/' + encodeURIComponent(entry.id) + '/probe',
       { method: 'POST' });
+    if (!connectorCurrent(ticket) || requestId !== connectorView.requestId) return;
     host.replaceChildren(element('h3', 'Discovered tools for ' + entry.id));
     host.append(element('p', String(result.count) + ' tools found. Discovery does not grant permission.', 'muted'));
     const list = document.createElement('ul');
@@ -2149,26 +2162,35 @@ async function probeConnector(entry, button) {
         (tool.description ? ': ' + tool.description : '')));
     host.append(list);
   } catch (error) {
-    host.replaceChildren(element('p', 'Probe failed: ' + error.message, 'feedback'));
+    if (connectorCurrent(ticket) && requestId === connectorView.requestId)
+      host.replaceChildren(element('p', 'Probe failed: ' + error.message, 'feedback'));
   } finally { button.disabled = false; }
 }
 async function deleteConnector(entry, button) {
   if (!window.confirm('Delete connector ' + entry.id + ' and its stored credential?')) return;
   button.disabled = true;
+  const ticket = connectorTicket();
   try {
     await request('/api/v1/admin/mcp/connectors/' + encodeURIComponent(entry.id) +
       '?revision=' + encodeURIComponent(entry.revision), { method: 'DELETE' });
+    if (!connectorCurrent(ticket)) return;
     if (connectorView.editingId === entry.id) resetConnectorForm();
-    await loadConnectors(); $('connector-status').textContent = 'Connector deleted.';
+    await loadConnectors(); if (connectorCurrent(ticket)) $('connector-status').textContent = 'Connector deleted. Its ID remains reserved.';
   } catch (error) {
-    $('connector-status').textContent = 'Delete failed: ' + error.message; button.disabled = false;
+    if (connectorCurrent(ticket)) $('connector-status').textContent = 'Delete failed: ' + error.message;
+    button.disabled = false;
   }
 }
 $('connector-refresh').addEventListener('click', () => loadConnectors());
 $('connector-reset').addEventListener('click', resetConnectorForm);
+$('connector-form').addEventListener('input', connectorDraftChanged);
+$('connector-form').addEventListener('change', connectorDraftChanged);
 $('connector-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!canAdmin()) return;
-  const save = $('connector-save'), status = $('connector-form-status'); save.disabled = true;
+  const save = $('connector-save'), status = $('connector-form-status'); if (save.disabled) return;
+  save.disabled = true;
+  const ticket = connectorTicket(), editor = connectorView.editor, saveId = ++connectorView.saveId;
+  const current = () => connectorCurrent(ticket) && saveId === connectorView.saveId;
   status.textContent = 'Saving connector…';
   try {
     const tools = $('connector-tools').value.split(/[\r\n,]+/).map(x => x.trim()).filter(Boolean);
@@ -2184,14 +2206,333 @@ $('connector-form').addEventListener('submit', async event => {
     if (change.bearerToken && change.clearBearerToken)
       throw new Error('Choose credential rotation OR credential removal.');
     const editing = !!connectorView.editingId;
-    await request('/api/v1/admin/mcp/connectors' + (editing ? '/' + encodeURIComponent(id) : ''), {
+    $('connector-bearer').value = '';
+    const saved = await request('/api/v1/admin/mcp/connectors' + (editing ? '/' + encodeURIComponent(id) : ''), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change)
     });
-    resetConnectorForm(); await loadConnectors();
-    status.textContent = 'Connector saved. No credential was returned.';
-  } catch (error) { status.textContent = 'Save failed: ' + error.message; }
-  finally { save.disabled = false; $('connector-bearer').value = ''; }
+    if (!current()) return;
+    if (editor !== connectorView.editor) {
+      if (saved?.id === id && $('connector-id').value === id) {
+        connectorView.editingId = id; connectorView.revision = saved.revision;
+        $('connector-id').readOnly = true;
+        $('connector-editor-title').textContent = 'Edit connector: ' + id;
+        $('connector-save').textContent = 'Save connector';
+      }
+      status.textContent = 'Submitted version saved. Your newer edits are still unsaved.';
+      await loadConnectors(); return;
+    }
+    resetConnectorForm();
+    const cleanEditor = connectorView.editor, cleanSave = connectorView.saveId;
+    await loadConnectors();
+    if (connectorCurrent(ticket) && cleanEditor === connectorView.editor && cleanSave === connectorView.saveId)
+      status.textContent = 'Connector saved. No credential was returned.';
+  } catch (error) { if (current() && editor === connectorView.editor) status.textContent = 'Save failed: ' + error.message; }
+  finally { if (current()) save.disabled = false; }
+});
+
+// Native database connectors: administrative SQL templates, exact model query grants.
+const databaseView = { epoch: 0, requestId: 0, actionId: 0, saveId: 0, queryId: 0,
+  editor: 0, editingId: null, revision: 0, testRecord: null, executionEnabled: false };
+let databaseFieldId = 0;
+const databaseProviders = { postgresql: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', sqlserver: 'SQL Server', oracle: 'Oracle' };
+const databasePorts = { postgresql: 5432, mysql: 3306, mariadb: 3306, sqlserver: 1433, oracle: 2484 };
+const databaseTypes = ['string', 'int64', 'decimal', 'bool', 'uuid', 'date', 'datetime'];
+function databaseTicket() { return { epoch: databaseView.epoch, token: state.token }; }
+function databaseCurrent(ticket) { return ticket.epoch === databaseView.epoch && ticket.token === state.token && canAdmin(); }
+function databaseDraftChanged() {
+  databaseView.editor++;
+  $('database-form-status').textContent = '';
+}
+function databaseCanQuery(record = databaseView.testRecord) {
+  return canAdmin() && databaseView.executionEnabled && !!record?.definition.enabled &&
+    !!record.hasPassword && (record.definition.queries || []).length > 0;
+}
+function updateDatabaseRunState() {
+  $('database-run').disabled = !databaseCanQuery() ||
+    !databaseView.testRecord.definition.queries.some(query => query.name === $('database-query-select').value);
+}
+function invalidateDatabaseQuery() {
+  databaseView.queryId++;
+  $('database-query-results').replaceChildren();
+  updateDatabaseRunState();
+}
+function closeDatabaseQuery() {
+  databaseView.testRecord = null;
+  $('database-query-panel').hidden = true;
+  $('database-query-select').replaceChildren();
+  $('database-query-arguments').value = '{}'; $('database-query-contract').textContent = '';
+  invalidateDatabaseQuery();
+}
+function databaseProviderFields() {
+  const oracle = $('database-provider').value === 'oracle';
+  $('database-oracle-dn-field').hidden = !oracle;
+  $('database-oracle-dn').required = oracle;
+}
+function resetDatabaseForm() {
+  databaseView.editor++; databaseView.saveId++; databaseView.editingId = null; databaseView.revision = 0;
+  $('database-form').reset(); $('database-id').readOnly = false;
+  $('database-query-editors').replaceChildren();
+  $('database-editor-title').textContent = 'Create database connector';
+  $('database-save').textContent = 'Create database connector';
+  $('database-save').disabled = false;
+  $('database-form-status').textContent = '';
+  databaseProviderFields();
+}
+function clearDatabases() {
+  databaseView.epoch++; databaseView.requestId++; databaseView.actionId++; databaseView.executionEnabled = false;
+  resetDatabaseForm();
+  closeDatabaseQuery();
+  for (const id of ['database-table', 'database-results']) $(id).replaceChildren();
+  $('database-policy').textContent = '';
+  $('database-status').textContent = 'Administrator access is required.';
+}
+function databaseField(parent, label, field, kind, value, options = {}) {
+  const wrapper = element('label', label), control = document.createElement(kind === 'textarea' ? 'textarea' : kind === 'select' ? 'select' : 'input');
+  control.id = 'db-dynamic-' + (++databaseFieldId); wrapper.htmlFor = control.id;
+  control.dataset.field = field;
+  if (kind === 'select') {
+    for (const item of options.choices || []) { const option = element('option', item); option.value = item; control.append(option); }
+  } else if (kind !== 'textarea') control.type = kind;
+  if (kind === 'checkbox') control.checked = !!value;
+  else control.value = value == null ? '' : String(value);
+  if (options.required) control.required = true;
+  if (options.maxLength) control.maxLength = options.maxLength;
+  if (options.min !== undefined) control.min = String(options.min);
+  if (options.max !== undefined) control.max = String(options.max);
+  if (options.pattern) control.pattern = options.pattern;
+  if (kind === 'textarea') { control.rows = options.rows || 3; control.spellcheck = false; }
+  if (kind === 'checkbox') wrapper.className = 'connector-check';
+  control.autocomplete = 'off'; wrapper.append(control); parent.append(wrapper);
+  return control;
+}
+function addDatabaseParameter(parent, parameter = { name: '', type: 'string', required: true, maxLength: 2048 }, dirty = true) {
+  if (parent.children.length >= 32) { $('database-form-status').textContent = 'A query supports at most 32 parameters.'; return; }
+  const row = element('div', '', 'database-parameter');
+  databaseField(row, 'Parameter name', 'name', 'text', parameter.name, { required: true, maxLength: 64, pattern: '[a-zA-Z_][a-zA-Z0-9_]*' });
+  databaseField(row, 'Type', 'type', 'select', parameter.type, { choices: databaseTypes });
+  databaseField(row, 'Text length limit', 'maxLength', 'number', parameter.maxLength, { required: true, min: 1, max: 2048 });
+  databaseField(row, 'Required', 'required', 'checkbox', parameter.required);
+  const remove = element('button', 'Remove parameter', 'button-secondary'); remove.type = 'button';
+  remove.addEventListener('click', () => { row.remove(); databaseDraftChanged(); }); row.append(remove); parent.append(row);
+  if (dirty) databaseDraftChanged();
+}
+function addDatabaseQuery(query, dirty = true) {
+  const parent = $('database-query-editors');
+  if (parent.children.length >= 32) { $('database-form-status').textContent = 'A connector supports at most 32 queries.'; return; }
+  query = query || { name: '', description: '', sql: '', parameters: [], maxRows: 100, timeoutSeconds: 10 };
+  const editor = element('fieldset', '', 'database-query-editor');
+  editor.append(element('legend', 'Approved query'));
+  const grid = element('div', '', 'connector-form-grid');
+  databaseField(grid, 'Query name', 'queryName', 'text', query.name, { required: true, maxLength: 64, pattern: '[a-zA-Z_][a-zA-Z0-9_]*' });
+  databaseField(grid, 'Description for AI callers', 'description', 'text', query.description, { required: true, maxLength: 512 });
+  editor.append(grid);
+  databaseField(editor, 'Approved SELECT template', 'sql', 'textarea', query.sql, { required: true, maxLength: 8192, rows: 4 });
+  const limits = element('div', '', 'connector-form-grid');
+  databaseField(limits, 'Maximum rows', 'maxRows', 'number', query.maxRows, { required: true, min: 1, max: 1000 });
+  databaseField(limits, 'Query timeout (seconds)', 'timeoutSeconds', 'number', query.timeoutSeconds, { required: true, min: 1, max: 30 });
+  editor.append(limits, element('h4', 'Typed parameters'));
+  const parameters = element('div', '', 'database-parameters'); editor.append(parameters);
+  for (const parameter of query.parameters || []) addDatabaseParameter(parameters, parameter, false);
+  const buttons = element('div', '', 'button-row');
+  const add = element('button', 'Add parameter', 'button-secondary'); add.type = 'button';
+  add.addEventListener('click', () => addDatabaseParameter(parameters));
+  const remove = element('button', 'Remove query', 'danger-action'); remove.type = 'button';
+  remove.addEventListener('click', () => { editor.remove(); databaseDraftChanged(); }); buttons.append(add, remove); editor.append(buttons); parent.append(editor);
+  if (dirty) databaseDraftChanged();
+}
+function readDatabaseQueries() {
+  return Array.from($('database-query-editors').children).map(editor => {
+    const field = name => editor.querySelector('[data-field="' + name + '"]');
+    return { name: field('queryName').value, description: field('description').value, sql: field('sql').value,
+      maxRows: Number(field('maxRows').value), timeoutSeconds: Number(field('timeoutSeconds').value),
+      parameters: Array.from(editor.querySelector('.database-parameters').children).map(row => {
+        const input = name => row.querySelector('[data-field="' + name + '"]');
+        return { name: input('name').value, type: input('type').value, required: input('required').checked, maxLength: Number(input('maxLength').value) };
+      }) };
+  });
+}
+function editDatabase(record) {
+  resetDatabaseForm();
+  const d = record.definition; databaseView.editingId = d.id; databaseView.revision = d.revision;
+  const values = { 'database-id': d.id, 'database-name': d.name, 'database-provider': d.provider,
+    'database-host': d.host, 'database-port': d.port, 'database-catalog': d.database,
+    'database-username': d.username, 'database-tls-name': d.tlsServerName, 'database-oracle-dn': d.oracleServerCertificateDn || '' };
+  for (const [id, value] of Object.entries(values)) $(id).value = value;
+  $('database-id').readOnly = true; $('database-enabled').checked = !!d.enabled;
+  for (const query of d.queries || []) addDatabaseQuery(query, false);
+  databaseProviderFields();
+  $('database-editor-title').textContent = 'Edit database connector: ' + d.id;
+  $('database-save').textContent = 'Save database connector';
+  $('database-form-status').textContent = record.hasPassword ? 'The saved password is hidden. Leave the password field empty to retain it.' : 'No password is configured.';
+  $('database-name').focus();
+}
+async function databaseAction(record, action, button) {
+  if (!canAdmin() || (action === 'probe' && (!databaseView.executionEnabled || !record.hasPassword))) return;
+  const ticket = databaseTicket(), d = record.definition, editor = databaseView.editor;
+  if (action === 'delete' && !window.confirm('Delete ' + d.id + ' and its stored password? This ID cannot be reused.')) return;
+  const actionId = ++databaseView.actionId;
+  const current = () => databaseCurrent(ticket) && actionId === databaseView.actionId;
+  button.dataset.databaseAction = String(actionId);
+  button.disabled = true;
+  const host = $('database-results'); host.replaceChildren(element('p', 'Working…', 'muted'));
+  try {
+    const path = '/api/v1/admin/database-connectors/' + encodeURIComponent(d.id);
+    const result = await request(path + (action === 'delete' ? '?revision=' + d.revision : '/' + action),
+      action === 'audit' ? {} : { method: action === 'delete' ? 'DELETE' : 'POST' });
+    if (!databaseCurrent(ticket)) return;
+    if (action === 'delete') {
+      if (databaseView.editingId === d.id && editor === databaseView.editor) resetDatabaseForm();
+      if (databaseView.testRecord?.definition.id === d.id) closeDatabaseQuery();
+      await loadDatabases();
+      if (current()) host.replaceChildren(element('p', 'Connector deleted. Its ID remains reserved.'));
+    } else if (!current()) return;
+    else if (action === 'probe') {
+      host.replaceChildren(element('h3', 'Connection verified: ' + d.id), element('p', result.qualification));
+    } else {
+      host.replaceChildren(element('h3', 'Recent activity: ' + d.id));
+      const list = document.createElement('ul');
+      for (const item of result.items || []) list.append(element('li', new Date(item.createdAt).toISOString() + ' · ' + item.action + (item.query ? ' · ' + item.query : '') + ' · ' + item.actor));
+      if (!list.children.length) list.append(element('li', 'No recorded activity.'));
+      host.append(list);
+    }
+  } catch (error) { if (current()) host.replaceChildren(element('p', 'Operation failed: ' + error.message, 'feedback')); }
+  finally {
+    if (databaseCurrent(ticket) && button.dataset.databaseAction === String(actionId)) button.disabled = false;
+  }
+}
+async function loadDatabases() {
+  const ticket = databaseTicket(), requestId = ++databaseView.requestId;
+  $('database-table').replaceChildren();
+  if (!canAdmin()) { clearDatabases(); return; }
+  $('database-status').textContent = 'Loading database connectors…';
+  try {
+    const response = await request('/api/v1/admin/database-connectors');
+    if (!databaseCurrent(ticket) || requestId !== databaseView.requestId) return;
+    databaseView.executionEnabled = response.enabled === true;
+    if (!databaseView.executionEnabled) { databaseView.actionId++; $('database-results').replaceChildren(); }
+    const records = Array.isArray(response.items) ? response.items : [];
+    $('database-status').textContent = records.length + ' database connectors. ' + (response.enabled ? 'Database execution is enabled by the operator.' : 'Database execution is disabled by the operator.');
+    $('database-policy').textContent = (response.allowedTargets || []).length ? 'Approved destinations: ' + response.allowedTargets.join(', ') : 'No database destinations have been approved by the operator.';
+    for (const record of records) {
+      const d = record.definition, row = document.createElement('tr');
+      row.append(element('td', d.name + ' (' + d.id + ')'), element('td', (databaseProviders[d.provider] || d.provider) + ' · ' + d.host + ':' + d.port + ' / ' + d.database),
+        element('td', d.enabled ? 'Enabled' : 'Disabled'), element('td', (d.queries || []).length + ' approved'), element('td', record.hasPassword ? 'Configured (hidden)' : 'Not configured'));
+      const actions = element('td', '', 'feed-actions');
+      for (const [label, callback, disabled] of [
+        ['Edit', () => editDatabase(record), false],
+        ['Test connection', button => databaseAction(record, 'probe', button), !response.enabled || !record.hasPassword],
+        ['Run query', () => selectDatabaseForQuery(record), !databaseCanQuery(record)],
+        ['Audit', button => databaseAction(record, 'audit', button), false],
+        ['Delete', button => databaseAction(record, 'delete', button), false]
+      ]) {
+        const button = element('button', label, label === 'Delete' ? 'danger-action' : 'button-secondary');
+        button.type = 'button'; button.disabled = disabled; button.addEventListener('click', () => callback(button)); actions.append(button);
+      }
+      row.append(actions); $('database-table').append(row);
+    }
+    if (!records.length) { const row = document.createElement('tr'), cell = element('td', 'No database connectors configured.', 'muted'); cell.colSpan = 6; row.append(cell); $('database-table').append(row); }
+    if (databaseView.testRecord) {
+      const current = records.find(r => r.definition.id === databaseView.testRecord.definition.id);
+      if (!current || !databaseCanQuery(current) || current.definition.revision !== databaseView.testRecord.definition.revision)
+        closeDatabaseQuery();
+    }
+  } catch (error) { if (databaseCurrent(ticket) && requestId === databaseView.requestId) $('database-status').textContent = 'Cannot load database connectors: ' + error.message; }
+}
+function selectDatabaseForQuery(record) {
+  if (!databaseCanQuery(record)) { closeDatabaseQuery(); return; }
+  databaseView.testRecord = record; $('database-query-select').replaceChildren(); $('database-query-results').replaceChildren();
+  for (const query of record.definition.queries || []) { const option = element('option', query.name + ' — ' + query.description); option.value = query.name; $('database-query-select').append(option); }
+  $('database-query-title').textContent = 'Test approved query: ' + record.definition.id;
+  $('database-query-panel').hidden = false; updateDatabaseQueryContract(); $('database-query-select').focus();
+}
+function updateDatabaseQueryContract() {
+  const query = databaseView.testRecord?.definition.queries.find(q => q.name === $('database-query-select').value);
+  invalidateDatabaseQuery();
+  $('database-query-contract').textContent = ''; $('database-query-arguments').value = '{}';
+  if (!query) return;
+  const examples = { string: '', int64: 0, decimal: 0, bool: false, uuid: '00000000-0000-0000-0000-000000000000', date: '2026-01-01', datetime: '2026-01-01T00:00:00Z' };
+  $('database-query-arguments').value = JSON.stringify(Object.fromEntries(query.parameters.filter(p => p.required).map(p => [p.name, examples[p.type]])), null, 2);
+  $('database-query-contract').textContent = query.parameters.length ? query.parameters.map(p => p.name + ': ' + p.type + (p.required ? ' (required)' : ' (optional)')).join('\n') : 'No parameters. Use {}.';
+}
+$('database-provider').addEventListener('change', () => { $('database-port').value = databasePorts[$('database-provider').value]; databaseProviderFields(); });
+$('database-host').addEventListener('change', () => { if (!$('database-tls-name').value) $('database-tls-name').value = $('database-host').value; });
+$('database-refresh').addEventListener('click', loadDatabases);
+$('database-reset').addEventListener('click', resetDatabaseForm);
+$('database-add-query').addEventListener('click', () => addDatabaseQuery());
+$('database-query-select').addEventListener('change', updateDatabaseQueryContract);
+$('database-query-arguments').addEventListener('input', invalidateDatabaseQuery);
+$('database-form').addEventListener('input', databaseDraftChanged);
+$('database-form').addEventListener('change', databaseDraftChanged);
+$('database-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!canAdmin()) return;
+  const button = $('database-save'); if (button.disabled) return;
+  const ticket = databaseTicket(), editor = databaseView.editor, saveId = ++databaseView.saveId;
+  const current = () => databaseCurrent(ticket) && saveId === databaseView.saveId;
+  button.disabled = true;
+  $('database-form-status').textContent = 'Saving database connector…';
+  try {
+    const definition = { id: $('database-id').value, name: $('database-name').value, provider: $('database-provider').value,
+      host: $('database-host').value, port: Number($('database-port').value), database: $('database-catalog').value,
+      username: $('database-username').value, tlsServerName: $('database-tls-name').value,
+      oracleServerCertificateDn: $('database-provider').value === 'oracle' ? $('database-oracle-dn').value : null,
+      enabled: $('database-enabled').checked, queries: readDatabaseQueries(), revision: databaseView.revision };
+    const password = $('database-password').value || null, clearPassword = $('database-clear-password').checked;
+    if (password && clearPassword) throw new Error('Choose password rotation or password removal.');
+    const body = JSON.stringify({ definition, password, clearPassword });
+    $('database-password').value = '';
+    const saved = await request('/api/v1/admin/database-connectors' + (databaseView.editingId ? '/' + encodeURIComponent(definition.id) : ''),
+      { method: databaseView.editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (!current()) return;
+    databaseView.actionId++; $('database-results').replaceChildren();
+    if (editor !== databaseView.editor) {
+      // Acknowledge our saved revision without overwriting a newer local draft.
+      // Its next save still uses the server's optimistic concurrency check.
+      if (saved?.definition?.id === definition.id && $('database-id').value === definition.id) {
+        databaseView.editingId = definition.id; databaseView.revision = saved.definition.revision;
+        $('database-id').readOnly = true;
+        $('database-editor-title').textContent = 'Edit database connector: ' + definition.id;
+        $('database-save').textContent = 'Save database connector';
+      }
+      $('database-form-status').textContent = 'Submitted version saved. Your newer edits are still unsaved.';
+      await loadDatabases(); return;
+    }
+    resetDatabaseForm();
+    const cleanEditor = databaseView.editor, cleanSave = databaseView.saveId;
+    await loadDatabases();
+    if (databaseCurrent(ticket) && cleanEditor === databaseView.editor && cleanSave === databaseView.saveId)
+      $('database-form-status').textContent = 'Database connector saved. Its password remains hidden.';
+  } catch (error) { if (current() && editor === databaseView.editor) $('database-form-status').textContent = 'Save failed: ' + error.message; }
+  finally { if (current()) button.disabled = false; }
+});
+$('database-run-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!databaseCanQuery()) return;
+  const ticket = databaseTicket(), record = databaseView.testRecord, query = $('database-query-select').value;
+  const button = $('database-run'), host = $('database-query-results'); if (button.disabled) return;
+  const raw = $('database-query-arguments').value, queryId = ++databaseView.queryId;
+  const current = () => databaseCurrent(ticket) && queryId === databaseView.queryId &&
+    databaseCanQuery(record) && databaseView.testRecord === record &&
+    $('database-query-select').value === query && $('database-query-arguments').value === raw;
+  button.disabled = true;
+  host.replaceChildren(element('p', 'Running approved query…', 'muted'));
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('Arguments must be a JSON object.');
+    // Preserve exact JSON integer/decimal tokens. Parsing then reserializing would round 64-bit values.
+    const body = '{"query":' + JSON.stringify(query) + ',"arguments":' + raw + '}';
+    const response = await request('/api/v1/admin/database-connectors/' + encodeURIComponent(record.definition.id) + '/query',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (!current()) return;
+    const result = response.result, rows = result.rows || [], columns = result.columns || [];
+    host.replaceChildren(element('p', rows.length + ' rows returned.' + (result.truncated ? ' Row limit reached; more rows may exist.' : '') + (result.cellsTruncated ? ' Some text cells were truncated.' : '') + ' Treat returned data as untrusted.'));
+    const wrapper = element('div', '', 'table-wrap'), table = document.createElement('table'), heading = document.createElement('tr');
+    for (const column of columns) { const th = element('th', column); th.scope = 'col'; heading.append(th); }
+    const thead = document.createElement('thead'); thead.append(heading); table.append(thead);
+    const tbody = document.createElement('tbody');
+    for (const values of rows) { const row = document.createElement('tr'); for (const column of columns) row.append(element('td', values[column] == null ? 'NULL' : String(values[column]))); tbody.append(row); }
+    table.append(tbody); wrapper.append(table); host.append(wrapper);
+  } catch (error) { if (current()) host.replaceChildren(element('p', 'Query failed: ' + error.message, 'feedback')); }
+  finally { if (databaseCurrent(ticket) && queryId === databaseView.queryId) updateDatabaseRunState(); }
 });
 
 routeFromHash();

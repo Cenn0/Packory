@@ -5,6 +5,7 @@ following independent workflows for the **same source commit and event**:
 
 | Workflow file | Mandatory jobs |
 | --- | --- |
+| `database-connectors.yml` | TLS database connector jobs for PostgreSQL, MySQL, MariaDB, SQL Server and Oracle |
 | `keycloak.yml` | Signed Keycloak JWT |
 | `mcp-typescript.yml` | Independent TypeScript SDK HTTP conformance |
 | `native-matrix.yml` | Both Cargo/pip Python 3.12 and 3.13 profiles plus npm/pnpm/Yarn Classic lockfiles |
@@ -31,7 +32,7 @@ the administrative readback and negative merge proof are recorded below.
 Independent current-code approval remains a separate review obligation.
 
 The automatically published development containers now require the full CI
-gate. Publication rechecks the eight independent inventories before building,
+gate. Publication rechecks the nine independent inventories before building,
 in addition to checking that the CI source is still current main. Manual CI
 dispatch inspects existing main-push qualification; it cannot manufacture
 independent provider runs for an arbitrary untested branch.
@@ -78,7 +79,7 @@ An authorized repository administrator must, in a controlled test:
    protection and audit the intended automation and emergency bypass access.
    Do not publish identities, permission tokens or private administration logs.
 2. Require the stable **`Complete qualification`** job context on `main`.
-   It must run on **every PR**, with all eight independent workflow jobs
+   It must run on **every PR**, with all nine independent workflow inventories
    represented by [the exact source gate](../scripts/qualification_gate.py).
    Avoid requiring a conditional/renamed job that can remain pending forever.
    Consider independent required contexts only where their PR triggering
@@ -102,6 +103,18 @@ operators must still obtain independent approval of the current change for
 release acceptance. Neither a green CI index nor this control is that approval.
 
 ## Evidence index
+
+The native database matrix builds the exact PR head or main-push commit. Each
+provider uses a digest-pinned disposable engine, generated certificate authority,
+TLS certificate and independent restricted reader. It requires positive queries,
+parameter binding, independent write denial, output bounds, wrong-name rejection,
+wrong-password rejection and an untrusted-CA failure in a fresh process. The harness
+rejects skipped provider tests and uploads only sanitized provider/image/source
+metadata. Credentials, private keys, raw database logs and raw test reports are
+removed rather than published as artifacts. See the
+[fixture profile](../tests/fixtures/database-connectors/README.md) for versions and
+limits. Actual passing workflow results are required; a checked-in fixture is not
+evidence that a provider or deployment passed.
 
 The main integration job additionally uploads a seven-day
 `client-environment-<SHA>-<attempt>` inventory. It records an allowlisted

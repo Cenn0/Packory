@@ -1,0 +1,28 @@
+{
+  "checkedUtc": "2026-11-18",
+  "postgresql": {
+    "image": "postgres:17.12-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7",
+    "publisher": "Docker Official Image",
+    "source": "https://github.com/docker-library/postgres"
+  },
+  "mysql": {
+    "image": "mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902",
+    "publisher": "Docker Official Image",
+    "source": "https://github.com/docker-library/mysql"
+  },
+  "mariadb": {
+    "image": "mariadb:11.8@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707",
+    "publisher": "Docker Official Image",
+    "source": "https://github.com/MariaDB/mariadb-docker"
+  },
+  "sqlserver": {
+    "image": "mcr.microsoft.com/mssql/server:2022-latest@sha256:e10cd49443c94dbdcb7a050987db22ff4d8c87052ac53768abe1ed848d3fcef6",
+    "publisher": "Microsoft Container Registry",
+    "source": "https://learn.microsoft.com/sql/linux/quickstart-install-connect-docker"
+  },
+  "oracle": {
+    "image": "gvenzl/oracle-free:23.26.3-full@sha256:3251b285857ba46166279bcf9d4d00c0628335021bd2d0362dedf8b397e76eb5",
+    "publisher": "gvenzl community image; not an Oracle certification",
+    "source": "https://github.com/gvenzl/oci-oracle-free"
+  }
+}

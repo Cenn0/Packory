@@ -83,6 +83,9 @@ jobs:
           PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS=https://mcp.example.org \
           PACKORY_MCP_CONNECTOR_KEYRING_PATH=/tmp/packory-mcp-keyring-synthetic-placeholder.json \
           docker compose -f compose.yaml -f compose.mcp-connectors.yaml config --quiet
+          PACKORY_DB_CONNECTOR_ALLOWED_TARGETS=postgresql://db.example.invalid:5432 \
+          PACKORY_MCP_CONNECTOR_KEYRING_PATH=/tmp/packory-mcp-keyring-synthetic-placeholder.json \
+          docker compose -f compose.yaml -f compose.database-connectors.yaml config --quiet
       - name: Validate private ingress profile and proxy authorization boundaries
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
       - name: Validate synthetic single-node evidence ledger

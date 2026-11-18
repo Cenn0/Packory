@@ -214,6 +214,26 @@ public static class Access
                 (toolName is null || grant == prefix + toolName));
     }
 
+    // Database capabilities are deliberately separate from remote MCP tool grants.
+    // Even an OIDC administrator must explicitly receive the exact database/query grant for MCP.
+    public static bool HasDatabaseConnectorGrant(HttpContext context, Settings settings,
+        string connectorId, string? queryName = null)
+    {
+        if (!McpConnectorPolicy.ValidId(connectorId) ||
+            (queryName is not null && !DatabaseConnectorPolicy.ValidName(queryName))) return false;
+        var verified = ValidatedBearer(context, settings);
+        if (verified is null) return false;
+        var scopes = verified.FindAll("scope").Concat(verified.FindAll("scp"))
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!scopes.Contains("packory.read") || !scopes.Contains("packory.database.read")) return false;
+        var prefix = connectorId + ":";
+        return verified.FindAll("packory_database").Take(64).Select(c => c.Value)
+            .Any(grant => grant.StartsWith(prefix, StringComparison.Ordinal) &&
+                DatabaseConnectorPolicy.ValidName(grant[prefix.Length..]) &&
+                (queryName is null || grant == prefix + queryName));
+    }
+
     public static IResult? RequireAdmin(HttpContext context, Settings settings)
     {
         if (Require(context, settings, write: true) is { } denied) return denied;
