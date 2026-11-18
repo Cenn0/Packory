@@ -180,6 +180,52 @@ public sealed class DatabaseConnectorExecutorTests
             DatabaseConnectorExecutor.BindArguments(Query().Parameters, arguments.RootElement));
     }
 
+    [Theory]
+    [InlineData("0.123456789012345678901234567890123")]
+    [InlineData("-0.123456789012345678901234567890123")]
+    [InlineData("1e-29")]
+    [InlineData("-1e-29")]
+    [InlineData("79228162514264337593543950335.1")]
+    [InlineData("-79228162514264337593543950335.1")]
+    [InlineData("0e2147483648")]
+    [InlineData("0e-2147483649")]
+    public void Decimal_arguments_reject_rounding_underflow_and_unbounded_exponents(string raw)
+    {
+        using var arguments = JsonDocument.Parse("{\"value\":" + raw + "}");
+        Assert.Throws<InvalidDataException>(() => DatabaseConnectorExecutor.BindArguments(
+            [new("value", "decimal", true, 100)], arguments.RootElement));
+    }
+
+    [Theory]
+    [InlineData("1e-28", "0.0000000000000000000000000001")]
+    [InlineData("-1e-28", "-0.0000000000000000000000000001")]
+    [InlineData("7.9228162514264337593543950335e28", "79228162514264337593543950335")]
+    [InlineData("-7.9228162514264337593543950335e28", "-79228162514264337593543950335")]
+    [InlineData("1.0000000000000000000000000000000", "1")]
+    [InlineData("-12.50000E+2", "-1250")]
+    [InlineData("123450000e-4", "12345")]
+    [InlineData("0e2147483647", "0")]
+    [InlineData("-0e-2147483648", "0")]
+    public void Decimal_arguments_preserve_exact_values_across_notation_and_scale(string raw, string expected)
+    {
+        using var arguments = JsonDocument.Parse("{\"value\":" + raw + "}");
+        var bound = DatabaseConnectorExecutor.BindArguments(
+            [new("value", "decimal", true, 100)], arguments.RootElement);
+        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture),
+            Assert.IsType<decimal>(Assert.Single(bound).Value));
+    }
+
+    [Fact]
+    public void Decimal_literal_length_is_bounded_before_coefficient_parsing()
+    {
+        using var accepted = JsonDocument.Parse("{\"value\":1." + new string('0', 126) + "}");
+        Assert.Equal(1m, Assert.Single(DatabaseConnectorExecutor.BindArguments(
+            [new("value", "decimal", true, 100)], accepted.RootElement)).Value);
+        using var rejected = JsonDocument.Parse("{\"value\":1." + new string('0', 127) + "}");
+        Assert.Throws<InvalidDataException>(() => DatabaseConnectorExecutor.BindArguments(
+            [new("value", "decimal", true, 100)], rejected.RootElement));
+    }
+
     [Fact]
     public async Task Huge_text_and_binary_are_not_materialized_and_rows_are_bounded()
     {

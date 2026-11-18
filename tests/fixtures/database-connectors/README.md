@@ -38,8 +38,15 @@ accepted explicitly. Oracle Database Free runs in a **community-maintained**
 gvenzl image; passing this test is not an Oracle product endorsement or support
 certification.
 
+The fixture uses its own internal Docker bridge and publishes no host ports.
+The Linux runner connects directly to the container's private IPv4 address. The
+script reads that address from the named container's sole network attachment,
+and the tests allow only that exact `/32` address. No wider subnet is allowed.
+This setup requires a Linux Docker host; Docker Desktop VM networking is outside
+this qualification.
+
 The certificate has only `DNS:db.example.invalid` in its SAN. Packory connects to
-the numeric loopback address and verifies the original DNS identity (Oracle:
+the inspected numeric address and verifies the original DNS identity (Oracle:
 the configured exact certificate DN). This exercises the separation between
 address pinning and TLS identity rather than accepting a certificate for the IP.
 No `TrustServerCertificate` or certificate-validation bypass is enabled. Database
@@ -62,6 +69,7 @@ The workflow checks out the immutable source SHA recorded by the report.
 
 ## Primary references
 
+- [Docker internal network isolation and direct host access](https://docs.docker.com/reference/cli/docker/network/create/#internal)
 - [Docker PostgreSQL image source](https://github.com/docker-library/postgres)
 - [Docker MySQL image source](https://github.com/docker-library/mysql)
 - [MariaDB image source](https://github.com/MariaDB/mariadb-docker)

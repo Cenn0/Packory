@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.Security;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -281,7 +282,7 @@ public sealed class DatabaseConnectorExecutor(DatabaseConnectorPolicy policy) : 
                 "string" when value.ValueKind == JsonValueKind.String &&
                     value.GetString()!.Length <= parameter.MaxLength => value.GetString()!,
                 "int64" when value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) => number,
-                "decimal" when value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number) => number,
+                "decimal" when value.ValueKind == JsonValueKind.Number && TryExactDecimal(value, out var number) => number,
                 "bool" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => value.GetBoolean(),
                 "uuid" when value.ValueKind == JsonValueKind.String && Guid.TryParseExact(value.GetString(), "D", out var id) => id,
                 "date" when value.ValueKind == JsonValueKind.String && DateOnly.TryParseExact(value.GetString(),
@@ -293,6 +294,45 @@ public sealed class DatabaseConnectorExecutor(DatabaseConnectorPolicy policy) : 
             bound.Add(new(parameter.Name, parameter.Type, parsed, parameter.MaxLength));
         }
         return bound;
+    }
+
+    private static bool TryExactDecimal(JsonElement value, out decimal number)
+    {
+        number = default;
+        var raw = value.GetRawText();
+        if (raw.Length > 128 || !value.TryGetDecimal(out number)) return false;
+        // TryGetDecimal can round excessive precision and underflow to zero.
+        // Compare the original coefficient/exponent with the decimal's exact
+        // 96-bit coefficient. Normalization never constructs a large power.
+        var mantissa = raw.AsSpan();
+        long exponent = 0;
+        var exponentIndex = mantissa.IndexOfAny('e', 'E');
+        if (exponentIndex >= 0)
+        {
+            if (!int.TryParse(mantissa[(exponentIndex + 1)..], NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture, out var parsedExponent)) return false;
+            exponent = parsedExponent;
+            mantissa = mantissa[..exponentIndex];
+        }
+        var point = mantissa.IndexOf('.');
+        if (point >= 0) exponent -= mantissa.Length - point - 1;
+        Span<char> digits = stackalloc char[128];
+        var count = 0;
+        foreach (var character in mantissa)
+            if (char.IsAsciiDigit(character)) digits[count++] = character;
+        var coefficient = BigInteger.Parse(digits[..count], NumberStyles.None, CultureInfo.InvariantCulture);
+        if (raw[0] == '-') coefficient = -coefficient;
+        if (coefficient.IsZero) return number == 0;
+        if (number == 0) return false;
+
+        var bits = decimal.GetBits(number);
+        var convertedCoefficient = (BigInteger)(uint)bits[0] +
+            ((BigInteger)(uint)bits[1] << 32) + ((BigInteger)(uint)bits[2] << 64);
+        if (bits[3] < 0) convertedCoefficient = -convertedCoefficient;
+        long convertedExponent = -((bits[3] >> 16) & 0xff);
+        while (coefficient % 10 == 0) { coefficient /= 10; exponent++; }
+        while (convertedCoefficient % 10 == 0) { convertedCoefficient /= 10; convertedExponent++; }
+        return coefficient == convertedCoefficient && exponent == convertedExponent;
     }
 
     private static bool TryTimestamp(string? value, out DateTimeOffset timestamp)

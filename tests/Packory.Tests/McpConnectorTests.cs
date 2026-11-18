@@ -487,6 +487,49 @@ public sealed class McpConnectorTests
     }
 
 
+    [Theory]
+    [InlineData("fixture-key", true)]
+    [InlineData("fixture_key", true)]
+    [InlineData("Key09_-", true)]
+    [InlineData("fixture.key", false)]
+    [InlineData("fixture/key", false)]
+    [InlineData("fixture:key", false)]
+    [InlineData("fixture key", false)]
+    [InlineData("fixture\\key", false)]
+    [InlineData("fixtureékey", false)]
+    public void KeyringIdsAcceptOnlyAsciiLettersDigitsUnderscoreAndHyphen(string keyId, bool valid)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "packory-keyring-id-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var path = Path.Combine(folder, "ring.json");
+            var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            var keys = new Dictionary<string, string> { ["baseline"] = key };
+            File.WriteAllText(path, JsonSerializer.Serialize(new { active = "baseline", keys }));
+            var secrets = new McpConnectorSecrets(path);
+            var previousEnvelope = secrets.Protect(Secret, "one", "https://mcp.example.org/mcp");
+            keys.Add(keyId, key);
+            File.WriteAllText(path, JsonSerializer.Serialize(new { active = keyId, keys }));
+            if (valid)
+            {
+                var envelope = secrets.Protect(Secret, "one", "https://mcp.example.org/mcp");
+                using var json = JsonDocument.Parse(envelope);
+                Assert.Equal(keyId, json.RootElement.GetProperty("keyId").GetString());
+                Assert.Equal(Secret, secrets.Unprotect(envelope, "one", "https://mcp.example.org/mcp"));
+                Assert.Equal(Secret, secrets.Unprotect(previousEnvelope, "one", "https://mcp.example.org/mcp"));
+            }
+            else
+            {
+                Assert.Throws<McpConnectorKeyringException>(() =>
+                    secrets.Protect(Secret, "one", "https://mcp.example.org/mcp"));
+                Assert.Throws<McpConnectorKeyringException>(() =>
+                    secrets.Unprotect(previousEnvelope, "one", "https://mcp.example.org/mcp"));
+            }
+        }
+        finally { Directory.Delete(folder, true); }
+    }
+
     [Fact]
     public void ScopedMcpCapabilityRequiresValidatedBearerAndExactToolClaim()
     {

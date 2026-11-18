@@ -142,7 +142,6 @@ SQL
     docker run -d --name "$fixture_name" --platform linux/amd64 --network "$fixture_network" \
       --memory "$fixture_memory" --cpus 2 --pids-limit 512 \
       --security-opt no-new-privileges --env-file "$fixture_dir/server.env" \
-      -p "127.0.0.1::$fixture_port" \
       -v "$fixture_dir/tls:/run/packory-tls:ro" -v "$fixture_dir/init:/docker-entrypoint-initdb.d:ro" \
       "$fixture_image" postgres -c ssl=on -c ssl_ca_file=/run/packory-tls/ca.crt \
       -c ssl_cert_file=/run/packory-tls/server.crt -c ssl_key_file=/run/packory-tls/server.key \
@@ -173,7 +172,6 @@ SQL
     docker run -d --name "$fixture_name" --platform linux/amd64 --network "$fixture_network" \
       --memory "$fixture_memory" --cpus 2 --pids-limit 512 \
       --security-opt no-new-privileges --env-file "$fixture_dir/server.env" \
-      -p "127.0.0.1::$fixture_port" \
       -v "$fixture_dir/tls:/run/packory-tls:ro" -v "$fixture_dir/init:/docker-entrypoint-initdb.d:ro" \
       "$fixture_image" --ssl-ca=/run/packory-tls/ca.crt --ssl-cert=/run/packory-tls/server.crt \
       --ssl-key=/run/packory-tls/server.key --require-secure-transport=ON --local-infile=OFF \
@@ -198,7 +196,7 @@ CONF
     docker run -d --name "$fixture_name" --platform linux/amd64 --network "$fixture_network" \
       --memory "$fixture_memory" --cpus 2 --pids-limit 1024 \
       --security-opt no-new-privileges --env-file "$fixture_dir/server.env" \
-      --add-host db.example.invalid:127.0.0.1 -p "127.0.0.1::$fixture_port" \
+      --add-host db.example.invalid:127.0.0.1 \
       -v "$fixture_dir/tls:/run/packory-tls:ro" -v "$fixture_dir/init/mssql.conf:/var/opt/mssql/mssql.conf:ro" \
       "$fixture_image" >"$fixture_dir/container.id"
     docker exec --user 0 "$fixture_name" sh -c \
@@ -218,7 +216,7 @@ CONF
     docker run -d --name "$fixture_name" --platform linux/amd64 --network "$fixture_network" \
       --memory "$fixture_memory" --cpus 2 --pids-limit 2048 --shm-size 1g \
       --security-opt no-new-privileges --env-file "$fixture_dir/server.env" \
-      -p "127.0.0.1::$fixture_port" -v "$fixture_dir/tls:/run/packory-tls:ro" \
+      -v "$fixture_dir/tls:/run/packory-tls:ro" \
       "$fixture_image" >"$fixture_dir/container.id"
     fixture_sqlplus() {
       docker exec -i "$fixture_name" sqlplus -s '/ as sysdba' >"$fixture_dir/provision.log" 2>&1
@@ -304,11 +302,26 @@ SQL
 ORACLE
 fi
 
+# On a Linux Docker host, an internal bridge is reachable directly from the
+# host. Keep the container isolated and do not publish ports: qualify only the
+# inspected IPv4 of this container on the single network created above.
+docker inspect --format '{{json .NetworkSettings.Networks}}' "$fixture_name" >"$fixture_dir/container-networks.json"
+fixture_address="$(python3 - "$fixture_network" "$fixture_dir/container-networks.json" <<'PY'
+import ipaddress, json, sys
+network_name, path = sys.argv[1:]
+with open(path) as source:
+    networks = json.load(source)
+assert set(networks) == {network_name}, 'Fixture must use only its own internal network'
+address = ipaddress.IPv4Address(networks[network_name]['IPAddress'])
+private_ranges = map(ipaddress.IPv4Network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+assert any(address in network for network in private_ranges), 'Fixture address must be private IPv4'
+print(address)
+PY
+)"
 export PACKORY_TEST_DB_PROVIDER="$provider"
-export PACKORY_TEST_DB_HOST=127.0.0.1 PACKORY_TEST_DB_ADDRESS=127.0.0.1
+export PACKORY_TEST_DB_HOST="$fixture_address" PACKORY_TEST_DB_ADDRESS="$fixture_address"
 export PACKORY_TEST_DB_TLS_SERVER_NAME=db.example.invalid
-export PACKORY_TEST_DB_PORT="$(docker port "$fixture_name" "$fixture_port/tcp" | sed -n 's/^127\.0\.0\.1://p')"
-[[ "$PACKORY_TEST_DB_PORT" =~ ^[0-9]+$ ]] || { echo 'No loopback fixture port' >&2; exit 1; }
+export PACKORY_TEST_DB_PORT="$fixture_port"
 export PACKORY_TEST_DB_DATABASE=packory_fixture PACKORY_TEST_DB_USER=packory_reader
 export PACKORY_TEST_DB_PASSWORD="$fixture_reader_password"
 export PACKORY_TEST_DB_EXPECTED_DN=CN=db.example.invalid

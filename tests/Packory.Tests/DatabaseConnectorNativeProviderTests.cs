@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using Packory;
 using Xunit;
@@ -33,9 +34,14 @@ public sealed class DatabaseConnectorNativeProviderTests
             true, [], 1);
     }
 
-    internal static DatabaseConnectorExecutor Executor(DatabaseConnectorDefinition definition) =>
-        new(new DatabaseConnectorPolicy(
-            [$"{definition.Provider}://{definition.Host}:{definition.Port}"], ["127.0.0.0/8", "::1/128"]));
+    internal static DatabaseConnectorExecutor Executor(DatabaseConnectorDefinition definition)
+    {
+        var address = IPAddress.Parse(Required("ADDRESS"));
+        if (address.AddressFamily != AddressFamily.InterNetwork)
+            throw new InvalidOperationException("The disposable database fixture must have an IPv4 address.");
+        return new(new DatabaseConnectorPolicy(
+            [$"{definition.Provider}://{definition.Host}:{definition.Port}"], [$"{address}/32"]));
+    }
 
     private static DatabaseQueryDefinition Query(string sql, DatabaseParameterDefinition[]? parameters = null,
         int maxRows = 20) => new("fixture_query", "Disposable fixture query", sql, parameters ?? [], maxRows, 5);

@@ -48,7 +48,7 @@ public sealed class McpConnectorSecrets
             foreach (var (id, encoded) in ring.Keys)
             {
                 if (id.Length is < 1 or > 64 || encoded is null ||
-                    id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '_' and '-'))
+                    id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-')))
                     throw new InvalidDataException("Invalid MCP keyring structure.");
                 var key = Convert.FromBase64String(encoded);
                 try

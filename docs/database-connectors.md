@@ -100,7 +100,7 @@ Use named `@parameter` placeholders for PostgreSQL, MySQL, MariaDB and SQL Serve
 | --- | --- | --- |
 | `string` | A string within its declared `maxLength` | Typed text parameter; never SQL interpolation. |
 | `int64` | An integer within signed 64-bit range | Native signed integer. Clients must preserve the numeric literal exactly. |
-| `decimal` | A JSON number representable as a .NET `decimal` | Typed decimal parameter with explicit precision/scale derived from the value. |
+| `decimal` | A JSON number exactly representable as a .NET `decimal`, using at most 128 literal characters | Typed decimal parameter with explicit precision/scale; values requiring rounding or nonzero underflow are rejected. |
 | `bool` | `true` or `false` | Native boolean/bit; Oracle uses numeric `0`/`1` for compatibility with older supported servers. |
 | `uuid` | Canonical hyphenated UUID string | Native PostgreSQL UUID / SQL Server uniqueidentifier; MySQL/MariaDB and Oracle bind a 36-character string. |
 | `date` | `YYYY-MM-DD` | Date parameter, without a caller-supplied time or timezone. |
@@ -108,7 +108,7 @@ Use named `@parameter` placeholders for PostgreSQL, MySQL, MariaDB and SQL Serve
 
 A required parameter must be present and non-null. An optional parameter may be omitted or explicitly null, in which case it binds SQL `NULL`. Unknown names, duplicate JSON properties, invalid types and excess values are rejected. Parameter types are not inferred from strings: for example, `"123"` is not accepted for `int64`.
 
-For JavaScript callers, construct large integer/decimal JSON literals without a prior lossy floating-point conversion. The MCP tool accepts `argumentsJson` as a string, allowing an exact literal to be transmitted. Arbitrary-precision decimal inputs beyond .NET `decimal` are not accepted; use a reviewed string parameter and explicit server-side conversion when that behavior is necessary.
+For JavaScript callers, construct large integer/decimal JSON literals without a prior lossy floating-point conversion. The MCP tool accepts `argumentsJson` as a string, allowing an exact literal to be transmitted. Decimal binding verifies the original numeric value against its native representation, including scientific notation; it does not silently round a long fraction, a value above the range boundary or a nonzero value below the minimum scale to zero. Arbitrary-precision decimal inputs beyond .NET `decimal` are not accepted; use a reviewed string parameter and explicit server-side conversion when that behavior is necessary.
 
 ### Example disabled definition
 
