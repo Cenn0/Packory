@@ -16,7 +16,7 @@
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.401" />
     <PackageReference Include="AWSSDK.S3" Version="4.0.104.6" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.15" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="ThirdPartyNotices/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
