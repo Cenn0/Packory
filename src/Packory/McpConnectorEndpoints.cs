@@ -148,6 +148,10 @@ public sealed class McpConnectorMcpTools(IHttpContextAccessor accessor, Settings
         var ctx = Authorized(connectorId);
         var record = store.Get(connectorId) ?? throw new McpProtocolException(
             "Unknown connector", McpErrorCode.InvalidParams);
+        // A disabled connector must not initiate outbound discovery using its stored
+        // credentials. Administrators may explicitly probe it through the REST API.
+        if (!record.Enabled)
+            throw new McpProtocolException("Connector is disabled", McpErrorCode.InvalidParams);
         var tools = await runtime.DiscoverAsync(record, cancellationToken);
         return new { connectorId, tools = IsAdmin(ctx) ? tools : tools.Where(t =>
             t.Allowed && Access.HasConnectorGrant(ctx, settings, connectorId, t.Name)).ToArray() };
