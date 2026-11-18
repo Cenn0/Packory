@@ -199,6 +199,52 @@ class ManifestSafetyTests(unittest.TestCase):
                 mod.restore_current_objects(target, "isolated", f.manifest, f.root)
             self.assertTrue(target.body.closed)
 
+    def test_restore_checks_connector_rows_and_rejects_hidden_legacy_ledgers(self):
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _): pass
+            def fetchone(self): return (0,)
+
+        class Connection:
+            def cursor(self): return Cursor()
+
+        with tempfile.TemporaryDirectory() as temp:
+            f = SnapshotFixture(Path(temp))
+            f.manifest["objects"] = []
+            f.manifest["delete_markers"] = []
+            for path in (f.root / "objects").iterdir(): path.unlink()
+            for table in (*mod.MCP_CONNECTOR_TABLES, *mod.DATABASE_CONNECTOR_TABLES):
+                f.manifest["postgres"]["table_counts"][table] = 1
+                f.manifest["postgres"]["table_fingerprints"][table] = {
+                    "count": 1, "sha256": hashlib.sha256(b"synthetic-approved-policy").hexdigest()}
+            original = copy.deepcopy(f.manifest)
+            actual_counts = original["postgres"]["table_counts"]
+            corrupted_rows = copy.deepcopy(original["postgres"]["table_fingerprints"])
+            corrupted_rows["database_connectors"]["sha256"] = hashlib.sha256(b"synthetic-replaced-policy").hexdigest()
+            for legacy in (False, True):
+                f.manifest = copy.deepcopy(original)
+                expected_error = "Restored PostgreSQL row values"
+                if legacy:
+                    f.manifest["schema"] = 1
+                    f.manifest["postgres"].pop("table_fingerprints")
+                    for table in (*mod.MCP_CONNECTOR_TABLES, *mod.DATABASE_CONNECTOR_TABLES):
+                        del f.manifest["postgres"]["table_counts"][table]
+                    expected_error = "Restored connector ledgers are absent"
+                f.save()
+                with self.subTest(legacy=legacy), \
+                        patch.dict(os.environ, {"PGDATABASE": "synthetic-target"}), \
+                        patch.object(mod, "versioning_enabled", return_value=True), \
+                        patch.object(mod, "inventory", return_value=([], [])), \
+                        patch.object(mod, "postgres", return_value=nullcontext(Connection())), \
+                        patch.object(mod, "restore_current_objects", return_value=0), \
+                        patch.object(mod, "pg_command"), \
+                        patch.object(mod, "database_schema_version", return_value=2), \
+                        patch.object(mod, "counts", return_value=actual_counts), \
+                        patch.object(mod, "metadata_fingerprints", return_value=corrupted_rows):
+                    with self.assertRaisesRegex(mod.SnapshotError, expected_error):
+                        mod.restore(f.root, object(), "synthetic-target")
+
     def test_cli_redacts_unexpected_sdk_failures(self):
         secret_marker = "do-not-print-operator-detail"
         args = ["snapshot", "backup", "--snapshot", "unused", "--bucket", "isolated",

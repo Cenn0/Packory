@@ -9,3 +9,26 @@
 
 .page-view>*{min-width:0}#packages-tab-panel{width:100%;min-width:0}.catalog-lower,.activity-grid{min-width:0}
 .feed-grants{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.feed-grants h3{margin:0 0 6px}.feed-grants>p{color:var(--muted);max-width:720px}.feed-grant-form{display:grid;grid-template-columns:minmax(170px,1fr) minmax(140px,.7fr) auto;align-items:end;gap:10px}.feed-grant-form label{display:grid;gap:5px;color:var(--muted);font-size:13px}.feed-grant-form input,.feed-grant-form select{min-width:0;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text);font:inherit}.feed-grant-result{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}.feed-grant-result p{flex-basis:100%;margin:4px 0;color:var(--muted)}.feed-grant-result input{flex:1 1 280px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.feed-grant-result button{min-height:38px}@media(max-width:620px){.feed-grant-form{grid-template-columns:1fr}.feed-grant-result{grid-column:auto}}
+
+
+/* MCP connector administration follows the native Packory form and table vocabulary. */
+.connector-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.connector-form-grid>label{min-width:0}
+.connector-check{display:flex;align-items:center;gap:8px;font-size:13px}
+.connector-check input{flex:none}
+#connector-test-results{margin-top:14px;overflow-wrap:anywhere}
+#connector-test-results ul{padding-left:22px;max-height:320px;overflow-y:auto}
+#connector-table td:nth-child(2){overflow-wrap:anywhere}
+#connector-id[readonly]{background:var(--surface-2);color:var(--muted)}
+@media(max-width:720px){.connector-form-grid{grid-template-columns:1fr}}
+/* Database administration shares the connector layout and renders all remote values as text. */
+.database-query-editor { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #d8dce5); border-radius: 10px; min-width: 0; }
+.database-query-editor legend { padding: 0 .4rem; font-weight: 650; }
+.database-parameter { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1.2fr) minmax(0,1fr) auto auto; gap: .65rem; align-items: end; margin-bottom: .75rem; }
+.database-parameter>label, #database-run-form>label, #database-run-form select { min-width: 0; }
+#database-results, #database-query-results { margin-top: 1rem; overflow-wrap: anywhere; }
+#database-query-contract { white-space: pre-wrap; }
+#database-editor-title, #database-query-title, #database-query-contract, #database-policy { overflow-wrap: anywhere; }
+#database-table td:nth-child(2) { overflow-wrap: anywhere; max-width: 24rem; }
+@media (max-width: 1100px) { .database-parameter { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 520px) { .database-parameter { grid-template-columns: minmax(0,1fr); } }

@@ -373,6 +373,87 @@ class SnapshotTests(unittest.TestCase):
                 with self.subTest(incomplete_manifest=missing), self.assertRaises(mod.SnapshotError):
                     mod.verify(root)
 
+    def test_optional_connector_ledgers_require_definitions_credentials_tombstones_and_audit(self):
+        groups = mod.CONNECTOR_TABLE_GROUPS
+        connector_tables = set().union(*groups)
+        optional = connector_tables | set(mod.AI_TABLES)
+
+        class OneRow:
+            def __init__(self, value): self.value = value
+            def fetchone(self): return (self.value,)
+
+        class Connection:
+            def __init__(self, present, version=2): self.present, self.version = present, version
+            def execute(self, query, args=None):
+                if "to_regclass('packory_schema_version')" in query:
+                    return OneRow("packory_schema_version" if self.version else None)
+                if query.startswith("SELECT version FROM packory_schema_version"): return OneRow(self.version)
+                if query == "SELECT to_regclass(%s)":
+                    return OneRow(args[0] if args[0] not in optional or args[0] in self.present else None)
+                raise AssertionError(query)
+
+        self.assertEqual(mod.CORE_TABLES, mod.metadata_tables(Connection(set(), version=0)))
+        with self.assertRaisesRegex(mod.SnapshotError, "versioned core metadata"):
+            mod.metadata_tables(Connection(connector_tables, version=0))
+        old_tables = mod.metadata_tables(Connection(set()))
+        self.assertFalse(connector_tables & set(old_tables))
+        self.assertTrue(connector_tables <= set(mod.metadata_tables(Connection(connector_tables))))
+        for group in groups:
+            self.assertTrue(set(group) <= set(mod.metadata_tables(Connection(set(group)))))
+            for missing in group:
+                with self.subTest(missing=missing), self.assertRaisesRegex(mod.SnapshotError, "Incomplete authoritative connector"):
+                    mod.metadata_tables(Connection(set(group) - {missing}))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dump = b"synthetic"
+            (root / "metadata.dump").write_bytes(dump)
+            tables = mod.metadata_tables(Connection(connector_tables))
+            hashes = {name: {"count": 0, "sha256": hashlib.sha256(b"").hexdigest()} for name in tables}
+            manifest = {"schema": 2, "profile": "postgresql-s3-offline",
+                        "source": {"bucket": "test-bucket", "prefix": "test/", "database": "test-db"},
+                        "postgres": {"path": "metadata.dump", "size": len(dump),
+                                     "sha256": hashlib.sha256(dump).hexdigest(),
+                                     "database_schema_version": 2,
+                                     "table_counts": {name: 0 for name in tables}, "table_fingerprints": hashes},
+                        "objects": [], "delete_markers": []}
+            path = root / "manifest.json"
+            path.write_text(json.dumps(manifest))
+            self.assertEqual(2, mod.verify(root)["schema"])
+            for missing in connector_tables:
+                altered = json.loads(json.dumps(manifest))
+                del altered["postgres"]["table_counts"][missing]
+                del altered["postgres"]["table_fingerprints"][missing]
+                path.write_text(json.dumps(altered))
+                with self.subTest(incomplete_manifest=missing), self.assertRaises(mod.SnapshotError):
+                    mod.verify(root)
+            manifest["schema"] = 1
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(mod.SnapshotError, "Connector ledgers require"):
+                mod.verify(root)
+            # Genuine pre-connector snapshots keep their original contract.
+            manifest["schema"] = 2
+            for name in connector_tables:
+                del manifest["postgres"]["table_counts"][name]
+                del manifest["postgres"]["table_fingerprints"][name]
+            path.write_text(json.dumps(manifest))
+            self.assertEqual(2, mod.verify(root)["schema"])
+
+    def test_connector_row_fingerprints_detect_same_count_changes_without_exposing_values(self):
+        class Rows:
+            def __init__(self, text): self.text = text
+            def execute(self, query): return [(self.text,)]
+
+        for table in (*mod.MCP_CONNECTOR_TABLES, *mod.DATABASE_CONNECTOR_TABLES):
+            with self.subTest(table=table):
+                rows = Rows('{"id":"synthetic-retired-id","secret_ciphertext":"synthetic-envelope-v1"}')
+                original = mod.metadata_fingerprints(rows, (table,))
+                self.assertNotIn("synthetic-retired-id", json.dumps(original))
+                self.assertNotIn("synthetic-envelope", json.dumps(original))
+                rows.text = '{"id":"synthetic-reused-id","secret_ciphertext":"synthetic-envelope-v2"}'
+                changed = mod.metadata_fingerprints(rows, (table,))
+                self.assertEqual(original[table]["count"], changed[table]["count"])
+                self.assertNotEqual(original[table]["sha256"], changed[table]["sha256"])
+
     def test_endpoint_guards(self):
         with self.assertRaises(mod.SnapshotError):
             mod.validate_endpoint("http://s3.example.test")

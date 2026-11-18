@@ -1,6 +1,6 @@
 # MCP delivery roadmap
 
-**Updated: 20 October 2026.** This is the actionable MCP continuation of [V3 MS5](roadmap.md#ms5--ai-distribution-skills-and-mcp-p1p2) and [V4 E10](roadmap-v4.md). It incorporates the protocol, Registry, quality-assessment and optional gateway gaps identified in the MCP completeness review. A task is complete only for its stated behavior, including failure cases and reproducible tests. A parser, schema or disabled placeholder alone does not complete a feature.
+**Updated: 18 November 2026.** This is the actionable MCP continuation of [V3 MS5](roadmap.md#ms5--ai-distribution-skills-and-mcp-p1p2) and [V4 E10](roadmap-v4.md). It incorporates the protocol, Registry, quality-assessment and optional gateway gaps identified in the MCP completeness review. A task is complete only for its stated behavior, including failure cases and reproducible tests. A parser, schema or disabled placeholder alone does not complete a feature.
 
 ## Product boundaries
 
@@ -11,7 +11,7 @@ Packory has four distinct responsibilities:
 | Packory MCP server | Let an authorized client discover Packory artifacts and read approved Skills | Native Streamable HTTP, legacy initialize clients and current stateless protocol, tools/resources/prompts and Skills Extension |
 | MCP Registry | Store, review, revoke and discover immutable server descriptors | Remote-only manifest profile, v0.1 read API, Packory management API and dashboard |
 | Artifact assessment | Explain independently what was checked, found and not checked | Existing offline security scan plus deterministic static Skill quality reports; signed external validation exports remain a separate opt-in feature |
-| Optional MCP gateway | Connect to approved external servers under explicit runtime policy | Not implemented; separate isolated runtime and acceptance criteria below |
+| Optional MCP gateway | Connect to approved external servers under explicit runtime policy | Initial in-process, operator-approved HTTPS Streamable HTTP connector lifecycle, admin UI, exact tool permissions and encrypted credentials implemented in PR #174. This is **not** the isolated gateway or full G1–G5 acceptance. |
 
 Registry approval is a local distribution decision. It does not prove publisher identity, signature authenticity, runtime compatibility or execution safety. Quality findings do not alter the approval state or the immutable Skill bytes.
 
@@ -32,6 +32,9 @@ The three v0.1 endpoints are `GET /v0.1/servers`, `GET /v0.1/servers/{serverName
 Tests are evidence for the exact source revision and environment that ran them. The PostgreSQL tests explicitly skip when no test database is configured; an unconfigured local run is not PostgreSQL evidence. CI executes them with `PACKORY_TEST_POSTGRES`.
 
 The browser job pins Node 22 and Playwright 1.62.1, serves the actual dashboard assets with the application's CSP, and checks completed/incomplete/error quality reports, cursor continuation, delayed-response invalidation and 1440/375-pixel layouts. Its synthetic API responses isolate UI behavior; the .NET/native-client and PostgreSQL suites establish the backend contracts separately.
+
+
+**18 November 2026 — approved connector implementation (PR #174; qualification is tied to the exact commit):** The administrator can create, edit, disable, probe and delete remote HTTPS Streamable HTTP connectors; tokens are encrypted in an operator keyring, egress is exact-origin/CIDR restricted and tools require per-connector allowlists and scoped validated OIDC claims. This does **not** implement the remaining separate-process sandbox, per-principal upstream OAuth brokerage, upstream automatic credential rotation, circuit breakers, database-specific data policy or multi-server native end-to-end qualification. Native PostgreSQL, MySQL/MariaDB, SQL Server and Oracle connectors now add a complete administrative lifecycle, typed SELECT templates, a distinct OIDC query capability, TLS validation, limits, audit, UI and a five-engine native test matrix. See [Managed MCP connectors](mcp-connectors.md), [Database connectors](database-connectors.md) and [ADR-004](adr/0004-approved-connectors.md). An official driver and an implemented native fixture do not by themselves establish a passed deployment qualification. Do not consider G1–G5 closed.
 
 ## Priority 1 — remaining Registry and protocol work
 

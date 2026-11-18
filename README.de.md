@@ -84,7 +84,9 @@ Hier startet nur die Anwendung. Für den Offline-SkillSpector-Worker den Docker-
 | **Raw-Artefakte** | Unveränderliche Dateien mit Prüfsummen, Range-Zugriff und Quotas für private Feeds | [Raw](docs/raw-registry.md) |
 | **Agent Skills** | ZIP-Staging, Offline-SkillSpector, Freigabe/Widerruf und statische Qualitätsbefunde | [Skill-Sicherheit](docs/mcp-security-integration.md) · [Qualität](docs/skill-quality.md) |
 | **Optionale KI-Prüfung** | Zuschaltbare LLM-Analyse mit separatem netzwerkisoliertem Worker und durch Betreiber kontrolliertem Providerzugriff; menschliche Freigabe bleibt nötig | [Skill-KI](docs/skill-ai.md) |
-| **MCP-Suche** | Authentifizierter lesender `/mcp`-Endpunkt, globaler Katalog und freigegebene Skills; geprüfte passive MCP-Registry-Einträge | [MCP-Roadmap](docs/mcp-roadmap.md) · [Registry-Katalog](docs/mcp-registry-catalog.md) |
+| **MCP-Suche** | Authentifizierter `/mcp`-Endpunkt mit lesenden Katalog- und Skill-Werkzeugen; geprüfte passive MCP-Registry-Einträge | [MCP-Roadmap](docs/mcp-roadmap.md) · [Registry-Katalog](docs/mcp-registry-catalog.md) |
+| **MCP-Connectoren (optional)** | Im Dashboard verwaltete HTTPS-Verbindungen zu freigegebenen MCP-Diensten, verschlüsselte Zugangsdaten und genaue Werkzeugberechtigungen | [MCP-Connectoren](docs/mcp-connectors.md) |
+| **Datenbank-Connectoren (optional)** | PostgreSQL, MySQL/MariaDB, SQL Server und Oracle mit freigegebenen SELECT-Vorlagen, typisierten Parametern und genauen OIDC-Abfrageberechtigungen; Passwörter bleiben auf dem Server | [Datenbank-Connectoren](docs/database-connectors.md) · [Lizenzhinweise](THIRD-PARTY-NOTICES.md) |
 | **Plattform** | Dashboard, REST-API, exakte private Feed-Grants, optionale OIDC-JWT-Prüfung, SQLite/Dateisystem bzw. PostgreSQL/S3 | [API](docs/api.md) · [Betrieb](docs/operations.md) |
 
 **Private Hosted-Feeds (E0):** Für alle acht Pakettypen sind isolierte native Routen mit expliziter Aktivierung und genauen Grants `feed:{id}:read` bzw. `feed:{id}:publish` umgesetzt. Private Anfragen greifen nicht auf globale oder Upstream-Pakete zurück. Der [E0-Abnahmenachweis](docs/e0-acceptance.md) gilt für die dort dokumentierten Testversionen und Provider, **nicht** als allgemeine Interoperabilitäts- oder Produktionsfreigabe. Proxy-/Group-Feeds, private Skills und Feed-bezogene MCP-Suche stehen noch aus.
@@ -108,7 +110,7 @@ Für Veröffentlichungen sind passende Tokens und Namespace-/Feed-Grants nötig.
 flowchart LR
     Native["NuGet, npm, Cargo, PyPI, OCI, Maven, Go, Raw"] --> App["Packory · ASP.NET Core"]
     Browser["Dashboard / REST-Clients"] --> App
-    MCP["MCP-Clients"] --> API["Nur lesende MCP-API"]
+    MCP["MCP-Clients"] --> API["MCP-Suche und freigegebene Connector-Werkzeuge"]
     API --> App
     OIDC["Optionaler OIDC-Issuer"] -.-> App
     App --> Registry["Native Protokolladapter"]
