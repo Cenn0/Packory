@@ -162,6 +162,8 @@ public sealed class DatabaseConnectorPolicy
                 quoted = !quoted;
                 tokens.Append(' ');
             }
+            else if (!quoted && sql[i] == '#')
+                throw new InvalidDataException("Only a single approved SELECT template is allowed.");
             else tokens.Append(quoted ? ' ' : sql[i]);
         }
         var words = Regex.Matches(tokens.ToString(), @"[a-zA-Z_][a-zA-Z0-9_]*")
