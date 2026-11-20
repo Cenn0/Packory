@@ -16,6 +16,8 @@ public static class DatabaseConnectorWorkerHost
 
     public static async Task RunAsync()
     {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("Native database isolation requires Linux containers.");
         var key = DatabaseWorkerProtocol.LoadKey();
         var path = DatabaseWorkerProtocol.SocketPath();
         var policy = DatabaseConnectorPolicy.FromEnvironment();
