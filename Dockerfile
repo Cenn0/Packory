@@ -9,7 +9,7 @@ RUN dotnet publish src/Packory/Packory.csproj -c Release --no-restore -o /app/pu
 RUN dotnet publish workers/database-connector/Packory.DatabaseConnectorWorker.csproj -c Release --no-restore -o /worker/publish
 
 # Separate process/container with no Packory data, keyring, admin tokens or HTTP listener.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS database-worker
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS database-worker
 WORKDIR /worker
 ENV DOTNET_EnableDiagnostics=0 \
     DOTNET_CLI_HOME=/tmp
@@ -19,7 +19,7 @@ USER $APP_UID
 ENTRYPOINT ["dotnet", "Packory.DatabaseConnectorWorker.dll"]
 
 # Keep the original default image target for Packory's existing CI/deployments.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS packory
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS packory
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     PACKORY_DATA_DIRECTORY=/data \
