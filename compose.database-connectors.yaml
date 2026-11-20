@@ -49,7 +49,10 @@ services:
 
 networks:
   database-worker-egress:
+    driver: bridge
     internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
 
 volumes:
   database-worker-ipc:

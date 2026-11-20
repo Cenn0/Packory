@@ -34,13 +34,15 @@ def require_isolation(conf):
     assert worker["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in worker["security_opt"]
     assert worker["pids_limit"] <= 64
-    assert worker["mem_limit"] <= 805306368
-    assert worker["cpus"] <= 1.0
+    assert 0 < int(worker["mem_limit"]) <= 805306368
+    assert 0 < float(worker["cpus"]) <= 1.0
     assert worker.get("ports") in (None, [])
     assert worker.get("network_mode") in (None, "")
     networks = worker["networks"]
     assert set(networks) == {"database-worker-egress"}
     assert conf["networks"]["database-worker-egress"]["internal"] is True
+    assert conf["networks"]["database-worker-egress"]["driver"] == "bridge"
+    assert conf["networks"]["database-worker-egress"]["driver_opts"]["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
     assert worker["build"]["target"] == "database-worker"
 
     destinations = {v["target"]: v for v in worker["volumes"]}
@@ -98,6 +100,13 @@ class DatabaseWorkerIsolationComposeTests(unittest.TestCase):
             })
             with self.subTest(path=path), self.assertRaises(AssertionError):
                 require_isolation(config)
+
+    def test_gateway_mode_downgrade_is_rejected(self):
+        conf = compose()
+        conf["networks"]["database-worker-egress"]["driver_opts"][
+            "com.docker.network.bridge.gateway_mode_ipv4"] = "nat"
+        with self.assertRaises(AssertionError):
+            require_isolation(conf)
 
     def test_noninternal_network_is_rejected(self):
         conf = compose()

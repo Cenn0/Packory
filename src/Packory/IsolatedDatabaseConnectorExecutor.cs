@@ -49,7 +49,8 @@ public sealed class IsolatedDatabaseConnectorExecutor : IDatabaseConnectorExecut
         DatabaseConnectorDefinition definition, DatabaseQueryDefinition? query,
         JsonElement arguments, string password) =>
         new(DatabaseWorkerProtocol.Version, Guid.NewGuid().ToString("N"), operation,
-            definition, query, arguments, password);
+            definition with { Queries = query is null ? [] : [query] },
+            query, arguments, password);
 
     private static async Task<DatabaseWorkerResponse> InvokeAsync(DatabaseWorkerRequest request,
         CancellationToken cancellationToken)
