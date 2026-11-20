@@ -39,7 +39,7 @@ Packory is a self-hosted distribution platform in **active development**. Docume
 | MCP catalog/Skill tools and remaining work | [MCP delivery roadmap](mcp-roadmap.md) · [MCP validation](mcp-validation-results.md) |
 | Reviewed inert MCP Registry metadata | [MCP Registry catalog](mcp-registry-catalog.md) |
 | Administrator-managed remote MCP connections and scoped AI tool use | [Managed MCP connectors](mcp-connectors.md) |
-| Native database connections, approved queries and exact AI grants | [Database connectors](database-connectors.md) · [Connector architecture decision](adr/0004-approved-connectors.md) |
+| Native database connections, approved queries and exact AI grants | [Database connectors](database-connectors.md) · [Approved connector design](adr/0004-approved-connectors.md) · [Isolated worker security decision](adr/0005-isolated-database-workers.md) |
 | OIDC resource server / Keycloak test profile | [OIDC and Keycloak](oidc-keycloak.md) |
 
 ## Architecture, operations and verification

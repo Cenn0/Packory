@@ -87,6 +87,8 @@ jobs:
           PACKORY_MCP_CONNECTOR_KEYRING_PATH=/tmp/packory-mcp-keyring-synthetic-placeholder.json \
           PACKORY_DB_WORKER_IPC_KEY_PATH=/tmp/packory-db-ipc-synthetic-placeholder.key \
           docker compose -f compose.yaml -f compose.database-connectors.yaml config --quiet
+      - name: Verify database worker Compose privilege/network/mount boundaries
+        run: python3 -m unittest discover -s tests -p test_database_worker_isolation.py -v
       - name: Validate private ingress profile and proxy authorization boundaries
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
       - name: Validate synthetic single-node evidence ledger
@@ -212,6 +214,8 @@ jobs:
         run: |
           bash -n scripts/smoke_single_node_compose.sh scripts/smoke_single_node_native.sh scripts/smoke_single_node_tls.sh
           bash scripts/smoke_single_node_compose.sh
+      - name: Exercise real isolated database worker IPC and process limits
+        run: bash scripts/smoke-db-worker.sh
       - name: Record container recovery client and runner versions
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

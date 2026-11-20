@@ -1,0 +1,33 @@
+# ADR 0005: Isolated native database driver workers
+
+Status: accepted implementation for an opt-in Linux-container profile, 20 November 2026. The CI evidence for each exact revision and a separate production environment assessment are required; acceptance of this architecture does not certify protection against every malicious server, driver or kernel exploit.
+
+## Threat and trust boundaries
+
+A hostile database server can send malformed protocol data, oversized values, confusing TLS handshakes, stalled reads, driver-specific redirections or responses that trigger a bug in a native provider. A compromised provider may execute arbitrary instructions **in the process hosting it**. Hosting such providers in the Packory web process would give that code access to the application's memory, keyring, database metadata, API credentials and failure domain. Cancellation and a lexical SELECT check cannot contain a compromised native library.
+
+Packory retains the authoritative approval, identity checks, saved query contracts, credential encryption, audit and writer lease. It registers only IsolatedDatabaseConnectorExecutor and never calls native ADO.NET drivers in its HTTP/MCP request path. The worker executes in a separate Linux container using its own entry point (Packory.DatabaseConnectorWorker.dll). The worker executable references the shared Packory assembly to reuse the tested native adapters and policy code, but does not start the web application or mount Packory's metadata, blob store, administrator tokens or encrypted keyring. The web image still contains native package binaries as build dependencies; it does not execute them for database requests.
+
+## IPC boundary
+
+The only control channel is a Unix-domain socket in a dedicated Docker volume. There is no worker HTTP or TCP listener, published port, Docker API socket or direct inbound path from a database. The socket has owner-only mode 0600. The two containers use UID/GID 1654; no unrelated services should receive the socket volume.
+
+Messages are version 1, length-prefixed (big-endian length), authenticated with HMAC-SHA256, and bounded to 96 KiB per request or 140 KiB per response. The operator mounts exactly 32 cryptographically random key bytes as a private file into the two containers. The file must not be world readable or group writable, and **must never be committed, printed in logs or supplied to an AI**. The key is independent of the at-rest credential keyring. On authentication failure the worker closes the connection without a response. Request IDs correlate responses; incompatible versions or unexpected shapes fail closed.
+
+Packory serializes one previously admitted, reviewed query and its typed parameters, target definition and decrypted password for each operation. Passwords exist transiently in both processes' memory, and the worker can use them while executing; isolation cannot hide a credential from malicious code in that worker. The worker repeats target, SELECT-contract and argument validation. The web application accepts only bounded flat scalar results and revalidates row, column, text, numeric, byte and SourceDataUntrusted constraints, independent of the worker. The worker returns opaque failure envelopes; native exception messages and stack traces are never forwarded.
+
+## OS and network boundary
+
+The worker runs as non-root, with a read-only root filesystem, all Linux capabilities dropped, no-new-privileges, default Docker seccomp confinement, no Packory data mounts, an isolated PID and mount namespace, a 64-process limit, 768 MiB memory limit and 1 CPU quota. /tmp is a bounded noexec,nosuid tmpfs. Its own watchdog exits the **worker process** with code 124 if a driver does not finish within 45 seconds; Docker on-failure restarts it. The web server remains running, and a missing or unresponsive worker fails closed.
+
+By default the worker only joins database-worker-egress, a Compose internal: true network not shared with Packory's web frontend. Approved database services must explicitly join that network. This intentionally makes external databases unreachable by default. If operators route to external/on-prem/cloud databases, they must supply **independently enforced host/cluster firewall or network policy** constraining the worker's egress to approved database IPs, ports and required certificate infrastructure. Application DNS allowlists and TLS checks alone are not an egress sandbox. The worker can still contact other peers intentionally attached to its internal network. The profile does not support unrestricted dynamic database failover or automatic driver redirects.
+
+A compromised worker may disclose the one-operation database password and query values, tamper with that operation's output, attack other allowed network peers, or cause its own service to restart. Isolation is intended to stop such a compromise from directly reading Packory application secrets, files, other process memory, or bringing down the Packory web process. It is **not** a VM, hypervisor, kernel-escape protection, guarantee against container-runtime bugs, hardware side channels, or a replacement for least-privilege database identities and server-side row/tenant access controls. A compromised Packory web process is not contained by this worker profile.
+
+## Deployment, compatibility and verification
+
+Linux Docker Engine with working user/mount/PID namespaces, seccomp, cgroup memory/PID controllers, a private socket volume, a correctly permissioned binary key and an intentionally approved database network is the supported deployment shape for this feature. The plain source-level DatabaseConnectorExecutor remains available for native-driver unit/fixture tests, but is never the application's DI implementation. Direct Windows/macOS execution with the database feature enabled has no automatic in-process fallback.
+
+CI must compile both executables and images, reject broad or missing worker limits, exercise the real worker container with no network and a fresh synthetic key, prove invalid HMAC and oversized IPC frames are denied, prove an authenticated negative native probe returns only a generic failure, and verify the positive native TLS/permission matrix independently. Exact-commit evidence is required before describing the implementation as qualified. No fixture uploads operational secrets, private keys, raw database logs or private personal data.
+
+This ADR updates the runtime separation deferred in [ADR-0004](0004-approved-connectors.md). It does not expand arbitrary SQL, provider, integrated-identity or remote MCP connector capabilities.
