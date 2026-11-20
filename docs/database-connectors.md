@@ -277,7 +277,7 @@ bash scripts/qualify-database-connectors.sh sqlserver
 bash scripts/qualify-database-connectors.sh oracle
 ```
 
-The CI additionally builds the worker image and runs a real isolated container with a temporary binary IPC key, no network, invalid-MAC/oversize probes and a negative native connection check. This verifies the real worker process and protocol; it does not simulate kernel escape or prove external egress restrictions.
+The CI additionally runs a separate real worker process for one **positive TLS database IPC roundtrip per provider**, and builds the worker image to exercise a real container with a temporary binary IPC key, an isolated-gateway network, invalid-MAC/oversize probes and a negative native connection check. This verifies the real worker process and protocol; it does not simulate kernel escape or prove external egress restrictions.
 
 Each fixture creates synthetic data and separate privileged-setup/SELECT-only accounts, requires real TLS, and runs parameter/injection, precise numeric output, permission-denial, password-denial, certificate identity and output-limit cases. The harness then removes its test CA, checks that the same correctly named server is rejected, restores trust and reruns a positive control. It rejects empty or skipped test runs and exports sanitized exact-source/provider/image evidence. It does not upload raw database logs or credentials. Treat SQL Server/Oracle test-image licenses separately from Packory's license.
 
