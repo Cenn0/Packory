@@ -1,6 +1,6 @@
 # ADR 0004: Operator-approved remote MCP and database connectors
 
-Status: accepted for an opt-in technical preview, 18 November 2026. Qualification applies to named tests and the exact source commit; this decision does not close the isolated-gateway or production-release gates.
+Status: accepted historical design for an opt-in technical preview, 18 November 2026. The in-process database runtime decision was superseded by [ADR-0005](0005-isolated-database-workers.md) on 20 November 2026. Qualification applies to named tests and the exact source commit; this decision does not close the isolated-gateway or production-release gates.
 
 ## Context
 

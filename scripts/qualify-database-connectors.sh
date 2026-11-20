@@ -19,6 +19,7 @@ cd "$repo_dir"
 fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/packory-db-qualification.XXXXXXXX")"
 fixture_suffix="$(openssl rand -hex 6)"
 fixture_name="packory-db-$provider-$fixture_suffix"
+worker_pid=""
 fixture_network="$fixture_name-net"
 fixture_trust="/usr/local/share/ca-certificates/$fixture_name.crt"
 fixture_image="$(python3 - "$provider" <<'PY'
@@ -51,9 +52,13 @@ cleanup() {
     # Only this script's synthetic fixture is inspected. Redact every generated
     # credential before emitting any diagnostic output; never publish files.
     docker logs --tail 100 "$fixture_name" >"$fixture_dir/container.log" 2>&1 || true
-    for log in pull.log provision.log oracle-tls.log container-trust.log container.log; do
+    for log in pull.log provision.log oracle-tls.log container-trust.log worker.log container.log; do
       fixture_print_log "$fixture_dir/$log" || true
     done
+  fi
+  if [[ -n "$worker_pid" ]]; then
+    kill "$worker_pid" >/dev/null 2>&1 || true
+    wait "$worker_pid" >/dev/null 2>&1 || true
   fi
   docker rm -fv "$fixture_name" >/dev/null 2>&1 || true
   docker network rm "$fixture_network" >/dev/null 2>&1 || true
@@ -347,6 +352,36 @@ assert len(results) >= int(sys.argv[2]), 'Required native database tests did not
 assert all(result.attrib.get('outcome') == 'Passed' for result in results), 'Native database test failed or was skipped'
 PY
 }
+# Verify the *actual production IPC executor* with this real TLS fixture. This
+# short-lived standalone worker runs as a distinct process on the CI runner,
+# sharing no Packory web process; the Docker security job separately qualifies
+# the resource-limited container namespaces and isolated network.
+export PACKORY_DB_CONNECTORS_ENABLED=true
+export PACKORY_DB_CONNECTOR_ALLOWED_TARGETS="$provider://$fixture_address:$fixture_port"
+export PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS="$fixture_address/32"
+export PACKORY_DB_WORKER_SOCKET="$fixture_dir/worker.sock"
+export PACKORY_DB_WORKER_IPC_KEY_FILE="$fixture_dir/worker-ipc.key"
+openssl rand -out "$PACKORY_DB_WORKER_IPC_KEY_FILE" 32
+chmod 0400 "$PACKORY_DB_WORKER_IPC_KEY_FILE"
+dotnet workers/database-connector/bin/Release/net10.0/Packory.DatabaseConnectorWorker.dll \
+  >"$fixture_dir/worker.log" 2>&1 &
+worker_pid="$!"
+for attempt in $(seq 1 80); do
+  [[ -S "$PACKORY_DB_WORKER_SOCKET" ]] && break
+  if ! kill -0 "$worker_pid" >/dev/null 2>&1; then
+    echo 'Isolated native worker failed to start.' >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+[[ -S "$PACKORY_DB_WORKER_SOCKET" ]] || { echo 'Native worker IPC socket missing.' >&2; exit 1; }
+fixture_run_tests 'FullyQualifiedName~Packory.Tests.DatabaseConnectorIsolatedNativeProviderTests' isolated 1
+kill "$worker_pid" >/dev/null 2>&1 || true
+wait "$worker_pid" >/dev/null 2>&1 || true
+worker_pid=""
+unset PACKORY_DB_WORKER_SOCKET PACKORY_DB_WORKER_IPC_KEY_FILE PACKORY_DB_CONNECTORS_ENABLED
+unset PACKORY_DB_CONNECTOR_ALLOWED_TARGETS PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS
+
 fixture_run_tests 'FullyQualifiedName~Packory.Tests.DatabaseConnectorNativeProviderTests' trusted 6
 
 # A wrong hostname alone does not prove that the certificate chain is checked.
@@ -371,7 +406,7 @@ import xml.etree.ElementTree as ET
 provider, image, reports, output = sys.argv[1:]
 ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
 phases = {}
-for phase, minimum in [('trusted', 6), ('untrusted', 1), ('restored', 1)]:
+for phase, minimum in [('isolated', 1), ('trusted', 6), ('untrusted', 1), ('restored', 1)]:
     root = ET.parse(Path(reports) / (phase + '.trx')).getroot()
     results = root.findall('.//t:UnitTestResult', ns)
     assert len(results) >= minimum, 'Required native database tests did not run'

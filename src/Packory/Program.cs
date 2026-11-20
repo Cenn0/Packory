@@ -256,7 +256,8 @@ builder.Services.AddSingleton<IMcpConnectorRuntime, McpConnectorGateway>();
 builder.Services.AddSingleton<ConnectorOperationGate>();
 builder.Services.AddSingleton(_ => DatabaseConnectorPolicy.FromEnvironment());
 builder.Services.AddSingleton<DatabaseConnectorStore>();
-builder.Services.AddSingleton<IDatabaseConnectorExecutor, DatabaseConnectorExecutor>();
+// Native database drivers must never execute in the web process.
+builder.Services.AddSingleton<IDatabaseConnectorExecutor, IsolatedDatabaseConnectorExecutor>();
 builder.Services.AddSingleton<DatabaseConnectorService>();
 builder.Services.AddSingleton<ModelCatalogStore>();
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<McpServerOptions>, PackoryMcpOptionsConfigurator>();

@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="src/Packory/Packory.csproj" />
+  <Project Path="workers/database-connector/Packory.DatabaseConnectorWorker.csproj" />
   <Project Path="tests/Packory.Tests/Packory.Tests.csproj" />
 </Solution>

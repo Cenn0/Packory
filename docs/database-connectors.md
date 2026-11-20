@@ -10,8 +10,8 @@ This is an **opt-in implementation for operator-controlled databases**, with nat
 | --- | --- |
 | Does the feature exist? | Native connection, probe, parameter binding, query execution, administrative lifecycle, dashboard and scoped MCP contracts are implemented. |
 | Is a driver officially maintained for its database? | Microsoft.Data.SqlClient and Oracle ODP.NET are vendor drivers. Npgsql and MySqlConnector are independently maintained projects with their own compatibility statements. Using one does not confer vendor certification on Packory. |
-| What is the operational baseline? | One active Packory writer, a trusted database server, authenticated TLS, a dedicated database login restricted to reviewed views, exact OIDC query grants and deployment-owned egress controls. |
-| Is arbitrary database access safe? | No. Database privileges and server-side row/tenant policy remain essential. The same-process runtime is not a containment boundary for a hostile database protocol implementation or server. |
+| What is the operational baseline? | One active Packory writer, a separate restricted Linux worker container, authenticated TLS, a dedicated database login restricted to reviewed views, exact OIDC query grants and deployment-owned egress controls. |
+| Is arbitrary database access safe? | No. Database privileges and server-side row/tenant policy remain essential. The native driver runs in a separate bounded worker process/container, but container breakout, credential exposure inside that worker and hostile result content remain residual risks. |
 | What is qualified? | Consult the exact-commit **Native database connectors** workflow and its sanitized evidence artifacts. The workflow's existence is not a passed result or a general production qualification. |
 
 The implementation uses the following pinned packages. These are implementation versions, not claims that every server version or managed database service is supported.
@@ -52,27 +52,41 @@ The dashboard cannot enlarge the operator's network allowlist. Set the following
 | `PACKORY_DB_CONNECTORS_ENABLED` | `false`. Set to `true` to permit probes and queries. Administrative definitions may be prepared while execution is disabled. |
 | `PACKORY_DB_CONNECTOR_ALLOWED_TARGETS` | Empty. Comma-separated exact `provider://host:port` entries, such as `postgresql://db.example.invalid:5432`. No user information, wildcards, path, query or fragment. The configured host and port must match a listed target. |
 | `PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS` | Empty. Explicit, deployment-owned exceptions for private addresses. Narrow these to required database addresses. Link-local, metadata and other forbidden address classes remain blocked. |
-| `PACKORY_MCP_CONNECTOR_KEYRING_FILE` | Absolute private keyring path, shared with remote MCP connector credential storage. Required to store or use a password. |
+| `PACKORY_MCP_CONNECTOR_KEYRING_FILE` | Absolute private keyring path in the Packory web container only; not mounted in the worker. Required for decrypting saved passwords. |
+| PACKORY_DB_WORKER_SOCKET | Required absolute Unix socket path in the private shared volume, configured identically in both containers. No TCP fallback. |
+| PACKORY_DB_WORKER_IPC_KEY_FILE | Required absolute file of exactly 32 random bytes, readable only by the dedicated container UID. Independent of the encrypted-credential keyring. |
 
 At most 64 targets and 16 private CIDR exceptions are accepted. The runtime rechecks the target and all returned DNS addresses before each connection, then passes only the selected numeric address to the driver. An unapproved DNS answer fails the operation. TLS certificate identity is checked separately from that address. `TlsServerName` is the expected certificate name; Oracle additionally requires its expected full certificate distinguished name.
 
-Use the [private keyring creation procedure](mcp-connectors.md#operator-owned-deployment-policy) before starting the optional Compose overlay:
+Use the [private keyring creation procedure](mcp-connectors.md#operator-owned-deployment-policy) and provision a **separate binary IPC key** before enabling the Compose overlay. The example locations are operator-owned and must not be committed:
 
-```bash
-export PACKORY_DB_CONNECTOR_ALLOWED_TARGETS='postgresql://db.example.invalid:5432,sqlserver://sql.example.invalid:1433,oracle://oracle.example.invalid:2484'
+~~~bash
+export PACKORY_DB_CONNECTOR_ALLOWED_TARGETS='postgresql://db.example.invalid:5432'
 export PACKORY_MCP_CONNECTOR_KEYRING_PATH=/var/lib/packory/private/mcp-keyring.json
+export PACKORY_DB_WORKER_IPC_KEY_PATH=/var/lib/packory/private/db-worker-ipc.key
+
+# Private host path; examples assume the image UID/GID 1654:1654.
+sudo install -d -m 0700 -o 1654 -g 1654 /var/lib/packory/private
+sudo openssl rand -out "$PACKORY_DB_WORKER_IPC_KEY_PATH" 32
+sudo chown 1654:1654 "$PACKORY_DB_WORKER_IPC_KEY_PATH"
+sudo chmod 0400 "$PACKORY_DB_WORKER_IPC_KEY_PATH"
+
 docker compose -f compose.yaml -f compose.database-connectors.yaml up -d --build
-```
+~~~
 
-The host-side `PACKORY_MCP_CONNECTOR_KEYRING_PATH` is a Compose input. The overlay mounts it read-only at the internal `PACKORY_MCP_CONNECTOR_KEYRING_FILE` path. The application user must be able to read the file, while unrelated users must not. For prebuilt images, combine the overlay with `compose.ghcr.yaml`, omit `--build`, and use a verified image revision as described in [Container images](container-images.md).
+Both the Packory web container and the worker mount the IPC key read-only, but **only the web container receives the encrypted-credential keyring and Packory data volume**. The worker receives the password for exactly one admitted operation over the authenticated socket. Its key file is a binary file (not a hex string), and the worker rejects missing, malformed or overly broad key-file permissions. Rotate the IPC key and restart both services following suspected compromise; make sure no previous worker process is still running.
 
-The example names are reserved, non-operational examples. Supply your own private deployment configuration without committing it. If the database resolves to private addresses, set the reviewed private-CIDR exception before starting Packory. Restart the process when environment policy changes.
+The overlay builds a separate database-worker image from the explicit Dockerfile target. The normal Packory image remains the default Dockerfile target. For prebuilt Packory images, build the worker image independently with Compose before starting the stack without rebuilding Packory; verify both image revisions. Never deploy an old Packory image whose runtime still invokes drivers in-process alongside this overlay.
+
+The worker has a private internal Docker bridge network named database-worker-egress, configured with Docker Engine 28+ gateway mode `isolated` so the host bridge interface does not receive a gateway address. **By default it cannot reach databases on the public internet or Packory's web network.** Attach only approved database services to that network (and use a matching Docker network alias/TLS certificate identity). For externally hosted databases, do not simply join the public bridge network: create a restricted routed network with host- or cluster-enforced egress rules for exact database IPs and ports, then separately test certificate lookups and SQL Server/Oracle redirection behavior. An application-level allowlist cannot replace these network restrictions.
+
+The example names are reserved, non-operational examples. If a database resolves to private addresses, also specify reviewed private CIDR exceptions in the deployment. Restart both processes when target, network or credential policy changes. A missing worker must cause database probes and queries to fail; never enable an in-process fallback.
 
 ### Certificate trust
 
-Install the database CA into the operating-system trust store used by the Packory process. The server must provide the necessary intermediate certificates, and its identity must match the configured TLS name or Oracle certificate DN. There is no dashboard switch to ignore a certificate error, disable encryption or trust an arbitrary server certificate.
+Install the database CA into the operating-system trust store used by the **database worker** process. The server must provide the necessary intermediate certificates, and its identity must match the configured TLS name or Oracle certificate DN. There is no dashboard switch to ignore a certificate error, disable encryption or trust an arbitrary server certificate.
 
-For a private CA in the container, build a deployment-owned derivative image from the verified Packory image. Add only the required public CA certificate under `/usr/local/share/ca-certificates`, run `update-ca-certificates` as root during the image build, then restore `USER $APP_UID`. Do not copy a CA private key into that image, and do not replace the entire `/etc/ssl/certs` directory with a bind mount. Update and test that image when the CA changes.
+For a private CA in the container, build a deployment-owned derivative image from the verified **database-worker** image. Add only the required public CA certificate under `/usr/local/share/ca-certificates`, run `update-ca-certificates` as root during the image build, then restore `USER $APP_UID`. Do not copy a CA private key into that image, and do not replace the entire `/etc/ssl/certs` directory with a bind mount. Update and test that image when the CA changes.
 
 In Npgsql, the TLS callback disables certificate-authority downloads while preserving normal trust/hostname validation. Other drivers may perform certificate-chain or revocation lookups internally. An application-level socket pin is not a complete firewall; see [Runtime and network boundaries](#runtime-and-network-boundaries).
 
@@ -199,7 +213,7 @@ Dates/timestamps and UUIDs are formatted as strings. Binary values, arrays, comp
 | Same-connector configuration/call coordination | Shared bounded stripe lock, up to two seconds to acquire; a busy request returns `429` |
 | Audit read | Latest 100 events for the connector |
 
-The row limit is an output limit, not an optimizer/work limit. A query can scan many rows or perform expensive joins before producing its first result. Review indexes, predicates and execution plans, use database resource governance, and keep timeouts small. The overall deadline requests cancellation; native driver cleanup and a misbehaving remote server are not equivalent to a forcibly terminated isolated worker.
+The row limit is an output limit, not an optimizer/work limit. A query can scan many rows or perform expensive joins before producing its first result. Review indexes, predicates and execution plans, use database resource governance, and keep timeouts small. The request deadline requests native cancellation; the worker additionally has a hard process watchdog (45 seconds). If a driver ignores cancellation, the worker exits and is restarted, without stopping the Packory web process.
 
 ## Administrative API and audit
 
@@ -234,21 +248,23 @@ Back up the complete Packory metadata database, including `database_connectors`,
 
 ## Runtime and network boundaries
 
-The current database gateway runs in the Packory application process. It uses no submitted code, stdio server or dynamically loaded provider. It also shares that process's CPU, memory, filesystem permissions and failure domain. Application row/cell/output limits do not bound every native driver's internal packet buffers.
+Native ADO.NET providers are invoked only by the separate Packory.DatabaseConnectorWorker executable, not by the Packory web/MCP process. A versioned Unix-domain socket carries bounded HMAC-SHA256-authenticated request/reply frames; the private operator-provisioned IPC key is distinct from the Packory credential keyring. The worker is launched as a dedicated container with a separate PID/mount/network namespace, non-root identity, no HTTP listener or published ports, read-only root filesystem, dropped capabilities, no-new-privileges, the Docker default seccomp profile, and memory/CPU/PID limits. The separate hard watchdog terminates an unresponsive worker after 45 seconds; a database worker outage does not restart the Packory web process.
 
-The initial destination is pinned to an approved numeric IP and the certificate remains bound to the expected database identity. This does not prove that a provider never opens another socket: SQL Server routing, Oracle listener behavior, certificate/AIA lookups and native cancellation can have provider-specific network behavior. SQL Server/Oracle cluster redirection and arbitrary cloud failover arrangements are not qualified by the single-server fixture matrix.
+The parent revalidates results after deserialization, treating even an authenticated worker as potentially compromised: only flat scalar JSON cells, reviewed column names, fixed row/column/cell/output budgets and explicitly untrusted results are accepted. IPC corruption, wrong MAC, missing worker, incompatible versions and oversized responses fail closed. These controls limit a corrupted provider's effect on the web process but **cannot guarantee the truth of a database result or erase a password from the compromised worker's memory**. The same Packory source assembly is referenced by both executables to share native adapter tests, but no native provider call is registered in the web application's runtime dependency injection.
 
-Use deployment egress rules allowing only intended database destinations/ports and required infrastructure. Prefer a separately operated restricted database endpoint/network segment, and apply container/process memory and CPU limits. A dedicated isolated connector worker remains a separate hardening step; this implementation must not be described as hostile-server containment or general production certification. Row/tenant authorization and safe function behavior must be enforced in the database.
+The initial network destination is still pinned to an approved numeric IP, and the TLS certificate remains bound to the expected database identity. Native drivers can make secondary connections or certificate lookups, so approved DNS/TLS checks do **not** constitute an external egress firewall. The default internal Docker network intentionally has no external route; operators must separately enforce and validate host/cluster egress restrictions before allowing external database servers. SQL Server/Oracle cluster redirection and arbitrary cloud failover remain outside the qualified single-server fixture profile.
+
+The isolation boundary is the **Linux container and kernel**, not a virtual machine. A malicious driver may read its current query data and database password, attack other allowed network peers or crash its own container. Container escapes, kernel vulnerabilities, side channels and a compromise of the Packory web process are not prevented by the worker protocol. Keep least-privilege database logins, reviewed views and server-side row/tenant policies. The isolated Docker gateway mode requires Docker Engine 28.0.0 or newer. Containers that share this bridge can still communicate, and kernel/container escape is not prevented. The worker's IPC key must never be distributed to arbitrary containers or a model. See [ADR-0005](adr/0005-isolated-database-workers.md) for the formal threat model.
 
 ## Reproduce verification
 
-Offline tests cover the native builders and certificate policies, exact parameter binding, argument rejection, bounded reads, numeric precision, cancellation admission and credential redaction. REST/MCP lifecycle tests cover separate scopes, grants, revision conflicts, writer restrictions and reserved IDs. Browser tests exercise the administrative workflow and untrusted text rendering.
+Offline tests cover the authenticated IPC frame, tampering, result-shape rejection and the native builders and certificate policies, exact parameter binding, argument rejection, bounded reads, numeric precision, cancellation admission and credential redaction. REST/MCP lifecycle tests cover separate scopes, grants, revision conflicts, writer restrictions and reserved IDs. Browser tests exercise the administrative workflow and untrusted text rendering.
 
 ```bash
 dotnet restore Packory.slnx
 dotnet build Packory.slnx -c Release --no-restore -warnaserror
 dotnet test tests/Packory.Tests/Packory.Tests.csproj -c Release --no-build \
-  --filter 'FullyQualifiedName~DatabaseConnector'
+  --filter 'FullyQualifiedName~DatabaseConnector|FullyQualifiedName~DatabaseWorker'
 ```
 
 Real-provider tests are explicitly skipped without disposable fixture settings; skipped tests are not provider evidence. On a suitable Linux runner with Docker, OpenSSL, Python, .NET and passwordless `sudo` for the temporary CA trust operation:
@@ -260,6 +276,8 @@ bash scripts/qualify-database-connectors.sh mariadb
 bash scripts/qualify-database-connectors.sh sqlserver
 bash scripts/qualify-database-connectors.sh oracle
 ```
+
+The CI additionally runs a separate real worker process for one **positive TLS database IPC roundtrip per provider**, and builds the worker image to exercise a real container with a temporary binary IPC key, an isolated-gateway network, invalid-MAC/oversize probes and a negative native connection check. This verifies the real worker process and protocol; it does not simulate kernel escape or prove external egress restrictions.
 
 Each fixture creates synthetic data and separate privileged-setup/SELECT-only accounts, requires real TLS, and runs parameter/injection, precise numeric output, permission-denial, password-denial, certificate identity and output-limit cases. The harness then removes its test CA, checks that the same correctly named server is rejected, restores trust and reruns a positive control. It rejects empty or skipped test runs and exports sanitized exact-source/provider/image evidence. It does not upload raw database logs or credentials. Treat SQL Server/Oracle test-image licenses separately from Packory's license.
 
