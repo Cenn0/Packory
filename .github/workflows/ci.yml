@@ -85,6 +85,7 @@ jobs:
           docker compose -f compose.yaml -f compose.mcp-connectors.yaml config --quiet
           PACKORY_DB_CONNECTOR_ALLOWED_TARGETS=postgresql://db.example.invalid:5432 \
           PACKORY_MCP_CONNECTOR_KEYRING_PATH=/tmp/packory-mcp-keyring-synthetic-placeholder.json \
+          PACKORY_DB_WORKER_IPC_KEY_PATH=/tmp/packory-db-ipc-synthetic-placeholder.key \
           docker compose -f compose.yaml -f compose.database-connectors.yaml config --quiet
       - name: Validate private ingress profile and proxy authorization boundaries
         run: python3 -m unittest discover -s tests -p test_proxy_profile.py -v
@@ -204,7 +205,9 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Build self-hosted image
-        run: docker build -t packory:ci .
+        run: |
+          docker build -t packory:ci .
+          docker build --target database-worker -t packory:db-worker-ci .
       - name: Exercise disposable HTTPS native clients and isolated container recovery
         run: |
           bash -n scripts/smoke_single_node_compose.sh scripts/smoke_single_node_native.sh scripts/smoke_single_node_tls.sh
