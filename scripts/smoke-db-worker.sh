@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Actual standalone worker container, with no database or public network.
+# Actual standalone worker container, with no database or external route.
 # Credentials, key material and socket volume are disposable, never uploaded.
 set -euo pipefail
 umask 077
@@ -13,9 +13,11 @@ tmp="$(mktemp -d)"
 suffix="$(openssl rand -hex 6)"
 container="packory-db-worker-smoke-$suffix"
 volume="packory-db-worker-ipc-$suffix"
+network="packory-db-worker-net-$suffix"
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
   docker volume rm -f "$volume" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
   sudo -n rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -24,8 +26,18 @@ openssl rand -out "$tmp/worker.key" 32
 sudo -n chown 1654:1654 "$tmp/worker.key"
 sudo -n chmod 0400 "$tmp/worker.key"
 docker volume create "$volume" >/dev/null
+# Docker Engine 28+ isolated gateway prevents internal bridge access to host
+# listeners (plain --internal still permits access via its bridge gateway).
+docker network create --driver bridge --internal \
+  -o com.docker.network.bridge.gateway_mode_ipv4=isolated "$network" >/dev/null
+docker network inspect "$network" | python3 -c '
+import json,sys
+net=json.load(sys.stdin)[0]
+assert net["Internal"] is True
+assert net["Options"]["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+'
 
-docker run -d --name "$container" --network none \
+docker run -d --name "$container" --network "$network" \
   --user 1654:1654 --read-only --cap-drop ALL \
   --security-opt no-new-privileges --pids-limit 64 \
   --memory 768m --cpus 1.0 \
@@ -59,7 +71,7 @@ c=json.load(sys.stdin)[0]
 h=c["HostConfig"]
 assert c["Config"]["User"]=="1654:1654"
 assert h["ReadonlyRootfs"] and not h["Privileged"]
-assert h["NetworkMode"]=="none" and h["CapDrop"]==["ALL"]
+assert h["NetworkMode"].startswith("packory-db-worker-net-") and h["CapDrop"]==["ALL"]
 assert "no-new-privileges" in h["SecurityOpt"]
 assert h["Memory"] > 0 and h["PidsLimit"] == 64
 assert not c["NetworkSettings"]["Ports"]
