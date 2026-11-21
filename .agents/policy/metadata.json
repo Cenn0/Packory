@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "aiset-policy",
+  "visibility": "public",
+  "origin": "first-party",
+  "owner": "Cenn0",
+  "reviewed_on": "2026-11-21",
+  "security_source": "security-boundaries.md",
+  "evidence_source": "evidence.md",
+  "enforcement": "guidance-only; host isolation must be verified separately"
+}

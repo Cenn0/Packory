@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ganzheitliches Software Engineering"
+  short_description: "Architektur, Änderung und Betrieb nachweisbar verbinden"
+  default_prompt: "Nutze $software-engineering, um das reale Problem zu analysieren, Optionen begründet zu vergleichen und autorisierte Änderungen mit Tests, Sicherheits- und Betriebsnachweisen umzusetzen."
