@@ -318,6 +318,26 @@ public sealed class DatabaseConnectorTests
     public void Query_policy_rejects_batches_writes_and_ambiguous_templates(string sql) =>
         Assert.Throws<InvalidDataException>(() => DatabaseConnectorPolicy.ValidateQuery(new("lookup", "Fixture", sql, [], 10, 5)));
 
+    [Theory]
+    [InlineData("SELECT 1 # hidden MySQL comment")]
+    [InlineData("SELECT 1 # comment\\nDROP TABLE records")]
+    [InlineData("SELECT 1\\n# comment")]
+    public void Query_policy_rejects_mysql_hash_comments_outside_literals(string sql)
+    {
+        foreach (var provider in new[] { "mysql", "mariadb" })
+            Assert.Throws<InvalidDataException>(() => DatabaseConnectorPolicy.ValidateQuery(
+                new("lookup", "Fixture", sql, [], 10, 5), provider));
+    }
+
+    [Fact]
+    public void Query_policy_preserves_hash_characters_inside_sql_string_literals()
+    {
+        DatabaseConnectorPolicy.ValidateQuery(
+            new("lookup", "Fixture", "SELECT '#safe' AS label", [], 10, 5), "mysql");
+        DatabaseConnectorPolicy.ValidateQuery(
+            new("lookup", "Fixture", "SELECT 'it''s #safe' AS label", [], 10, 5), "mariadb");
+    }
+
     [Fact]
     public void Policy_checks_placeholder_dialects_case_ambiguity_and_denies_network_special_ranges()
     {
