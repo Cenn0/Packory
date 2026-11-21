@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aussagekräftige Tests entwickeln"
+  short_description: "Fachliche und negative Tests mit echten Oracles"
+  default_prompt: "Nutze $design-effective-tests, um aus Risiken, Fachregeln und Fehlerpfaden wirklich aussagekräftige Tests zu planen und umzusetzen."

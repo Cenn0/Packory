@@ -1,0 +1,73 @@
+{
+  "provenance": {
+    "git_dirty": false,
+    "git_revision": "adedfd9016a01368b3d56f65965e39a5699242ca",
+    "selected_source_sha256": "eb0321e87ffd9774c1f03f44d5be6bf399a852bd73c02ab7ebd874e05ed82680"
+  },
+  "records": {
+    ".agents/policy": {
+      "files": {
+        "evidence.md": "619a90192a2ec50ab464f960a621876a9a1f9c54549c9f3b65e9b67857bbb7cb",
+        "metadata.json": "f07af9c1429bc9ca60bf585d863dd9288be02c8f50119a3949566c428b4c51be",
+        "security-boundaries.md": "1b1bb5fc5db7d0619d313f75cadbf0f46004d274369e239e8aace30fe67fb1b9"
+      },
+      "kind": "policy",
+      "name": "aiset-policy"
+    },
+    ".agents/skills/audit-repository-baseline": {
+      "files": {
+        "SKILL.md": "dd8a71a43f6ba69212f81cbe0a48cf23fdb54c25d8dbdedfce801a6bb3f70874",
+        "agents/openai.yaml": "17daf0e7028d6841da894d0d80492e62741568ffafa779abd2cb98870ef50672",
+        "assets/resource-rollout.md": "2fcc22614beea6362b6173fa2a6c941ef5ad70d9e805542c3dc63440aef3afb0"
+      },
+      "kind": "skill",
+      "name": "audit-repository-baseline"
+    },
+    ".agents/skills/design-effective-tests": {
+      "files": {
+        "SKILL.md": "a57a8fc7bfd8239e2fa38a929d56f393b81e51342474663f5a15da2314880229",
+        "agents/openai.yaml": "00557ae4a2838e27970d45d398260ceadd01cc76db9ad59b9c847dacf5470380",
+        "assets/test-case-card.md": "12b009383400de5e5a598925d8a488435f4f58b0c9458f396fd6145b2269f77b",
+        "references/test-design-patterns.md": "fa57d79cad0f33dfe551edea650becf31a7a780c8af5a74fb8d787c45e5d5ec3"
+      },
+      "kind": "skill",
+      "name": "design-effective-tests"
+    },
+    ".agents/skills/qualify-api-contracts": {
+      "files": {
+        "SKILL.md": "0355bd3781789fa9dd4556a87b91f4c0a6913d0a0c4275f9af76a1a0358628f4",
+        "agents/openai.yaml": "06b85b9aaebf2d756e04dcaf4421a00b1f1a520659466737439eff80ff34b478"
+      },
+      "kind": "skill",
+      "name": "qualify-api-contracts"
+    },
+    ".agents/skills/qualify-package-registry": {
+      "files": {
+        "SKILL.md": "5b98825e19d1fb4007db2b40efa778a9b8dc9fd9554577c8d69ac3d69af62442",
+        "agents/openai.yaml": "c1086a67753f7693ebeaac78b8aa042948aa3fddfecdd1e74a0eade96e8f7e38"
+      },
+      "kind": "skill",
+      "name": "qualify-package-registry"
+    },
+    ".agents/skills/review-security": {
+      "files": {
+        "SKILL.md": "0917207fe900fa3370f2be708088fc9e9ec128221077ca50183011d71bef1421",
+        "agents/openai.yaml": "e700949de4b9903bb05fa618cfa8b307651e1df12be794910980caf43cd95b3d"
+      },
+      "kind": "skill",
+      "name": "review-security"
+    },
+    ".agents/skills/software-engineering": {
+      "files": {
+        "SKILL.md": "37cc3045a68b0df7b7de4d4bc8ab4bd382d863fbc05507d1d44b5d755222cdca",
+        "agents/openai.yaml": "f28c5c3934cdc65dd93d2236ebda2537f47939a5a24a6b4fd0a646797b83882a",
+        "assets/engineering-change-record.md": "3179ac104d6a777cd561081f041eefdb9eddd12eb6bee86fed0d2654486212ad",
+        "references/engineering-method.md": "48c3d255a5c58f05b751167d3707c1b4a0fcfcc9f508835a5c59508c4e7cfd03",
+        "references/primary-sources.md": "86d2d890abb8ee9bb93dba02734d36a026379abcf527b825c75f95efc5523a73"
+      },
+      "kind": "skill",
+      "name": "software-engineering"
+    }
+  },
+  "schema_version": 1
+}

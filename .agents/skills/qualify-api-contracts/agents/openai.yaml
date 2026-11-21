@@ -1,0 +1,4 @@
+interface:
+  display_name: "API- und Eventverträge qualifizieren"
+  short_description: "Schnittstellen, Versionierung und Negativfälle abnehmen"
+  default_prompt: "Nutze $qualify-api-contracts, um den aktuellen Quellstand zu prüfen und belegte Ergebnisse im freigegebenen Scope zu liefern."

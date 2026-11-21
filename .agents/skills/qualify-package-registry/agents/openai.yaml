@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paketregistry-Protokolle testen"
+  short_description: "Native Paketclients, Mirror und Registry-Grenzen prüfen"
+  default_prompt: "Nutze $qualify-package-registry, um den aktuellen Quellstand zu prüfen und belegte Ergebnisse im freigegebenen Scope zu liefern."

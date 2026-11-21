@@ -19,6 +19,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_public_privacy.py -v
       - name: Check tracked source and checked-out commit identity
         run: python3 scripts/check_public_privacy.py
+      - name: Verify the fixed development-resource pilot readback
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_development_resources.py
+      - name: Exercise development-resource drift and safe-read negative controls
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_development_resources.py -v
   test:
     name: Build and integration tests
     runs-on: ubuntu-latest

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security-Review durchführen"
+  short_description: "Berechtigungen, Datenflüsse und Lieferkette überprüfen"
+  default_prompt: "Nutze $review-security, um den aktuellen Quellstand zu prüfen und belegte Ergebnisse im freigegebenen Scope zu liefern."

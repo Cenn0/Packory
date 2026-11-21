@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository-Baseline prüfen"
+  short_description: "Aktuellen Repo-Stand, PRs und Nachweise inventarisieren"
+  default_prompt: "Nutze $audit-repository-baseline, um den aktuellen Quellstand zu prüfen und belegte Ergebnisse im freigegebenen Scope zu liefern."
