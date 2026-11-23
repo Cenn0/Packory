@@ -209,21 +209,7 @@ public static class NuGetEndpoints
         // A concurrent reader must never observe a partially verified or mismatched package.
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         var bytes = await BlobStore.ReadBoundedAsync(stream, settings.MaxArtifactBytes, ct);
-        var checksumUrl = settings.NugetUpstreamUrl.TrimEnd('/') + $"/{id}/{version}/{id}.{version}.nupkg.sha512";
-        using var checksumResponse = await http.GetAsync(checksumUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-        // Do not silently cache a mirror artifact without upstream integrity evidence.
-        if (!checksumResponse.IsSuccessStatusCode)
-            throw new InvalidDataException("NuGet upstream SHA512 checksum unavailable");
-        {
-            // Bound the checksum document; a Base64-encoded SHA-512 checksum is 88 chars.
-            await using var checksumStream = await checksumResponse.Content.ReadAsStreamAsync(ct);
-            var checksumBytes = await BlobStore.ReadBoundedAsync(checksumStream, 1024, ct);
-            var expected = System.Text.Encoding.UTF8.GetString(checksumBytes).Trim();
-            var actual = Convert.ToBase64String(SHA512.HashData(bytes));
-            if (!CryptographicOperations.FixedTimeEquals(
-                System.Text.Encoding.UTF8.GetBytes(expected), System.Text.Encoding.UTF8.GetBytes(actual)))
-                throw new InvalidDataException("NuGet upstream SHA512 checksum mismatch");
-        }
+        await NugetUpstreamIntegrity.VerifyAsync(settings, http, id, version, bytes, ct);
         Nuspec spec;
         using (var archive = new MemoryStream(bytes, writable: false))
         {
