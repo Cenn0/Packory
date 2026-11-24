@@ -148,6 +148,62 @@ public sealed class NugetUpstreamIntegrityTests
         Assert.IsType<InvalidDataException>(invalidCatalog.Error);
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("42")]
+    public async Task RejectsNonObjectRegistrationMetadata(string payload)
+    {
+        var result = await Exercise(uri => uri.AbsoluteUri switch {
+            Sidecar => new(HttpStatusCode.NotFound),
+            Index => new(HttpStatusCode.OK) {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            },
+            _ => throw new Exception("Unexpected upstream request")
+        });
+        Assert.IsType<InvalidDataException>(result.Error);
+        Assert.Equal(new[] { Sidecar, Index }, result.Requests);
+    }
+
+    [Fact]
+    public async Task RejectsNonObjectExternalRegistrationPage()
+    {
+        const string page = "https://api.nuget.org/v3/registration5-semver2/test.nuget.package/page/1.0.0/2.0.0.json";
+        var result = await Exercise(uri => uri.AbsoluteUri switch {
+            Sidecar => new(HttpStatusCode.NotFound),
+            Index => Json(new { items = new[] { new Dictionary<string, string> { ["@id"] = page } } }),
+            page => Json(Array.Empty<object>()),
+            _ => throw new Exception("Unexpected upstream request")
+        });
+        Assert.IsType<InvalidDataException>(result.Error);
+        Assert.Equal(new[] { Sidecar, Index, page }, result.Requests);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"25\"")]
+    [InlineData("true")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public async Task RejectsNonNumericCatalogPackageSize(string payload)
+    {
+        using var size = JsonDocument.Parse(payload);
+        var result = await Exercise(uri => uri.AbsoluteUri switch {
+            Sidecar => new(HttpStatusCode.NotFound),
+            Index => Json(Registration()),
+            Catalog => Json(new {
+                id = Id,
+                version = Version,
+                packageHashAlgorithm = "SHA512",
+                packageHash = Convert.ToBase64String(SHA512.HashData(Package)),
+                packageSize = size.RootElement
+            }),
+            _ => throw new Exception("Unexpected upstream request")
+        });
+        Assert.IsType<InvalidDataException>(result.Error);
+        Assert.Equal(new[] { Sidecar, Index, Catalog }, result.Requests);
+    }
+
     [Fact]
     public async Task DoesNotUseCatalogForUnrelatedCustomUpstreams()
     {

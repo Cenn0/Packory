@@ -78,7 +78,13 @@ public static class NugetUpstreamIntegrity
             throw new InvalidDataException("NuGet catalog metadata too large");
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         var bytes = await BlobStore.ReadBoundedAsync(stream, MaxMetadataBytes, ct);
-        return JsonDocument.Parse(bytes);
+        var document = JsonDocument.Parse(bytes);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            document.Dispose();
+            throw new InvalidDataException("NuGet catalog metadata must be a JSON object");
+        }
+        return document;
     }
 
     private static bool TryGetString(JsonElement obj, string name, out string value)
@@ -165,6 +171,7 @@ public static class NugetUpstreamIntegrity
             !TryGetString(entry, "packageHash", out var hash) ||
             !NugetDigest.Valid(hash) ||
             !entry.TryGetProperty("packageSize", out var length) ||
+            length.ValueKind != JsonValueKind.Number ||
             !length.TryGetInt64(out var expectedLength) ||
             expectedLength != packageSize)
             throw new InvalidDataException("NuGet catalog package identity, length or checksum invalid");
