@@ -28,6 +28,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Publish and serve Packory
+        id: packory_start
         run: |
           dotnet publish src/Packory/Packory.csproj -c Release -o /tmp/packory-server
           mkdir -p /tmp/packory-data
@@ -46,6 +47,9 @@ jobs:
           exit 1
       - name: Restore a real package without fallback source
         run: bash scripts/smoke-nuget.sh
+      - name: Diagnose NuGet mirror failure with bounded status-only probes
+        if: ${{ !cancelled() && failure() && steps.packory_start.outcome == 'success' }}
+        run: bash scripts/diagnose-live-nuget.sh
       - name: Install a real npm package through Packory
         if: github.event_name != 'pull_request'
         run: PACKORY_PUBLIC_BASE_URL=http://localhost:8080 bash scripts/smoke-npm.sh
