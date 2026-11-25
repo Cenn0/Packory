@@ -27,6 +27,7 @@ printf 'Diagnostic only: status codes do not establish root cause.\n'
 python3 - <<'PY'
 import base64
 import hashlib
+import gzip
 import json
 import ssl
 import urllib.error
@@ -43,13 +44,17 @@ opener = urllib.request.build_opener(
     urllib.request.HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
 host = "https://api.nuget.org"
 artifact = host + "/v3-flatcontainer/newtonsoft.json/13.0.3/newtonsoft.json.13.0.3.nupkg"
-leaf = host + "/v3/registration5-semver2/newtonsoft.json/13.0.3.json"
+leaf = host + "/v3/registration5-gz-semver2/newtonsoft.json/13.0.3.json"
 
 
 def read(url, label, limit):
     try:
         with opener.open(url, timeout=10) as response:
-            data = response.read(limit + 1)
+            if response.headers.get('Content-Encoding', '').lower() == 'gzip':
+                with gzip.GzipFile(fileobj=response) as decoded:
+                    data = decoded.read(limit + 1)
+            else:
+                data = response.read(limit + 1)
             print(f"{label}: HTTP {response.status}")
             if len(data) > limit:
                 print(f"{label}: oversized")

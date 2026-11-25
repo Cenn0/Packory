@@ -14,7 +14,7 @@ public static class NugetUpstreamIntegrity
     private const int MaxMetadataBytes = 4 * 1024 * 1024;
     private const int MaxRegistrationPages = 32;
     private const string NugetFlatContainer = "https://api.nuget.org/v3-flatcontainer/";
-    private const string NugetRegistration = "https://api.nuget.org/v3/registration5-semver2/";
+    private const string NugetRegistration = "https://api.nuget.org/v3/registration5-gz-semver2/";
 
     public static async Task VerifyAsync(Settings settings, HttpClient http,
         string id, string version, byte[] package, CancellationToken ct)
@@ -120,7 +120,7 @@ public static class NugetUpstreamIntegrity
                 // inlined catalog lacks a version field.
                 if (!TryGetString(leaf, "@id", out var leafUrl)) continue;
                 var trustedLeaf = TrustedUri(leafUrl,
-                    $"/v3/registration5-semver2/{id}/");
+                    $"/v3/registration5-gz-semver2/{id}/");
                 if (!trustedLeaf.AbsolutePath.EndsWith("/" + version + ".json",
                     StringComparison.OrdinalIgnoreCase)) continue;
             }
@@ -132,7 +132,7 @@ public static class NugetUpstreamIntegrity
     private static async Task<string> ReadNugetOrgCatalogHashAsync(Settings settings,
         HttpClient http, string id, string version, long packageSize, CancellationToken ct)
     {
-        var root = $"/v3/registration5-semver2/{id}/";
+        var root = $"/v3/registration5-gz-semver2/{id}/";
         var indexUrl = TrustedUri(settings.NugetRegistrationUrl.TrimEnd('/') +
             $"/{id}/index.json", root);
         using var index = await ReadJsonAsync(http, indexUrl, ct);

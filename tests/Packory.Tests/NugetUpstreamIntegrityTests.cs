@@ -14,7 +14,7 @@ public sealed class NugetUpstreamIntegrityTests
     private const string Sidecar =
         "https://api.nuget.org/v3-flatcontainer/test.nuget.package/1.2.3/test.nuget.package.1.2.3.nupkg.sha512";
     private const string Index =
-        "https://api.nuget.org/v3/registration5-semver2/test.nuget.package/index.json";
+        "https://api.nuget.org/v3/registration5-gz-semver2/test.nuget.package/index.json";
     private const string Catalog =
         "https://api.nuget.org/v3/catalog0/data/2026.11.23/test.nuget.package.1.2.3.json";
 
@@ -42,7 +42,7 @@ public sealed class NugetUpstreamIntegrityTests
         new {
             items = new[] { new {
                 items = new[] { new Dictionary<string, object> {
-                    ["@id"] = "https://api.nuget.org/v3/registration5-semver2/test.nuget.package/1.2.3.json",
+                    ["@id"] = "https://api.nuget.org/v3/registration5-gz-semver2/test.nuget.package/1.2.3.json",
                     ["catalogEntry"] = new Dictionary<string, string> {
                         ["@id"] = catalog, ["id"] = Id, ["version"] = Version
                     }
@@ -70,6 +70,13 @@ public sealed class NugetUpstreamIntegrityTests
             NugetUpstreamIntegrity.VerifyAsync(settings ?? new Settings(),
                 http, Id, Version, package ?? Package, CancellationToken.None));
         return (error, handler.Paths);
+    }
+
+    [Fact]
+    public void DefaultRegistrationMatchesOfficialSemVer2Resource()
+    {
+        Assert.Equal("https://api.nuget.org/v3/registration5-gz-semver2/",
+            new Settings().NugetRegistrationUrl);
     }
 
     [Fact]
@@ -168,7 +175,7 @@ public sealed class NugetUpstreamIntegrityTests
     [Fact]
     public async Task RejectsNonObjectExternalRegistrationPage()
     {
-        const string page = "https://api.nuget.org/v3/registration5-semver2/test.nuget.package/page/1.0.0/2.0.0.json";
+        const string page = "https://api.nuget.org/v3/registration5-gz-semver2/test.nuget.package/page/1.0.0/2.0.0.json";
         var result = await Exercise(uri => uri.AbsoluteUri switch {
             Sidecar => new(HttpStatusCode.NotFound),
             Index => Json(new { items = new[] { new Dictionary<string, string> { ["@id"] = page } } }),
