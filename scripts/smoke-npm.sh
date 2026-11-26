@@ -11,9 +11,21 @@ node -e 'if (!require("is-number")(42)) process.exit(1)'
 node -e '
 const fs=require("node:fs");
 const lock=JSON.parse(fs.readFileSync("package-lock.json","utf8"));
-const url=lock.packages["node_modules/is-number"].resolved;
-if (!url.startsWith(process.env.PACKORY_PUBLIC_BASE_URL || "http://localhost:8080")) {
-  console.error("Install bypassed Packory:",url); process.exit(1);
+const raw=lock.packages?.["node_modules/is-number"]?.resolved;
+const base=process.env.PACKORY_PUBLIC_BASE_URL || "http://localhost:8080";
+let sameRegistry=false;
+try {
+  const trusted=new URL(base + (base.endsWith("/") ? "npm/" : "/npm/"));
+  const candidate=new URL(raw);
+  // Comparing string prefixes is insufficient: localhost:8080.evil.invalid
+  // would pass despite resolving to an unrelated host.
+  sameRegistry=(candidate.origin === trusted.origin &&
+    candidate.pathname.startsWith(trusted.pathname) &&
+    candidate.username === "" && candidate.password === "" &&
+    candidate.search === "" && candidate.hash === "");
+} catch {} // Invalid/untrusted URLs are rejected; never echo input to public CI.
+if (!sameRegistry) {
+  console.error("Install bypassed Packory; resolved source withheld from public logs."); process.exit(1);
 }
 '
 printf 'npm live mirror smoke succeeded (is-number 7.0.0)\n'

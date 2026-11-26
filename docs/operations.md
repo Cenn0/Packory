@@ -21,7 +21,7 @@ Deploy one Packory instance behind a TLS reverse proxy on a controlled host. The
 | `PACKORY_DATA_DIRECTORY` | `./data` or `/data` in Docker | SQLite + blob root |
 | `PACKORY_PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute public origin; browser SSO requires HTTPS except on loopback |
 | `PACKORY_NUGET_UPSTREAM_URL` | `https://api.nuget.org/v3-flatcontainer/` | Trusted NuGet flat container |
-| `PACKORY_NUGET_REGISTRATION_URL` | `https://api.nuget.org/v3/registration5-semver2/` | Trusted NuGet registration source |
+| `PACKORY_NUGET_REGISTRATION_URL` | `https://api.nuget.org/v3/registration5-gz-semver2/` | Trusted NuGet registration source |
 | `PACKORY_NPM_UPSTREAM_URL` | `https://registry.npmjs.org/` | Trusted npm upstream |
 | `PACKORY_ANONYMOUS_READ` | `true` | Permit unauthenticated registry read |
 | `PACKORY_OCI_AUTHENTICATED_PING` | `false` | Require writer authentication for Docker `/v2/` negotiation even if generic reads are anonymous; see OCI docs for pull tradeoff |

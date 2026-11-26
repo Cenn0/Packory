@@ -25,7 +25,7 @@ public sealed class Settings
     public string PublicBaseUrl { get; set; } = "http://localhost:8080";
     public string NugetUpstreamUrl { get; set; } = "https://api.nuget.org/v3-flatcontainer/";
     public string NpmUpstreamUrl { get; set; } = "https://registry.npmjs.org/";
-    public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-semver2/";
+    public string NugetRegistrationUrl { get; set; } = "https://api.nuget.org/v3/registration5-gz-semver2/";
     public bool AnonymousRead { get; set; } = true;
     // Explicit offline maintenance for controlled PostgreSQL/S3 quarantine operations.
     public bool RecoveryMaintenance { get; set; }

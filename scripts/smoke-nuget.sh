@@ -4,6 +4,9 @@ set -euo pipefail
 BASE_URL="${PACKORY_PUBLIC_BASE_URL:-http://localhost:8080}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+# A pre-populated runner cache must never satisfy the live mirror probe.
+export NUGET_PACKAGES="$WORK/packages"
+export NUGET_HTTP_CACHE_PATH="$WORK/http-cache"
 cd "$WORK"
 dotnet new classlib --framework net10.0 --no-restore -o Probe >/dev/null
 cd Probe
