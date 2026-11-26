@@ -6,6 +6,9 @@ on:
       - 'src/Packory/NuGetEndpoints.cs'
       - 'src/Packory/NugetUpstreamIntegrity.cs'
       - 'scripts/smoke-nuget.sh'
+      - 'scripts/smoke-npm.sh'
+      - 'src/Packory/Settings.cs'
+      - 'src/Packory/appsettings.json'
       - '.github/workflows/smoke-live.yml'
   schedule:
     - cron: '19 3 * * 0'
@@ -51,7 +54,7 @@ jobs:
         if: ${{ !cancelled() && failure() && steps.packory_start.outcome == 'success' }}
         run: bash scripts/diagnose-live-nuget.sh
       - name: Install a real npm package through Packory
-        if: github.event_name != 'pull_request'
+        if: ${{ !cancelled() && steps.packory_start.outcome == 'success' }}
         run: PACKORY_PUBLIC_BASE_URL=http://localhost:8080 bash scripts/smoke-npm.sh
       - name: Stop service
         if: always()
