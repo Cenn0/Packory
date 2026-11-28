@@ -17,11 +17,11 @@ CSPROJ = ROOT / "src" / "Packory" / "Packory.csproj"
 # be evaluated explicitly; do not silently assume a floating base is safe.
 IMAGE = re.compile(
     r"^FROM\s+mcr\.microsoft\.com/dotnet/(sdk|aspnet):"
-    r"([1-9][0-9]*)\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-Z0-9._-]+)?"
+    r"([1-9][0-9]*)\.([0-9]+)(?:\.[0-9]+)?(?:-[a-zA-Z0-9._-]+)?"
     r"(?:@sha256:[a-f0-9]{64})?(?:\s+AS\s+[a-zA-Z0-9._-]+)?\s*$",
     re.IGNORECASE,
 )
-FRAMEWORK = re.compile(r"net([1-9][0-9]*)\.[0-9]+")
+FRAMEWORK = re.compile(r"net([1-9][0-9]*)\.([0-9]+)")
 
 
 def validate_alignment(dockerfile: str, project: str) -> None:
@@ -32,7 +32,7 @@ def validate_alignment(dockerfile: str, project: str) -> None:
     frameworks = [e.text.strip() for e in root.findall(".//TargetFramework") if e.text]
     if len(frameworks) != 1 or not FRAMEWORK.fullmatch(frameworks[0]):
         raise ValueError("Packory must declare exactly one concrete .NET target framework")
-    target_major = int(FRAMEWORK.fullmatch(frameworks[0]).group(1))
+    target = tuple(map(int, FRAMEWORK.fullmatch(frameworks[0]).groups()))
     images = {}
     for line in dockerfile.splitlines():
         if not re.match(r"^\s*FROM\s+", line, re.IGNORECASE):
@@ -40,16 +40,23 @@ def validate_alignment(dockerfile: str, project: str) -> None:
         match = IMAGE.fullmatch(line.strip())
         if not match:
             raise ValueError("Unsupported or unpinned-format .NET base image")
-        flavor, version = match.group(1).lower(), int(match.group(2))
+        flavor = match.group(1).lower()
+        version = (int(match.group(2)), int(match.group(3)))
         if flavor in images:
             raise ValueError("Multiple .NET build/runtime images require explicit review")
         images[flavor] = version
     if set(images) != {"sdk", "aspnet"}:
         raise ValueError("Packory requires one SDK and one ASP.NET runtime image")
-    if images["aspnet"] != target_major:
+    if list(images) != ["sdk", "aspnet"]:
+        raise ValueError("ASP.NET runtime must be the final stage")
+    if images["aspnet"][0] != target[0]:
         raise ValueError("ASP.NET runtime major differs from the target framework; framework-dependent app may not start")
-    if images["sdk"] < target_major:
+    if images["aspnet"] < target:
+        raise ValueError("ASP.NET runtime minor is older than the target framework")
+    if images["sdk"][0] < target[0]:
         raise ValueError("SDK major is older than the target framework")
+    if images["sdk"] < target:
+        raise ValueError("SDK version is older than the target framework")
 
 
 class ContainerRuntimeAlignmentTests(unittest.TestCase):
@@ -58,6 +65,21 @@ class ContainerRuntimeAlignmentTests(unittest.TestCase):
 
     def test_repository_dockerfile_matches_project(self):
         validate_alignment(DOCKERFILE.read_text(encoding="utf-8"), CSPROJ.read_text(encoding="utf-8"))
+
+    def test_sdk_cannot_be_the_final_image(self):
+        reversed_stages = "\n".join(reversed(self.BASE.splitlines()))
+        with self.assertRaisesRegex(ValueError, "final stage"):
+            validate_alignment(reversed_stages, self.PROJECT)
+
+    def test_runtime_and_sdk_cannot_be_older_target_minor(self):
+        project = self.PROJECT.replace("net10.0", "net10.1")
+        with self.assertRaisesRegex(ValueError, "runtime minor"):
+            validate_alignment(self.BASE, project)
+        with self.assertRaisesRegex(ValueError, "SDK version"):
+            validate_alignment(self.BASE.replace("aspnet:10.0", "aspnet:10.1"), project)
+
+    def test_newer_minor_runtime_can_satisfy_target(self):
+        validate_alignment(self.BASE.replace("aspnet:10.0", "aspnet:10.1"), self.PROJECT)
 
     def test_runtime_major_bump_alone_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "runtime major differs"):
