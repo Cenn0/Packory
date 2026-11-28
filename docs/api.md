@@ -344,3 +344,51 @@ grant and returns `feedId`, `artifacts`, `bytes`, `maxBytes`, `maxArtifacts`,
 Private npm publication rejects non-string, control-containing or oversized
 `deprecated` fields. The read path also rejects malformed persisted warnings
 instead of treating an invalid archive's metadata as a valid lifecycle state.
+
+
+## Managed MCP connectors (administrator-only, optional)
+
+The inert MCP Registry endpoints and active connector APIs are separate. See [Managed MCP connectors](mcp-connectors.md) for deployment policy, OIDC grants and security limits.
+
+All paths below require Packory administrator authorization (static administrator Bearer, verified OIDC admin scope, or CSRF-protected browser administrator SSO). For mutation, the normal writer lease and publish rate limit apply. The connector capability is not an anonymous or generic write-token operation.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | /api/v1/admin/mcp/connectors | List redacted connector definitions and deployment-approved origins |
+| GET | /api/v1/admin/mcp/connectors/{id} | Inspect one redacted definition |
+| POST | /api/v1/admin/mcp/connectors | Create a connector (revision=0) |
+| PUT | /api/v1/admin/mcp/connectors/{id} | Replace configuration using the current revision |
+| DELETE | /api/v1/admin/mcp/connectors/{id}?revision=N | Delete only the matching revision |
+| POST | /api/v1/admin/mcp/connectors/{id}/probe | Handshake and discover remote MCP tool names and bounded input schemas; never enables tools |
+| POST | /api/v1/admin/mcp/connectors/{id}/call | Controlled administrator invocation, only if connector and exact tool are allowed |
+
+Create/update JSON shape (camelCase): id, name, endpoint, enabled, allowedTools (string array), bearerToken (optional, write-only), clearBearerToken (boolean), revision (integer). Create/update return the new revision; successful deletion returns 204 and permanently reserves the ID. Credential presence is returned only as hasBearerToken, never plaintext or encrypted bytes. Tool-call JSON shape: tool (approved tool name), arguments (JSON object). Malformed requests return 400; stale revisions 409; insufficient privileges 401/403; busy operations 429 with `Retry-After: 2`; invalid operator keyring 503; failed remote handshake 502/504. Runtime diagnostics and remote exception messages are replaced with opaque errors.
+
+**MCP client-facing invocation:** An existing authenticated bearer at /mcp can invoke list_connector_tools and call_connector_tool. A non-administrator must present a cryptographically validated OIDC token with packory.read, packory.connector.call and exact packory_connector=connector-id:tool-name claim(s). These claims never authorize editing a connector or reading its remote credential. Tool call argumentsJson is a JSON object encoded as a string.
+
+This API supports approved remote HTTPS Streamable HTTP MCP servers. Native database connections use the separate API below; neither connector API launches local processes.
+
+## Native database connectors (administrator-only, optional)
+
+These connections query external databases; they do not change Packory's own metadata backend. Supported provider IDs are `postgresql`, `mysql`, `mariadb`, `sqlserver` and `oracle`. The same administrator, browser-origin/CSRF and active-writer restrictions described above apply. All responses use `Cache-Control: no-store`. See [Database connectors](database-connectors.md) for complete request examples, native driver behavior, permission setup and result limits.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/admin/database-connectors` | Redacted definitions, global execution flag, exact approved targets, provider/parameter types and limits |
+| GET | `/api/v1/admin/database-connectors/{id}` | One definition with `hasPassword` and `updatedAt` |
+| GET | `/api/v1/admin/database-connectors/{id}/audit` | Up to 100 recent administrative/execution events; no SQL, arguments, result rows or credentials |
+| POST | `/api/v1/admin/database-connectors` | Create a definition with revision 0; returns 201 and revision 1 |
+| PUT | `/api/v1/admin/database-connectors/{id}` | Replace using the current revision; returns 200 with an incremented revision |
+| DELETE | `/api/v1/admin/database-connectors/{id}?revision=N` | Delete that revision; returns 204 and permanently reserves the ID |
+| POST | `/api/v1/admin/database-connectors/{id}/probe` | Check TLS/login with a fixed vendor-specific SELECT; allowed for a disabled definition if global execution is enabled |
+| POST | `/api/v1/admin/database-connectors/{id}/query` | Run one saved query on an enabled connector using typed JSON arguments |
+
+Create/update accepts `{ "definition": { ... }, "password": null, "clearPassword": false }`. The definition contains `id`, `name`, `provider`, `host`, `port`, `database`, `username`, `tlsServerName`, `oracleServerCertificateDn`, `enabled`, `queries` and `revision`. Oracle requires the expected full certificate DN and uses `database` as the service name. Other providers reject an Oracle DN.
+
+Each query contains `name`, `description`, `sql`, `parameters`, `maxRows` and `timeoutSeconds`. Each parameter contains `name`, `type`, `required` and `maxLength`; the accepted types are `string`, `int64`, `decimal`, `bool`, `uuid`, `date` and `datetime`. Templates and declarations must have exactly matching names, with `:` placeholders for Oracle and `@` for other providers. Definitions are limited to 32 queries, each with 32 parameters, 1–1000 rows and a 1–30 second command timeout.
+
+A null/omitted password retains the existing encrypted credential unless its connection identity changes. `clearPassword=true` removes it. An enabled definition needs a password and at least one query. Neither plaintext nor ciphertext is returned. The result of a query request `{ "query": "approved_name", "arguments": { ... } }` contains `id`, `query` and `result`, whose fields are `columns`, `rows`, `truncated`, `sourceDataUntrusted` and `cellsTruncated`. All 64-bit integers and decimal results use invariant JSON strings to preserve precision; callers must also transmit input numeric literals without floating-point rounding.
+
+Unknown fields, duplicate JSON properties, invalid typed values and bodies above 64 KiB are rejected. Arguments are bounded to 32 KiB of UTF-8 JSON. Decimal literals are limited to 128 characters and must be exactly representable as a .NET decimal; rounding and nonzero underflow are rejected before credential access. Typical status codes are 400 for invalid input, 401/403 for authentication or denied execution, 404 for an unknown individual definition, 409 for stale revisions/reserved IDs, 429 with `Retry-After: 2` for a busy gate, 502 for an opaque provider failure, 503 for unavailable writer/keyring and 504 for an application deadline. Database-provider error text is never relayed to clients. A probe proves only connection and the fixed SELECT, not effective database permission safety.
+
+**MCP access:** `list_database_queries` returns only enabled named contracts granted to the caller, excluding SQL, hostnames, usernames and credentials. `run_database_query(connectorId, queryName, argumentsJson)` accepts only an approved name and a JSON-object string. Both require a cryptographically validated OIDC bearer with `packory.read`, `packory.database.read` and exact `packory_database=connector-id:queryName` claims. Wildcards, unrelated read/write tokens and an administrator scope without exact database grants do not authorize this capability. Administrative REST tests remain separate. Query results are untrusted external content.

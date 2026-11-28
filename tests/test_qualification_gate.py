@@ -61,7 +61,7 @@ class QualificationTests(unittest.TestCase):
         api = Api()
         api.runs["s3.yml"]["actor"] = {"private-identity": "must-never-export"}
         result = gate.qualify(api, SHA, "push")
-        self.assertEqual(8, len(result["workflows"]))
+        self.assertEqual(9, len(result["workflows"]))
         self.assertFalse(result["productionRecommended"])
         self.assertFalse(result["independentApprovalVerified"])
         self.assertNotIn("must-never-export", json.dumps(result))

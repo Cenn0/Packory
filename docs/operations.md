@@ -569,3 +569,35 @@ connection. A terminated session releases it server-side. This coordinates
 initialization only, with a distinct lock key space; it does not permit multiple
 active application writers or supply independent failover fencing.
 See [PostgreSQL advisory locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
+
+
+### Remote MCP connectors (explicit opt-in)
+
+The administrator dashboard contains **MCP Connectors** for managing outbound Streamable HTTP connections. This is separate from the inert MCP Registry catalog. Outbound access is disabled unless the deployment operator configures exact approved HTTPS origins.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS | empty | Comma-separated HTTPS origin allowlist; the browser cannot change it |
+| PACKORY_MCP_CONNECTOR_ALLOWED_PRIVATE_CIDRS | empty | Explicit, security-sensitive private-address exceptions; no private egress by default |
+| PACKORY_MCP_CONNECTOR_KEYRING_FILE | unset | Absolute path to private JSON AES-256-GCM keyring, necessary for stored bearer credentials |
+
+Do not put the keyring, database passwords, or bearer credentials into the public repository or a Docker image. The keyring path must be mounted and readable by the Packory service account, with appropriate filesystem ACLs and encrypted backups. No automatic credential re-encryption occurs when switching key IDs. For setup, capability grants, rotation and limitations see [MCP connectors](mcp-connectors.md).
+
+### Native database connectors (explicit opt-in)
+
+The **Database connectors** dashboard manages external PostgreSQL, MySQL, MariaDB, SQL Server and Oracle queries. These are independent of `PACKORY_METADATA_PROVIDER`. Prepare a dedicated database login restricted to reviewed views, authenticated TLS and explicit network access before enabling execution. See the complete [database connector guide](database-connectors.md), including driver-specific behavior and the [architecture decision](adr/0004-approved-connectors.md).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PACKORY_DB_CONNECTORS_ENABLED` | `false` | Permit outbound probes and approved queries; definitions may be prepared while execution is disabled |
+| `PACKORY_DB_CONNECTOR_ALLOWED_TARGETS` | empty | Up to 64 exact `provider://host:port` destinations; no wildcard or connection-string input |
+| `PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS` | empty | Up to 16 explicit private-address exceptions; forbidden metadata/link-local addresses remain blocked |
+| `PACKORY_MCP_CONNECTOR_KEYRING_FILE` | unset | The same operator-owned private keyring used for remote MCP credentials; mandatory for saved database passwords |
+
+`compose.database-connectors.yaml` enables the feature and mounts the keyring read-only using the host-side `PACKORY_MCP_CONNECTOR_KEYRING_PATH` input. It can be combined with either the source-build or GHCR base Compose file. Restart after changing environment policy. Install private database CA certificates into the Packory operating-system trust store; no bypass for certificate validation is exposed.
+
+There are at most 100 active database definitions, 32 queries per definition and four concurrent database operations per process. A named query permits 1–1000 rows, 32 columns, 2048 characters per text cell and a 128 KiB serialized result budget. Command deadlines are 1–30 seconds with a bounded overall execution deadline. These are application limits, not a separate process/resource sandbox. Database permissions remain necessary even for SELECT templates and read-only transactions.
+
+Only an active writer executes connectors. An in-flight call and a configuration mutation share a bounded gate; a successful disable/delete denies subsequent calls, while a busy operation may return 429. External effects already dispatched are not rolled back by a later local disable or lease loss. Use deployment-owned firewall/network policy if every driver connection or certificate lookup must be restricted.
+
+Back up the metadata and private keyring together, with separate secure handling for the keyring. SQLite backups naturally include the connector tables. The PostgreSQL/S3 snapshot manifest and restore verifier include the remote connector configuration/audit/ID family and the database schema/configuration/audit/ID family as complete optional groups. Partial groups, omitted identity ledgers and mismatched connector fingerprints fail verification; genuine older snapshots without connector tables remain supported. Restore tombstones as well as current definitions so deleted IDs cannot inherit old grants. Restart with outbound execution disabled, verify trusted targets and credentials, then re-enable and test approved queries. The archive never replaces the need to preserve the keyring and appropriate filesystem permissions.

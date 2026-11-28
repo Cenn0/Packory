@@ -1,0 +1,58 @@
+# Isolated native database execution. No direct ADO.NET execution in Packory.
+# Provision a private 32-byte IPC key readable by UID 1654; never commit it.
+# The worker has separate PID/mount/network namespaces and no Packory data volume.
+# Explicitly attach approved database containers to database-worker-egress.
+services:
+  packory:
+    environment:
+      PACKORY_DB_CONNECTORS_ENABLED: "true"
+      PACKORY_DB_CONNECTOR_ALLOWED_TARGETS: ${PACKORY_DB_CONNECTOR_ALLOWED_TARGETS:?Specify exact provider://host:port targets}
+      PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS: ${PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS:-}
+      PACKORY_DB_WORKER_SOCKET: /run/packory-db-ipc/worker.sock
+      PACKORY_DB_WORKER_IPC_KEY_FILE: /run/secrets/packory-db-worker-key
+      PACKORY_MCP_CONNECTOR_KEYRING_FILE: /run/secrets/mcp-connector-keyring.json
+    volumes:
+      - ${PACKORY_MCP_CONNECTOR_KEYRING_PATH:?Specify a private absolute keyring path}:/run/secrets/mcp-connector-keyring.json:ro
+      - ${PACKORY_DB_WORKER_IPC_KEY_PATH:?Specify a private absolute IPC key path}:/run/secrets/packory-db-worker-key:ro
+      - database-worker-ipc:/run/packory-db-ipc
+
+  database-connector-worker:
+    build:
+      context: .
+      target: database-worker
+    image: packory:database-worker
+    restart: on-failure:5
+    user: "1654:1654"
+    read_only: true
+    environment:
+      DOTNET_EnableDiagnostics: "0"
+      PACKORY_DB_CONNECTORS_ENABLED: "true"
+      PACKORY_DB_CONNECTOR_ALLOWED_TARGETS: ${PACKORY_DB_CONNECTOR_ALLOWED_TARGETS:?Specify exact provider://host:port targets}
+      PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS: ${PACKORY_DB_CONNECTOR_ALLOWED_PRIVATE_CIDRS:-}
+      PACKORY_DB_WORKER_SOCKET: /run/packory-db-ipc/worker.sock
+      PACKORY_DB_WORKER_IPC_KEY_FILE: /run/secrets/packory-db-worker-key
+    networks:
+      - database-worker-egress
+    volumes:
+      - ${PACKORY_DB_WORKER_IPC_KEY_PATH:?Specify a private absolute IPC key path}:/run/secrets/packory-db-worker-key:ro
+      - database-worker-ipc:/run/packory-db-ipc
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+    stop_grace_period: 10s
+
+networks:
+  database-worker-egress:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+
+volumes:
+  database-worker-ipc:

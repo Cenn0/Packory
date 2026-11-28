@@ -1,0 +1,12 @@
+# Optional managed-MCP-connector overlay. No connector egress is enabled by default.
+# Usage: docker compose -f compose.yaml -f compose.mcp-connectors.yaml up -d --build
+# Host variables: PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS and PACKORY_MCP_CONNECTOR_KEYRING_PATH.
+# The keyring is read-only in the container and must never be checked into git.
+services:
+  packory:
+    environment:
+      PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS: ${PACKORY_MCP_CONNECTOR_ALLOWED_ORIGINS:?Specify exact approved HTTPS origin(s)}
+      PACKORY_MCP_CONNECTOR_ALLOWED_PRIVATE_CIDRS: ${PACKORY_MCP_CONNECTOR_ALLOWED_PRIVATE_CIDRS:-}
+      PACKORY_MCP_CONNECTOR_KEYRING_FILE: /run/secrets/mcp-connector-keyring.json
+    volumes:
+      - ${PACKORY_MCP_CONNECTOR_KEYRING_PATH:?Specify a private absolute keyring path}:/run/secrets/mcp-connector-keyring.json:ro

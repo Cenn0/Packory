@@ -16,6 +16,9 @@ import urllib.request
 REPOSITORY = "Cenn0/Packory"
 API = "https://api.github.com/repos/" + REPOSITORY
 REQUIRED = {
+    "database-connectors.yml": {"TLS database connector (postgresql)", "TLS database connector (mysql)",
+                                "TLS database connector (mariadb)", "TLS database connector (sqlserver)",
+                                "TLS database connector (oracle)"},
     "keycloak.yml": {"Real signed Keycloak JWT"},
     "mcp-typescript.yml": {"Official TS SDK v2.3.1 HTTP conformance"},
     "native-matrix.yml": {"Cargo and pip (Python 3.12)", "Cargo and pip (Python 3.13)",

@@ -24,6 +24,8 @@
         <p class="nav-label">Workspace</p>
         <a href="#catalog" data-route="catalog" class="nav-link" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Catalog</a>
         <a href="#models" data-route="models" class="nav-link"><span class="nav-icon" aria-hidden="true">◫</span>Models</a>
+        <a id="nav-connectors" href="#connectors" data-route="connectors" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">◇</span>MCP Connectors</a>
+        <a id="nav-databases" href="#databases" data-route="databases" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">▤</span>Database connectors</a>
         <a id="nav-feeds" href="#feeds" data-route="feeds" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">▤</span>Feeds</a>
         <a id="nav-publish" href="#publish" data-route="publish" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">↑</span>Publish</a>
         <a id="nav-reviews" href="#reviews" data-route="reviews" class="nav-link" hidden><span class="nav-icon" aria-hidden="true">◇</span>Reviews</a>
@@ -154,6 +156,86 @@
               <button id="publish-submit" type="submit">Publish</button><p id="publish-result" role="status" aria-live="polite"></p>
             </form>
           </section>
+        </section>
+
+        <section id="connectors-view" class="page-view" aria-labelledby="connectors-title" hidden>
+          <header class="page-heading">
+            <div><p class="eyebrow">MCP / ADMINISTRATION</p><h1 id="connectors-title">MCP connectors</h1>
+              <p class="page-description">Create, test and manage connections to approved remote MCP servers. Remote tools are not enabled automatically.</p></div>
+            <button id="connector-refresh" class="button-secondary" type="button">Refresh connectors</button>
+          </header>
+          <p id="connector-status" class="feedback" role="status" aria-live="polite">Administrator access is required.</p>
+          <section class="panel" aria-labelledby="connector-list-title">
+            <div class="section-head"><div><h2 id="connector-list-title">Configured connections</h2>
+            <p class="muted">Only administrator credentials can see or change connector definitions. Stored bearer tokens are never displayed.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Connector</th><th scope="col">Endpoint</th><th scope="col">State</th><th scope="col">Permitted tools</th><th scope="col">Credential</th><th scope="col">Actions</th></tr></thead>
+            <tbody id="connector-table"></tbody></table></div>
+            <div id="connector-test-results" role="status" aria-live="polite"></div>
+          </section>
+          <section class="panel" aria-labelledby="connector-editor-title">
+            <div class="section-head"><div><h2 id="connector-editor-title">Create connector</h2><p class="muted">Streamable HTTP over HTTPS only. The destination origin must be approved by the server operator before it can be saved.</p></div></div>
+            <p id="connector-egress" class="scope-note">Loading approved destination origins…</p>
+            <form id="connector-form">
+              <div class="connector-form-grid">
+                <label for="connector-id">Connector ID<input id="connector-id" maxlength="64" pattern="[a-z][a-z0-9-]{1,62}" placeholder="team-database" autocomplete="off" required></label>
+                <label for="connector-name">Display name<input id="connector-name" maxlength="120" placeholder="Team database MCP" autocomplete="off" required></label>
+                <label for="connector-endpoint">MCP endpoint URL<input id="connector-endpoint" type="url" maxlength="512" placeholder="https://mcp.example.org/mcp" autocomplete="off" required></label>
+                <label for="connector-bearer">Set or rotate bearer token<input id="connector-bearer" type="password" maxlength="4096" autocomplete="new-password" placeholder="Optional · not returned after saving"></label>
+              </div>
+              <label for="connector-tools">Allowed tool names, one per line<textarea id="connector-tools" maxlength="8192" rows="4" spellcheck="false" placeholder="list_tables&#10;query_readonly"></textarea></label>
+              <p class="muted">Start with no allowed tools. Add only specific reviewed names, then enable the connector. Tool calls may modify external data depending on what the remote server does.</p>
+              <div class="button-row">
+                <label class="connector-check"><input id="connector-enabled" type="checkbox"> Enable this connector</label>
+                <label class="connector-check"><input id="connector-clear-bearer" type="checkbox"> Remove saved bearer token</label>
+              </div>
+              <div class="button-row"><button id="connector-save" type="submit">Create connector</button><button id="connector-reset" type="button" class="button-secondary">Cancel edit</button></div>
+              <p id="connector-form-status" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+        </section>
+
+        <section id="databases-view" class="page-view" aria-labelledby="databases-title" hidden>
+          <header class="page-heading"><div><p class="eyebrow">DATABASES / ADMINISTRATION</p><h1 id="databases-title">Database connectors</h1>
+            <p class="page-description">Give AI clients access to approved queries in PostgreSQL, MySQL, MariaDB, SQL Server and Oracle. Database credentials stay on the server.</p></div>
+            <button id="database-refresh" class="button-secondary" type="button">Refresh databases</button></header>
+          <p id="database-status" class="feedback" role="status" aria-live="polite">Administrator access is required.</p>
+          <p id="database-policy" class="scope-note"></p>
+          <section class="panel" aria-labelledby="database-list-title">
+            <div class="section-head"><div><h2 id="database-list-title">Configured databases</h2><p class="muted">Use a dedicated account with access only to the required views. Connection tests verify connectivity, not the account's permissions.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">Connector</th><th scope="col">Database</th><th scope="col">State</th><th scope="col">Queries</th><th scope="col">Credential</th><th scope="col">Actions</th></tr></thead><tbody id="database-table"></tbody></table></div>
+            <div id="database-results" role="status" aria-live="polite"></div>
+          </section>
+          <section class="panel" aria-labelledby="database-editor-title">
+            <div class="section-head"><div><h2 id="database-editor-title">Create database connector</h2><p class="muted">TLS certificate verification is required. Changing the connection identity requires a new password. Deleted IDs remain reserved.</p></div></div>
+            <form id="database-form">
+              <div class="connector-form-grid">
+                <label for="database-id">Connector ID<input id="database-id" pattern="[a-z][a-z0-9-]{1,62}" maxlength="63" placeholder="reporting-db" autocomplete="off" required></label>
+                <label for="database-name">Display name<input id="database-name" maxlength="120" placeholder="Reporting database" autocomplete="off" required></label>
+                <label for="database-provider">Database system<select id="database-provider"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option><option value="sqlserver">Microsoft SQL Server</option><option value="oracle">Oracle Database</option></select></label>
+                <label for="database-host">Approved hostname or IP<input id="database-host" maxlength="253" placeholder="db.example.invalid" autocomplete="off" required></label>
+                <label for="database-port">Port<input id="database-port" type="number" min="1" max="65535" value="5432" required></label>
+                <label for="database-catalog">Database / Oracle service name<input id="database-catalog" maxlength="128" placeholder="reporting" autocomplete="off" required></label>
+                <label for="database-username">Database user<input id="database-username" maxlength="128" placeholder="packory_reader" autocomplete="off" required></label>
+                <label for="database-password">Set or rotate password<input id="database-password" type="password" maxlength="2048" autocomplete="new-password" placeholder="Never returned after saving"></label>
+                <label for="database-tls-name">TLS certificate hostname<input id="database-tls-name" maxlength="253" placeholder="db.example.invalid" autocomplete="off" required></label>
+                <label id="database-oracle-dn-field" for="database-oracle-dn" hidden>Oracle certificate distinguished name<input id="database-oracle-dn" maxlength="1024" placeholder="CN=db.example.invalid" autocomplete="off"></label>
+              </div>
+              <div class="section-head"><div><h3>Approved queries</h3><p class="muted">One SELECT per query. Use named parameters: @name for PostgreSQL, MySQL, MariaDB and SQL Server; :name for Oracle. Query text is visible only to administrators.</p></div><button id="database-add-query" type="button" class="button-secondary">Add query</button></div>
+              <div id="database-query-editors"></div>
+              <div class="button-row"><label class="connector-check"><input id="database-enabled" type="checkbox"> Enable approved queries</label><label class="connector-check"><input id="database-clear-password" type="checkbox"> Remove saved password</label></div>
+              <p class="muted">SQL Server requires a SELECT-only account. The read-only transactions used by other providers are an additional safeguard, not a substitute for restricted database permissions.</p>
+              <div class="button-row"><button id="database-save" type="submit">Create database connector</button><button id="database-reset" type="button" class="button-secondary">Cancel edit</button></div>
+              <p id="database-form-status" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+          <section id="database-query-panel" class="panel" aria-labelledby="database-query-title" hidden>
+            <h2 id="database-query-title">Test an approved query</h2><p class="muted">This runs a saved query against an enabled connector. The same limits apply to AI callers.</p>
+            <form id="database-run-form"><label for="database-query-select">Saved query<select id="database-query-select"></select></label>
+              <label for="database-query-arguments">Arguments (JSON object)<textarea id="database-query-arguments" rows="5" maxlength="32768" spellcheck="false">{}</textarea></label>
+              <pre id="database-query-contract" class="scope-note"></pre><button id="database-run" type="submit">Run approved query</button></form>
+            <div id="database-query-results" role="status" aria-live="polite"></div>
+          </section>
+          <section class="panel"><h2>Connect an AI client</h2><p>Use Packory's <code>/mcp</code> endpoint with a validated OIDC access token containing <code>packory.read</code> and <code>packory.database.read</code>. Grant each query through an exact <code>packory_database</code> claim such as <code>reporting-db:lookup_order</code>.</p><p>The <code>list_database_queries</code> tool exposes approved argument contracts. <code>run_database_query</code> accepts a connector ID, query name and JSON arguments. Neither tool accepts database passwords or arbitrary SQL.</p></section>
         </section>
 
         <section id="settings-view" class="page-view" aria-labelledby="settings-title" hidden>
